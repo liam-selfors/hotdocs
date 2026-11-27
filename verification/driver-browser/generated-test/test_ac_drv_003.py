@@ -1,5 +1,4 @@
-# hotdocs-criterion: sha256:16c692277d5d5c4d11ca00cfe360b1ab8900d5425827d350797ac01cb9b9aa7b
-import re
+# hotdocs-criterion: sha256:0f9b1f489fc85b2d5a33aa8047161aa0baa129614fceb8d9cd86d9f60c6e1c91
 import time
 from pathlib import Path
 
@@ -28,7 +27,10 @@ def provisioned():
 PAGE_HTML = (
     "<!DOCTYPE html>\n"
     "<html lang=\"en\">\n"
-    "<head><meta charset=\"utf-8\"><title>AC-DRV-003</title></head>\n"
+    "<head>\n"
+    "<meta charset=\"utf-8\">\n"
+    "<title>AC-DRV-003</title>\n"
+    "</head>\n"
     "<body>\n"
     "<button type=\"button\" id=\"warn\">Warn</button>\n"
     "<button type=\"button\" id=\"export\">Export</button>\n"
@@ -44,10 +46,11 @@ PAGE_HTML = (
     "  a.download = 'out.svg';\n"
     "  document.body.appendChild(a);\n"
     "  a.click();\n"
+    "  a.remove();\n"
     "});\n"
-    "</script>\n"
-    "<script>\n"
-    "throw new Error('boom');\n"
+    "window.addEventListener('load', function () {\n"
+    "  throw new Error('boom');\n"
+    "});\n"
     "</script>\n"
     "</body>\n"
     "</html>\n"
@@ -63,7 +66,7 @@ def _wait_for(read, predicate, timeout=5.0):
     return value
 
 
-def test_ac_drv_003_errors_dialogs_downloads_screenshot_and_open_refusal(provisioned, tmp_path):
+def test_ac_drv_003(provisioned, tmp_path):
     page_path = tmp_path / "index.html"
     page_path.write_text(PAGE_HTML, encoding="utf-8")
 
@@ -74,24 +77,30 @@ def test_ac_drv_003_errors_dialogs_downloads_screenshot_and_open_refusal(provisi
         page.find(role="button", name="Warn").click()
         page.find(role="button", name="Export").click()
 
-        assert page.console_errors() == ["Error: boom"]
-        assert page.dialogs() == ["hi"]
+        errors = _wait_for(page.console_errors, lambda v: len(v) >= 1)
+        assert errors == ["Error: boom"]
 
-        downloads = _wait_for(page.downloads, lambda d: len(d) >= 1)
+        dialogs = _wait_for(page.dialogs, lambda v: len(v) >= 1)
+        assert dialogs == ["hi"]
+
+        downloads = _wait_for(page.downloads, lambda v: len(v) >= 1)
         assert len(downloads) == 1
         download = Path(downloads[0])
         assert download.name == "out.svg"
         assert download.resolve().parent == (tmp_path / "downloads").resolve()
-        assert download.is_file()
 
-        shot = page.screenshot("home")
-        assert Path(shot).resolve() == (tmp_path / "screenshots" / "home.png").resolve()
-        with open(shot, "rb") as fh:
+        shot = session_shot = page.screenshot("home")
+        shot_path = Path(session_shot)
+        assert shot_path.resolve() == (tmp_path / "screenshots" / "home.png").resolve()
+        assert shot_path.is_file()
+        with open(shot_path, "rb") as fh:
             assert fh.read(len(PNG_SIGNATURE)) == PNG_SIGNATURE
+        del shot
 
-        expected = "only file paths and loopback URLs can be opened: https://example.com/"
-        with pytest.raises(driver_browser.BrowserError, match="^" + re.escape(expected) + "$") as excinfo:
+        with pytest.raises(driver_browser.BrowserError) as excinfo:
             session.open("https://example.com/")
-        assert str(excinfo.value) == expected
+        assert str(excinfo.value) == (
+            "only file paths and loopback URLs can be opened: https://example.com/"
+        )
     finally:
         session.close()

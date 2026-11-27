@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:ae995591bcddb340d57477dbdb2d8d885281e46f23bcab9417dd7d1f06b28731
+# hotdocs-criterion: sha256:60f4d9028e5cf1a40269c4d3fda0987fda6399db2443cdb835c8ecb66d7a093d
 import re
 from pathlib import Path
 
@@ -7,11 +7,20 @@ import pytest
 import driver_browser
 
 
-REPO_ROOT = Path.home() / ".cache" / "hotdocs-test"
+ENV_ROOT = Path.home() / ".cache" / "hotdocs-test"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+@pytest.fixture(scope="session")
+def provisioned():
+    ENV_ROOT.mkdir(parents=True, exist_ok=True)
+    result = driver_browser.provision(ENV_ROOT)
+    if not field(result, "ok"):
+        pytest.fail("provision failed: " + str(field(result, "reason")))
+    return result
 
 
 PAGE_HTML = (
@@ -21,22 +30,25 @@ PAGE_HTML = (
     "<body>\n"
     "<button type=\"button\" id=\"add\">Add</button>\n"
     "<label for=\"filter\">Filter</label>\n"
-    "<input type=\"text\" id=\"filter\">\n"
+    "<input id=\"filter\" type=\"text\">\n"
     "<ul id=\"items\">\n"
     "<li>alpha</li>\n"
     "<li>beta</li>\n"
     "</ul>\n"
     "<script>\n"
+    "var list = document.getElementById('items');\n"
+    "var filter = document.getElementById('filter');\n"
     "document.getElementById('add').addEventListener('click', function () {\n"
     "  var li = document.createElement('li');\n"
     "  li.textContent = 'gamma';\n"
-    "  document.getElementById('items').appendChild(li);\n"
+    "  list.appendChild(li);\n"
     "});\n"
-    "document.getElementById('filter').addEventListener('input', function (e) {\n"
-    "  var v = e.target.value;\n"
-    "  var items = document.querySelectorAll('#items li');\n"
+    "filter.addEventListener('input', function () {\n"
+    "  var q = filter.value;\n"
+    "  var items = list.querySelectorAll('li');\n"
     "  for (var i = 0; i < items.length; i++) {\n"
-    "    items[i].hidden = items[i].textContent.indexOf(v) === -1;\n"
+    "    var item = items[i];\n"
+    "    item.style.display = item.textContent.indexOf(q) === -1 ? 'none' : '';\n"
     "  }\n"
     "});\n"
     "</script>\n"
@@ -45,24 +57,15 @@ PAGE_HTML = (
 )
 
 
-@pytest.fixture(scope="session")
-def provisioned():
-    REPO_ROOT.mkdir(parents=True, exist_ok=True)
-    result = driver_browser.provision(REPO_ROOT)
-    if not field(result, "ok"):
-        pytest.fail("provision failed: " + str(field(result, "reason")))
-    return result
-
-
-def _write_page(tmp_path):
+def write_page(tmp_path):
     page_path = tmp_path / "index.html"
     page_path.write_text(PAGE_HTML, encoding="utf-8")
     return page_path
 
 
-def test_add_filter_and_reads(provisioned, tmp_path):
-    page_path = _write_page(tmp_path)
-    session = driver_browser.open_session(REPO_ROOT, tmp_path)
+def test_ac_drv_002_find_actions_and_reads(provisioned, tmp_path):
+    page_path = write_page(tmp_path)
+    session = driver_browser.open_session(ENV_ROOT, tmp_path)
     try:
         page = session.open(page_path)
         page.find(role="button", name="Add").click()
@@ -77,29 +80,30 @@ def test_add_filter_and_reads(provisioned, tmp_path):
         session.close()
 
 
-def test_click_missing_element_raises(provisioned, tmp_path):
-    page_path = _write_page(tmp_path)
-    session = driver_browser.open_session(REPO_ROOT, tmp_path)
+def test_ac_drv_002_no_match_raises(provisioned, tmp_path):
+    page_path = write_page(tmp_path)
+    session = driver_browser.open_session(ENV_ROOT, tmp_path)
     try:
         page = session.open(page_path)
-        with pytest.raises(
-            driver_browser.BrowserError,
-            match=re.escape('no element matches role=button name="Remove"'),
-        ):
+        expected = "no element matches role=button name=\"Remove\""
+        with pytest.raises(Exception, match=re.escape(expected)) as excinfo:
             page.find(role="button", name="Remove").click()
+        assert isinstance(excinfo.value, driver_browser.BrowserError)
+        assert str(excinfo.value) == expected
     finally:
         session.close()
 
 
-def test_find_with_two_selectors_raises(provisioned, tmp_path):
-    page_path = _write_page(tmp_path)
-    session = driver_browser.open_session(REPO_ROOT, tmp_path)
+def test_ac_drv_002_two_selectors_raises(provisioned, tmp_path):
+    page_path = write_page(tmp_path)
+    session = driver_browser.open_session(ENV_ROOT, tmp_path)
     try:
         page = session.open(page_path)
-        with pytest.raises(
-            driver_browser.BrowserError,
-            match=re.escape("find takes exactly one selector"),
-        ):
-            page.find(css="li", role="button")
+        expected = "find takes exactly one selector"
+        with pytest.raises(Exception, match=re.escape(expected)) as excinfo:
+            element = page.find(css="li", role="button")
+            element.count()
+        assert isinstance(excinfo.value, driver_browser.BrowserError)
+        assert str(excinfo.value) == expected
     finally:
         session.close()

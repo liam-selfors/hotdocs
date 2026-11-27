@@ -1,7 +1,7 @@
 {
-  "spec_bundle_hash": "sha256:7ec9584ac2255cf9e54267b1e59e60b0e83e714d800139bc60ff2e33aa97b643",
+  "spec_bundle_hash": "sha256:f71a4ba9f2899bdb327afbcfb6da96fc77892b8c926eee09957ff79bc75a8c25",
   "spec_bundle_parts": {
-    "spec": "sha256:7ec9584ac2255cf9e54267b1e59e60b0e83e714d800139bc60ff2e33aa97b643",
+    "spec": "sha256:f71a4ba9f2899bdb327afbcfb6da96fc77892b8c926eee09957ff79bc75a8c25",
     "dependency_code": "sha256:c92a94e1a5dc05f61ea3cafa3ab0d83b65ff7fc7322ac17584e5be5273d1b7b3"
   },
   "model_pin": "claude-opus-5-5",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T13:33:13Z",
+  "generated_at": "2026-11-27T21:56:37Z",
   "verification_run_id": "driver-browser-attempt-1",
   "verification_report": {
     "component_id": "comp-driver-browser",
@@ -39,7 +39,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -51,7 +51,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -63,7 +63,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -75,7 +75,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -87,7 +87,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -99,7 +99,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -111,7 +111,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -123,7 +123,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -135,7 +135,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -147,7 +147,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -159,7 +159,19 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-DRV-012",
+        "covers": "R-DRV-002",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -172,14 +184,14 @@
       "R-DRV-004": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8879310344827587,
+    "mutation_score": 0.8409090909090909,
     "mutation_error": null,
     "assets": [
       {
         "kind": "python",
         "path": ".",
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-        "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
+        "adapter_sha256": "sha256:8362b78ab748ac18bc698e12021205d61ddea2a28505ad934a6ba26d8c3a3b73",
         "versions": {
           "python": "3.14.10",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
@@ -410,7 +422,7 @@
       "kind": "python",
       "path": ".",
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-      "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
+      "adapter_sha256": "sha256:8362b78ab748ac18bc698e12021205d61ddea2a28505ad934a6ba26d8c3a3b73",
       "versions": {
         "python": "3.14.10",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:0221ad4e4d1ab50e1c2e15f9c924f864c1e065049b39c282cc59dcee37d16fad
+# hotdocs-criterion: sha256:fa093eadc8fa74a8359a48711827f54a4200d9f530b3485aaae97fecaeeb818e
 import re
 from pathlib import Path
 
@@ -7,7 +7,7 @@ import pytest
 import driver_browser
 
 
-REPO_ROOT = Path.home() / ".cache" / "hotdocs-test"
+ENV_ROOT = Path.home() / ".cache" / "hotdocs-test"
 
 
 def field(value, name):
@@ -16,7 +16,7 @@ def field(value, name):
 
 @pytest.fixture(scope="session")
 def provisioned():
-    result = driver_browser.provision(REPO_ROOT)
+    result = driver_browser.provision(ENV_ROOT)
     if not field(result, "ok"):
         pytest.fail("provision failed: " + str(field(result, "reason")))
     return result
@@ -41,7 +41,7 @@ def test_ac_drv_006_element_reads(provisioned, tmp_path):
     page_path = tmp_path / "index.html"
     page_path.write_text(PAGE, encoding="utf-8")
 
-    session = driver_browser.open_session(REPO_ROOT, tmp_path)
+    session = driver_browser.open_session(ENV_ROOT, tmp_path)
     try:
         page = session.open(page_path, width=400, height=300)
 
@@ -53,21 +53,21 @@ def test_ac_drv_006_element_reads(provisioned, tmp_path):
 
         assert page.find(css="#c").checked() is True
 
-        box = page.find(css="#box").box()
-        assert {
-            "x": field(box, "x"),
-            "y": field(box, "y"),
-            "width": field(box, "width"),
-            "height": field(box, "height"),
-        } == {"x": 10, "y": 20, "width": 30, "height": 40}
-        if isinstance(box, dict):
-            assert box == {"x": 10, "y": 20, "width": 30, "height": 40}
+        assert page.find(css="#box").box() == {
+            "x": 10,
+            "y": 20,
+            "width": 30,
+            "height": 40,
+        }
 
         assert page.find(css="li").nth(1).text() == "two"
 
         assert page.find(css="ul").find(text="three").text() == "three"
 
-        with pytest.raises(driver_browser.BrowserError, match=re.escape("3 elements match css=li")):
+        with pytest.raises(
+            driver_browser.BrowserError,
+            match=re.escape("3 elements match css=li"),
+        ):
             page.find(css="li").text()
     finally:
         session.close()

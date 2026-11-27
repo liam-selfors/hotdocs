@@ -1,7 +1,6 @@
-# hotdocs-criterion: sha256:fb0ab8ab21469585397b804ff651a8be43e387c5f223620b42520189e5c33862
-from pathlib import Path
-
+# hotdocs-criterion: sha256:b271fb0dc761082d7cf4f0d1ba88cc313c3ff546c111d5ac513c297ad5affd8b
 import pytest
+from pathlib import Path
 
 import driver_browser
 
@@ -17,63 +16,58 @@ def field(value, name):
 def provisioned():
     result = driver_browser.provision(REPO_ROOT)
     if not field(result, "ok"):
-        pytest.fail(str(field(result, "reason")))
+        pytest.fail("provision failed: " + str(field(result, "reason")))
     return result
 
 
 PAGE = (
     "<!DOCTYPE html>\n"
-    "<html lang=\"en\">\n"
+    "<html>\n"
     "<head>\n"
     "<meta charset=\"utf-8\">\n"
     "<title>Keys</title>\n"
     "<style>\n"
-    "html, body { margin: 0; padding: 0; overflow: hidden; }\n"
-    ".box { display: block; width: 200px; height: 30px; margin: 4px 0 4px 10px;"
-    " background: #ddd; border: 0; padding: 0; }\n"
-    "#k { display: block; width: 20px; height: 20px; margin: 4px 0 4px 10px; }\n"
-    "#out { margin: 4px 0 4px 10px; height: 30px; }\n"
+    "html, body { margin: 0; padding: 0; }\n"
+    "body { font-family: sans-serif; }\n"
+    ".box { display: block; width: 200px; height: 40px; margin: 0 0 10px 0;"
+    " background: #ddd; }\n"
+    "#g { width: 300px; }\n"
     "</style>\n"
     "</head>\n"
     "<body>\n"
+    "<p id=\"out\">ready</p>\n"
     "<div id=\"d\" class=\"box\">double</div>\n"
     "<div id=\"h\" class=\"box\">hover</div>\n"
-    "<select id=\"s\" class=\"box\">"
-    "<option value=\"a\">a</option>"
-    "<option value=\"b\">b</option>"
-    "</select>\n"
+    "<select id=\"s\"><option value=\"a\">a</option>"
+    "<option value=\"b\">b</option></select>\n"
     "<div id=\"w\" class=\"box\">wheel</div>\n"
     "<div id=\"g\" class=\"box\">drag</div>\n"
-    "<div id=\"m\" class=\"box\">modifier</div>\n"
-    "<input type=\"checkbox\" id=\"k\">\n"
-    "<p id=\"out\">none</p>\n"
+    "<button id=\"m\" class=\"box\" type=\"button\">modifier</button>\n"
+    "<input id=\"k\" type=\"checkbox\">\n"
     "<script>\n"
     "(function () {\n"
     "  var out = document.getElementById('out');\n"
-    "  function show(text) { out.textContent = text; }\n"
+    "  function show(t) { out.textContent = t; }\n"
     "  document.addEventListener('keydown', function (e) { show('key:' + e.key); });\n"
     "  document.getElementById('d').addEventListener('dblclick', function () { show('dbl'); });\n"
     "  document.getElementById('h').addEventListener('mouseenter', function () { show('hover'); });\n"
-    "  var sel = document.getElementById('s');\n"
-    "  sel.addEventListener('change', function () { show('sel:' + sel.value); });\n"
-    "  document.getElementById('w').addEventListener('wheel', function () { show('wheel'); });\n"
-    "  var dragging = false;\n"
-    "  var startX = 0;\n"
+    "  var s = document.getElementById('s');\n"
+    "  s.addEventListener('change', function () { show('sel:' + s.value); });\n"
+    "  document.getElementById('w').addEventListener('wheel', function (e) {\n"
+    "    e.preventDefault(); show('wheel');\n"
+    "  }, { passive: false });\n"
+    "  var dragging = false; var startX = 0;\n"
     "  document.getElementById('g').addEventListener('mousedown', function (e) {\n"
-    "    dragging = true;\n"
-    "    startX = e.clientX;\n"
+    "    dragging = true; startX = e.clientX;\n"
     "  });\n"
     "  document.addEventListener('mouseup', function (e) {\n"
-    "    if (dragging) {\n"
-    "      dragging = false;\n"
-    "      show('drag:' + Math.round(e.clientX - startX));\n"
-    "    }\n"
+    "    if (dragging) { dragging = false; show('drag:' + Math.round(e.clientX - startX)); }\n"
     "  });\n"
     "  document.getElementById('m').addEventListener('click', function (e) {\n"
     "    if (e.shiftKey) { show('shift'); }\n"
     "  });\n"
-    "  var chk = document.getElementById('k');\n"
-    "  chk.addEventListener('change', function () { show('chk:' + chk.checked); });\n"
+    "  var k = document.getElementById('k');\n"
+    "  k.addEventListener('change', function () { show('chk:' + String(k.checked)); });\n"
     "  window.addEventListener('resize', function () { show('size:' + window.innerWidth); });\n"
     "})();\n"
     "</script>\n"
@@ -82,13 +76,13 @@ PAGE = (
 )
 
 
-def test_ac_drv_007_input_actions_reach_page_handlers(provisioned, tmp_path):
-    page_file = tmp_path / "keys.html"
-    page_file.write_text(PAGE, encoding="utf-8")
+def test_ac_drv_007_input_actions_and_page_reads(provisioned, tmp_path):
+    page_path = tmp_path / "keys.html"
+    page_path.write_text(PAGE, encoding="utf-8")
 
     session = driver_browser.open_session(REPO_ROOT, tmp_path)
     try:
-        page = session.open(page_file)
+        page = session.open(page_path)
 
         def out():
             return page.find(css="#out").text()
