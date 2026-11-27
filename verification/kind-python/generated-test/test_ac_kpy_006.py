@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:df241dfcdbc2354fbe438a32424c8448200920e5448ad7ececfd9c08ee875a04
+# hotdocs-criterion: sha256:6b5871fcfc85f4374ad1bf6833e58247f5d8bce573e2879880b027041a6ae87e
 import json
 import platform
 import subprocess
@@ -16,14 +16,16 @@ PROGRAM = "\n".join([
 
 
 def envinfo(python):
-    completed = subprocess.run(
+    proc = subprocess.run(
         [python, "-I", "-c", PROGRAM], capture_output=True, text=True
     )
-    lines = [line for line in completed.stdout.splitlines() if line.strip()]
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
     return json.loads(lines[-1])
 
 
-def test_ac_kpy_006_no_lock_uses_running_interpreter(tmp_path, monkeypatch):
+def test_ac_kpy_006_provision_without_lock_uses_running_interpreter(
+    tmp_path, monkeypatch
+):
     monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
 
     assert not (tmp_path / "environments" / "python" / "requirements.lock").exists()

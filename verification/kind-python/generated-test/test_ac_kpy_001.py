@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:f8cfd2c0e5d9ab36265397e1651d070856d9e68b1374ddabd1faf4dceb09cca9
+# hotdocs-criterion: sha256:f23a081c781615b9afb0410c6a36dad64e54836691a3dc3b435af90a8962020c
 import inspect
 
 import pytest
@@ -20,6 +20,7 @@ def test_ac_kpy_001_constants_and_asset_error(monkeypatch):
     assert issubclass(AssetError, Exception) is True
 
     err = AssetError("x")
+    assert isinstance(err, Exception)
     assert str(err) == "x"
 
     with pytest.raises(kind_python.AssetError) as excinfo:

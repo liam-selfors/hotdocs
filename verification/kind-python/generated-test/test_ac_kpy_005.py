@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:e0e9753ceca0ac4fdd10d2a40533f327f84212883e10a5fa2a3b3fe99556db1d
+# hotdocs-criterion: sha256:f9af2c178d6a14156ccd929d21358604fd13d1f46fb4be11d61a05cdcf47a273
 import pytest
 
 import kind_python
@@ -11,17 +11,16 @@ SOURCE = (
 )
 
 
-def _make_code_dir(tmp_path):
+def _make_runner(tmp_path):
     code_dir = tmp_path / "calc"
     code_dir.mkdir(parents=True, exist_ok=True)
     (code_dir / "calc.py").write_text(SOURCE, encoding="utf-8")
-    return code_dir
+    return kind_python.asset_runner(code_dir)
 
 
 def test_ac_kpy_005_failing_entries_raise_asset_error(tmp_path, monkeypatch):
     monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
-    code_dir = _make_code_dir(tmp_path)
-    run = kind_python.asset_runner(code_dir)
+    run = _make_runner(tmp_path)
 
     with pytest.raises(kind_python.AssetError) as excinfo:
         run("boom", ["x"])

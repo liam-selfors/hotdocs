@@ -1,29 +1,29 @@
-# hotdocs-criterion: sha256:763a513f4c14800175f6e185376cd1acb7a491cbe8a60d2504df27bf817a5c60
+# hotdocs-criterion: sha256:c515cac783ab10b4683595d857390ae4a708fdf289f2ac04fe905636d869c273
 import kind_python
 
 
-def _write(d, rel, content):
-    path = d / rel
+def _write_text(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    if isinstance(content, bytes):
-        path.write_bytes(content)
-    else:
-        path.write_text(content, encoding="utf-8")
-    return path
+    path.write_text(text, encoding="utf-8")
 
 
-def test_ac_kpy_002_layout_errors_reports_unparsable_python_files(tmp_path, monkeypatch):
+def _write_bytes(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def test_ac_kpy_002_layout_errors_reports_each_unparsable_python_file_in_order(tmp_path, monkeypatch):
     monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
 
     d = tmp_path / "lay"
-    d.mkdir()
-    _write(d, "a.py", "def ok():\n    return 1\n")
-    _write(d, "b.py", "def f(:\n    pass\n")
-    _write(d, "b/c.py", "x = 1\nif x\n    y = 2\n")
-    _write(d, "n.py", b"x = 1\x00\n")
-    _write(d, "u.py", b"x = '\xff'\n")
-    _write(d, "__pycache__/bad.py", "def (\n")
-    _write(d, "notes.txt", "def (\n")
+    d.mkdir(parents=True, exist_ok=True)
+    _write_text(d / "a.py", "def ok():\n    return 1\n")
+    _write_text(d / "b.py", "def f(:\n    pass\n")
+    _write_text(d / "b" / "c.py", "x = 1\nif x\n    y = 2\n")
+    _write_bytes(d / "n.py", b"x = 1\x00\n")
+    _write_bytes(d / "u.py", b"x = '\xff'\n")
+    _write_text(d / "__pycache__" / "bad.py", "def (\n")
+    _write_text(d / "notes.txt", "def (\n")
 
     result = kind_python.layout_errors(d)
 
@@ -36,7 +36,9 @@ def test_ac_kpy_002_layout_errors_reports_unparsable_python_files(tmp_path, monk
     assert isinstance(result[3], str)
     assert result[3].startswith("u.py:1: SyntaxError: "), result[3]
 
-    for rel in ("b.py", "b/c.py", "n.py", "u.py"):
-        (d / rel).unlink()
+    (d / "b.py").unlink()
+    (d / "b" / "c.py").unlink()
+    (d / "n.py").unlink()
+    (d / "u.py").unlink()
 
     assert kind_python.layout_errors(d) == []
