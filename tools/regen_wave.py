@@ -91,9 +91,13 @@ def main(argv) -> int:
         if state == "hit":
             print(f"{component_id}: provenance hit, skipped", flush=True)
             continue
-        if state == "rerecordable":
-            proc = subprocess.run([PY, str(REPO / "tools" / "rerecord_provenance.py"), component_id],
-                                  capture_output=True, text=True, cwd=REPO)
+        # A stale hash may differ only in dependency code, which
+        # rerecord_provenance re-verifies without regenerating (D379); it
+        # refuses any other difference, which then regenerates below.
+        if state == "rerecordable" or (state == "stale" and not _sealed(component_id.removeprefix("comp-"))):
+            proc = subprocess.run([PY, str(REPO / "tools" / "rerecord_provenance.py"), component_id,
+                                   f"--author-tests={model}:{seed}"],
+                                  capture_output=True, text=True, cwd=Path.cwd())
             print((proc.stdout or proc.stderr).strip(), flush=True)
             if proc.returncode == 0:
                 continue
