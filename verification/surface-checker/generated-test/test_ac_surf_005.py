@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:fd738218e9ab0cceafd4d53b93bbe802fd8ee2e112a1a1d6c62389f3d429a7e6
+# hotdocs-criterion: sha256:6464e422f38d0d62a5dbf244df8edf66e1df257986b4e6f8f35ccc69a30a4f15
 import sys
 from pathlib import Path
 
@@ -9,76 +9,86 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PYTHON_ADAPTER = (
-    "import sys\n"
-    "from pathlib import Path\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,\n"
-    "            \"interpreter\": sys.executable}\n"
-)
-
-FAKE_ADAPTER = (
-    "KIND = " + repr("fake") + "\n"
-    "\n"
-    "\n"
-    "def surface(asset_file):\n"
-    "    return {\"names\": " + repr(["a", "b"]) + "}\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None}\n"
-)
+FENCE = "`" * 3
 
 
-def build_repo(root, block_lines):
-    root = Path(root)
-    comp = root / "specs" / "components" / "widget"
-    (comp / "interface" / "assets").mkdir(parents=True)
-    (comp / "component.md").write_text(
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def build_repo(repo_root, block_lines):
+    # The planted python adapter.
+    write(
+        repo_root / "gen" / "kind-python" / "kind_python.py",
+        "import sys\n"
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("")
+        + ", " + repr("versions") + ": {}, " + repr("lockfile_sha256") + ": None,\n"
+        "            " + repr("interpreter") + ": sys.executable}\n",
+    )
+
+    # The planted fake kind: definition and adapter.
+    write(repo_root / "specs" / "architecture" / "asset-kind-fake.md", "# Fake kind\n\nAny text.\n")
+    write(
+        repo_root / "gen" / "kind-fake" / "kind_fake.py",
+        "KIND = " + repr("fake") + "\n"
+        "\n"
+        "\n"
+        "def surface(asset_file):\n"
+        "    return {" + repr("names") + ": " + repr(["a", "b"]) + "}\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("")
+        + ", " + repr("versions") + ": {}, " + repr("lockfile_sha256") + ": None, "
+        + repr("interpreter") + ": None}\n",
+    )
+
+    # The component's spec.
+    comp_dir = repo_root / "specs" / "components" / "widget"
+    write(
+        comp_dir / "component.md",
         "---\n"
         "id: comp-widget\n"
         "title: Widget\n"
         "status: draft\n"
-        "owners: [test-team]\n"
+        "owners: [pipeline-team]\n"
         "depends_on: []\n"
         "assets: [fake:static/app.js]\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Widget\n",
     )
-    (comp / "interface" / "library.md").write_text("# Library\n")
-    (comp / "interface" / "assets" / "app.js.md").write_text(
+    write(comp_dir / "interface" / "library.md", "# Library\n")
+    write(
+        comp_dir / "interface" / "assets" / "app.js.md",
         "# app.js\n"
         "\n"
-        "```\n"
+        + FENCE + "\n"
         + "".join(line + "\n" for line in block_lines)
-        + "```\n"
+        + FENCE + "\n",
     )
 
-    gen_widget = root / "gen" / "widget"
-    (gen_widget / "static").mkdir(parents=True)
-    (gen_widget / "widget.py").write_text("X = 1\n")
-    (gen_widget / "static" / "app.js").write_text("// any text\n")
-
-    arch = root / "specs" / "architecture"
-    arch.mkdir(parents=True)
-    (arch / "asset-kind-fake.md").write_text("# Asset kind: fake\n")
-
-    kind_python = root / "gen" / "kind-python"
-    kind_python.mkdir(parents=True)
-    (kind_python / "kind_python.py").write_text(PYTHON_ADAPTER)
-
-    kind_fake = root / "gen" / "kind-fake"
-    kind_fake.mkdir(parents=True)
-    (kind_fake / "kind_fake.py").write_text(FAKE_ADAPTER)
-    return root
+    # The candidate's code and asset.
+    write(repo_root / "gen" / "widget" / "widget.py", "X = 1\n")
+    write(repo_root / "gen" / "widget" / "static" / "app.js", "export function a(x) { return x; }\n")
 
 
-def test_stated_names_not_provided_give_sorted_distinct_findings(tmp_path):
-    repo_root = build_repo(
-        tmp_path / "repo",
+def findings_as_pairs(report):
+    return [
+        {"kind": field(f, "kind"), "message": field(f, "message")}
+        for f in field(report, "findings")
+    ]
+
+
+def test_missing_stated_names_are_reported_sorted_and_distinct(tmp_path):
+    repo_root = tmp_path / "repo"
+    build_repo(
+        repo_root,
         [
             "export function zeta(y, z)",
             "export function a(x)",
@@ -91,26 +101,17 @@ def test_stated_names_not_provided_give_sorted_distinct_findings(tmp_path):
     report = surface_checker.check_surface("comp-widget", repo_root)
 
     assert field(report, "ok") is False
-    findings = [
-        {"kind": field(f, "kind"), "message": field(f, "message")}
-        for f in field(report, "findings")
-    ]
-    assert findings == [
-        {
-            "kind": "asset_name_missing",
-            "message": "static/app.js has no c, which its interface states",
-        },
-        {
-            "kind": "asset_name_missing",
-            "message": "static/app.js has no zeta, which its interface states",
-        },
+    assert findings_as_pairs(report) == [
+        {"kind": "asset_name_missing", "message": "static/app.js has no c, which its interface states"},
+        {"kind": "asset_name_missing", "message": "static/app.js has no zeta, which its interface states"},
     ]
 
 
-def test_all_stated_names_provided_gives_no_findings(tmp_path):
-    repo_root = build_repo(tmp_path / "repo", ["export function a(x)"])
+def test_all_stated_names_provided_gives_ok(tmp_path):
+    repo_root = tmp_path / "repo"
+    build_repo(repo_root, ["export function a(x)"])
 
     report = surface_checker.check_surface("comp-widget", repo_root)
 
+    assert findings_as_pairs(report) == []
     assert field(report, "ok") is True
-    assert list(field(report, "findings")) == []

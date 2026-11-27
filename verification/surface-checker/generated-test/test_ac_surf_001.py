@@ -1,12 +1,10 @@
-# hotdocs-criterion: sha256:edbc65fe967689e661b7fa9c8e63509233cc3478895b3d56b4397589f15032a9
-import sys
+# hotdocs-criterion: sha256:7489d8a7b9f842bfbd91ac62fd5427e2e0202814b85b54f8c1cdaaf968763ede
+"""AC-SURF-001: a candidate whose import fails gives exactly one import_error
+finding; a candidate that imports cleanly with no dependencies gives none."""
+
 from pathlib import Path
 
 import surface_checker
-
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 PYTHON_ADAPTER = (
@@ -20,48 +18,60 @@ PYTHON_ADAPTER = (
 )
 
 
-def build_repo(repo_root, widget_source):
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _build_repo(repo_root, module_source, with_depends_on):
     repo_root = Path(repo_root)
-    comp_dir = repo_root / "specs" / "components" / "widget"
-    (comp_dir / "interface").mkdir(parents=True)
-    (comp_dir / "component.md").write_text(
-        "---\n"
-        + "id: comp-widget\n"
-        + "title: Widget\n"
-        + "status: draft\n"
-        + "owners: [test-team]\n"
-        + "depends_on: []\n"
-        + "---\n"
-        + "\n"
-        + "# Widget\n"
+    _write(repo_root / "gen" / "kind-python" / "kind_python.py", PYTHON_ADAPTER)
+    lines = [
+        "---",
+        "id: comp-widget",
+        "title: Widget",
+        "status: draft",
+        "owners: [test-team]",
+    ]
+    if with_depends_on:
+        lines.append("depends_on: []")
+    lines.append("---")
+    lines.append("")
+    lines.append("# Widget")
+    lines.append("")
+    _write(
+        repo_root / "specs" / "components" / "widget" / "component.md",
+        "\n".join(lines),
     )
-    (comp_dir / "interface" / "library.md").write_text("# Library\n")
-
-    gen_widget = repo_root / "gen" / "widget"
-    gen_widget.mkdir(parents=True)
-    (gen_widget / "widget.py").write_text(widget_source)
-
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True)
-    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER)
+    _write(
+        repo_root / "specs" / "components" / "widget" / "interface" / "library.md",
+        "# Library\n",
+    )
+    _write(repo_root / "gen" / "widget" / "widget.py", module_source)
     return repo_root
 
 
 def test_import_failure_gives_one_import_error_finding(tmp_path):
-    repo_root = build_repo(tmp_path / "repo", "import nosuchmodule_xyz\n")
+    repo_root = _build_repo(
+        tmp_path / "repo", "import nosuchmodule_xyz\n", with_depends_on=True
+    )
 
     report = surface_checker.check_surface("comp-widget", repo_root)
 
     assert field(report, "ok") is False
     findings = field(report, "findings")
-    assert len(findings) == 1
+    assert len(findings) == 1, findings
     finding = findings[0]
     assert field(finding, "kind") == "import_error"
     assert "nosuchmodule_xyz" in field(finding, "message")
 
 
-def test_importable_module_without_dependencies_passes(tmp_path):
-    repo_root = build_repo(tmp_path / "repo", "X = 1\n")
+def test_clean_import_without_dependencies_gives_no_findings(tmp_path):
+    repo_root = _build_repo(tmp_path / "repo", "X = 1\n", with_depends_on=False)
 
     report = surface_checker.check_surface("comp-widget", repo_root)
 
