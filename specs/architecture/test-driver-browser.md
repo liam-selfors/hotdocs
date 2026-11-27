@@ -97,7 +97,9 @@ An action, and a read that needs one element, waits up to 5 seconds
 for exactly one match that is visible (and enabled, for an action),
 else raises `no element matches <selector>` or
 `<n> elements match <selector>`, `<selector>` being the call as
-written (`role=button name="Add"`). An action returns after the
+written: `<kind>=<value>` with the value bare, then for a role with a
+name ` name="<name>"` quoted, such as `css=li`, `label=Query` or
+`role=button name="Add"`. An action returns after the
 page's handlers for its events have run and two animation frames have
 passed, so a read after it sees the result without waiting.
 
