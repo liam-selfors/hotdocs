@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:6b26721f2bc11025222f7038075749393625c43523a37e6ed3fe018447504b7f
+# hotdocs-criterion: sha256:65fc3a59049fff0955dd5b840cb4e4fe658eabd60ffcd96cc0876bc0d0a7c7a4
 from pathlib import Path
 
 import size_checker
@@ -37,8 +37,11 @@ def build_fixture(repo_root):
 
     write(
         comp / "requirements" / "R-WIDGET-001.md",
-        "**R-WIDGET-001** — The widget MUST do the small thing.\n",
+        "# R-WIDGET-001\n"
+        "\n"
+        "**R-WIDGET-001** — The widget MUST do a small thing.\n",
     )
+
     write(
         comp / "acceptance" / "AC-WIDGET-001.md",
         "# AC-WIDGET-001\n"
@@ -46,57 +49,55 @@ def build_fixture(repo_root):
         "Covers: R-WIDGET-001\n"
         "Kind: generated-test\n"
         "\n"
-        "```gherkin\n"
         "Given a widget\n"
         "When it runs\n"
-        "Then it does the small thing\n"
-        "```\n",
+        "Then it does a small thing\n",
     )
 
-    # cli.md: first fenced block has three non-blank (logical) lines, one of
-    # which ends in a backslash joining it to a fourth physical line, plus
-    # one blank line.
-    backslash = "\\"
+    # CLI: three non-blank logical lines (one joined via a trailing
+    # backslash onto a fourth physical line) and one blank line -> 3
+    cli_lines = [
+        "widget run",
+        "widget build --fast \\",
+        "    --verbose",
+        "",
+        "widget clean",
+    ]
     write(
         comp / "interface" / "cli.md",
         "# CLI\n"
         "\n"
-        "```\n"
-        "widget run --input FILE " + backslash + "\n"
-        "    --output FILE\n"
+        "```\n" + "\n".join(cli_lines) + "\n```\n"
         "\n"
-        "widget status\n"
-        "widget version\n"
-        "```\n"
-        "\n"
-        "Prose after the block.\n",
+        "Some prose after the block.\n",
     )
 
-    # library.md: first fenced block has five signature lines and one prose line.
+    # Library: five signature lines plus one prose line -> 5
+    lib_lines = [
+        "alpha(x: int) -> int",
+        "beta(name: str) -> str",
+        "gamma() -> None",
+        "delta(a: int, b: int) -> list[int]",
+        "epsilon(path: Path) -> dict",
+        "These functions do small things.",
+    ]
     write(
         comp / "interface" / "library.md",
         "# Library\n"
         "\n"
-        "```\n"
-        "alpha(x: int) -> int\n"
-        "beta(y: str) -> str\n"
-        "gamma() -> None\n"
-        "delta(a: int, b: int) -> list\n"
-        "epsilon(path: Path) -> dict\n"
-        "This line is prose and not a signature.\n"
-        "```\n"
+        "```\n" + "\n".join(lib_lines) + "\n```\n"
         "\n"
-        "Some explanation.\n",
+        "Some prose after the block.\n",
     )
 
-    # interface/data/: three files.
-    for stem in ("Alpha", "Beta", "Gamma"):
+    # Data: three files -> 3
+    for name in ("Alpha", "Beta", "Gamma"):
         write(
-            comp / "interface" / "data" / (stem + ".md"),
-            "# " + stem + "\n\nA small data shape.\n",
+            comp / "interface" / "data" / (name + ".md"),
+            "# " + name + "\n"
+            "\n"
+            "A small data shape.\n",
         )
-
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
 
 def test_ac_size_005_interface_surface_warn(tmp_path):
@@ -106,15 +107,16 @@ def test_ac_size_005_interface_surface_warn(tmp_path):
 
     findings = size_checker.check(repo_root)
 
-    size_001 = [
+    size_001 = [f for f in findings if field(f, "rule_id") == "R-SIZE-001"]
+    widget_001 = [
         f
-        for f in findings
-        if field(f, "rule_id") == "R-SIZE-001"
-        and str(field(f, "message")).startswith("widget: ")
+        for f in size_001
+        if str(field(f, "message")).startswith("widget:")
+        or "components/widget" in str(field(f, "file"))
     ]
 
-    assert len(size_001) == 1, size_001
-    finding = size_001[0]
+    assert len(widget_001) == 1, findings
+    finding = widget_001[0]
     assert field(finding, "severity") == "warn"
     message = field(finding, "message")
     assert "interface_surface" in message
@@ -123,3 +125,4 @@ def test_ac_size_005_interface_surface_warn(tmp_path):
         "widget: interface_surface is 11, above the warn threshold of 10 "
         "(specs/architecture/size-caps.md)"
     )
+    assert isinstance(field(finding, "line"), int)
