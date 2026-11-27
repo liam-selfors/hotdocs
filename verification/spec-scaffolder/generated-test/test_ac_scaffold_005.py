@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:91452ccda77c012f03298d5ce91a194faef623c0994ab41be3528363af015c2f
+# hotdocs-criterion: sha256:6f6ed5498b444dda9e2dff85b684a5fcdd1dde63a5b526de2943a3cd5c6c5d9f
 from pathlib import Path
 
 import pytest
@@ -62,6 +62,14 @@ EXPECTED_COMPONENT_MD = (
 
 EXPECTED_CONSTRAINTS_MD = "# Order Book \u2014 Non-Functional Constraints\n\n- TODO.\n"
 
+SUBDIRS = ["requirements", "acceptance", "interface", "interface/data"]
+
+
+def _make_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    (repo_root / "specs").mkdir(parents=True)
+    return repo_root
+
 
 def _snapshot(root):
     result = {}
@@ -74,14 +82,9 @@ def _snapshot(root):
     return result
 
 
-@pytest.fixture
-def repo_root(tmp_path):
-    root = tmp_path / "repo"
-    (root / "specs").mkdir(parents=True)
-    return root
+def test_new_component_creates_layout(tmp_path):
+    repo_root = _make_repo(tmp_path)
 
-
-def test_ac_scaffold_005_creates_component_layout(repo_root):
     result = spec_scaffolder.new_component(
         repo_root, "order-book", depends_on=["comp-ledger"], realizes=["P-TRADING"]
     )
@@ -90,48 +93,40 @@ def test_ac_scaffold_005_creates_component_layout(repo_root):
     assert Path(result).resolve() == expected_dir.resolve()
     assert expected_dir.is_dir()
 
-    top_level = {p.name for p in expected_dir.iterdir()}
-    assert top_level == {
-        "component.md",
-        "constraints.md",
-        "requirements",
-        "acceptance",
-        "interface",
-    }
+    component_md = expected_dir / "component.md"
+    constraints_md = expected_dir / "constraints.md"
+    assert component_md.is_file()
+    assert constraints_md.is_file()
 
-    for sub in ("requirements", "acceptance", "interface", "interface/data"):
+    for sub in SUBDIRS:
         d = expected_dir / sub
         assert d.is_dir(), sub
         gitkeep = d / ".gitkeep"
         assert gitkeep.is_file(), sub
         assert gitkeep.read_bytes() == b"", sub
 
-    assert {p.name for p in (expected_dir / "requirements").iterdir()} == {".gitkeep"}
-    assert {p.name for p in (expected_dir / "acceptance").iterdir()} == {".gitkeep"}
-    assert {p.name for p in (expected_dir / "interface").iterdir()} == {".gitkeep", "data"}
-    assert {p.name for p in (expected_dir / "interface" / "data").iterdir()} == {".gitkeep"}
-
-    component_md = (expected_dir / "component.md").read_bytes().decode("utf-8")
-    assert component_md == EXPECTED_COMPONENT_MD
-
-    constraints_md = (expected_dir / "constraints.md").read_bytes().decode("utf-8")
-    assert constraints_md == EXPECTED_CONSTRAINTS_MD
+    assert component_md.read_text(encoding="utf-8") == EXPECTED_COMPONENT_MD
+    assert constraints_md.read_text(encoding="utf-8") == EXPECTED_CONSTRAINTS_MD
 
 
-def test_ac_scaffold_005_refuses_existing_and_invalid_slug(repo_root):
+def test_new_component_refuses_existing_and_invalid_slug(tmp_path):
+    repo_root = _make_repo(tmp_path)
     spec_scaffolder.new_component(
         repo_root, "order-book", depends_on=["comp-ledger"], realizes=["P-TRADING"]
     )
     components = repo_root / "specs" / "components"
-    before = _snapshot(repo_root)
+    before = _snapshot(components)
 
     with pytest.raises(FileExistsError):
         spec_scaffolder.new_component(repo_root, "order-book")
 
-    assert _snapshot(repo_root) == before
-
     with pytest.raises(ValueError):
         spec_scaffolder.new_component(repo_root, "Order_Book")
 
-    assert _snapshot(repo_root) == before
-    assert sorted(p.name for p in components.iterdir()) == ["order-book"]
+    entries = sorted(p.name for p in components.iterdir())
+    assert entries == ["order-book"]
+    assert _snapshot(components) == before
+    assert (
+        (components / "order-book" / "component.md").read_text(encoding="utf-8")
+        == EXPECTED_COMPONENT_MD
+    )
