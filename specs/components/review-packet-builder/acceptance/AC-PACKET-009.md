@@ -16,11 +16,13 @@ Then a packet is still produced, with spec_diff and exemption_changes
 
 Given a repo_root that is not a git repository at all (no .git
   directory, not even git-init'd), with a provenance-tracker fake
-  installed
+  installed whose report's top-level secret_scan is flagged with one
+  match (file a/b.py, line 3)
 When build_review_packet runs
 Then a packet is still produced -- changed_requirements,
   regenerated_components, verification_results, compliance_flags,
   provenance_hit_status, and capability_scenarios are all populated
-  correctly from provenance-tracker, and spec_diff/exemption_changes
-  are empty rather than raising
+  correctly from provenance-tracker (compliance_flags.secret_scan is
+  one entry, component_id None, holding that scan), and
+  spec_diff/exemption_changes are empty rather than raising
 ```
