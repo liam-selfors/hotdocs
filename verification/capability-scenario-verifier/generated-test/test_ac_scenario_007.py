@@ -1,228 +1,247 @@
-# hotdocs-criterion: sha256:67c8a5b4c4d88de35036c295596e877f5145a449d072f70c8f1a978b52c35f9c
+# hotdocs-criterion: sha256:ada1422a95c667cca458abb8771d80fed5e33e9671b2d4c6ccb023364e796f0a
+"""AC-SCENARIO-007: content_hash provenance covers realizing code, the
+capability's own product spec and the provisioned environment versions,
+and nothing else (R-SCENARIO-006)."""
+
 import json
 import sys
 from pathlib import Path
 
+import pytest
+
 import capability_scenario_verifier
 
 
-CAP = "P-X"
-SCENARIO_PATH = "verification/capabilities/P-X/generated-test/test_cs_x_001.py"
+CAPABILITY_ID = "P-X"
+MODEL = "fake-model"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
+def _write(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text)
+    return path
 
 
-def adapter_source(versions):
+def _kind_python_source(versions):
     return (
         "import sys\n"
         "\n"
         "\n"
         "def provision(repo_root):\n"
-        "    return {\"ok\": True, \"reason\": \"\", \"versions\": "
-        + repr(versions)
-        + ", \"lockfile_sha256\": None,\n"
+        "    return {\"ok\": True, \"reason\": \"\", \"versions\": " + repr(versions) + ", \"lockfile_sha256\": None,\n"
         "            \"interpreter\": sys.executable}\n"
     )
 
 
-def component_md(slug, realizes):
+def _generated_test_content(run_log):
     return (
-        "---\n"
-        "id: comp-" + slug + "\n"
-        "title: " + slug.capitalize() + "\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "realizes: [" + realizes + "]\n"
-        "sealed: false\n"
-        "---\n"
-        "\n"
-        "# " + slug.capitalize() + "\n"
-    )
-
-
-def product_md(cap_id, short):
-    return (
-        "---\n"
-        "id: " + cap_id + "\n"
-        "title: Capability " + short + "\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "---\n"
-        "\n"
-        "# Capability " + short + "\n"
-        "\n"
-        "### CS-" + short + "-001\n"
-        "\n"
-        "Covers: " + cap_id + "\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given a thing\n"
-        "When it runs\n"
-        "Then it passes\n"
-        "```\n"
-    )
-
-
-def build_repo(tmp_path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    author_log = logs / "author.log"
-    run_log = logs / "run.log"
-
-    # Capabilities
-    write(repo / "specs/product/x.md", product_md("P-X", "X"))
-    write(repo / "specs/product/y.md", product_md("P-Y", "Y"))
-
-    # Realizing component and a non-realizing one
-    write(repo / "specs/components/foo/component.md", component_md("foo", "P-X"))
-    write(repo / "gen/foo/foo.py", "VALUE = 1\n")
-    write(repo / "specs/components/bar/component.md", component_md("bar", "P-Y"))
-    write(repo / "gen/bar/bar.py", "OTHER = 1\n")
-
-    # Planted python adapter
-    write(repo / "gen/kind-python/kind_python.py", adapter_source({}))
-
-    # The generated test records each execution
-    content = (
         "def test_x():\n"
-        "    with open(" + repr(str(run_log)) + ", \"a\") as f:\n"
-        "        f.write(\"ran\\n\")\n"
+        "    with open(" + repr(str(run_log)) + ", \"a\") as handle:\n"
+        "        handle.write(\"ran\\n\")\n"
         "    assert True\n"
     )
 
-    # Fake test-author
-    write(
-        repo / "gen/test-author/test_author.py",
-        "CONTENT = " + repr(content) + "\n"
-        "LOG = " + repr(str(author_log)) + "\n"
-        "PATH = " + repr(SCENARIO_PATH) + "\n"
-        "GATE_VERSION = \"generated_test@3.0.0\"\n"
-        "\n"
-        "\n"
+
+def _test_author_source(author_log, content):
+    return (
         "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    with open(LOG, \"a\") as f:\n"
-        "        f.write(str(bundle[\"criterion_id\"]) + \"\\n\")\n"
+        "    with open(" + repr(str(author_log)) + ", \"a\") as handle:\n"
+        "        handle.write(str(bundle[\"criterion_id\"]) + \"\\n\")\n"
         "    return {\n"
-        "        \"component_id\": \"\",\n"
+        "        \"component_id\": bundle.get(\"component_id\", \"\") if isinstance(bundle, dict) else \"\",\n"
         "        \"criterion_id\": bundle[\"criterion_id\"],\n"
         "        \"model\": model,\n"
         "        \"seed\": seed,\n"
         "        \"prompt_version\": \"v1\",\n"
         "        \"cache_hit\": False,\n"
-        "        \"file\": {\"path\": PATH, \"content\": CONTENT},\n"
+        "        \"file\": {\n"
+        "            \"path\": \"verification/capabilities/P-X/generated-test/test_cs_x_001.py\",\n"
+        "            \"content\": " + repr(content) + ",\n"
+        "        },\n"
         "        \"model_call_error\": None,\n"
         "        \"repair_attempts\": 0,\n"
         "        \"probe_findings\": [],\n"
-        "    }\n",
+        "    }\n"
     )
 
-    # Fake llm-endpoint
-    write(
-        repo / "gen/llm-endpoint/llm_endpoint.py",
-        "DEFAULT_TIMEOUT_SECONDS = 600\n"
+
+LLM_ENDPOINT_SOURCE = (
+    "def complete(prompt, model, *, backend=None, **params):\n"
+    "    return {\"text\": \"pass\", \"model\": model, \"backend\": \"fake\", \"model_call_error\": None}\n"
+)
+
+
+PRODUCT_TEXT = (
+    "---\n"
+    "id: P-X\n"
+    "title: Capability X\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "---\n"
+    "\n"
+    "# P-X\n"
+    "\n"
+    "### CS-X-001\n"
+    "\n"
+    "Covers: P-X\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given a repository\n"
+    "When the capability runs\n"
+    "Then it succeeds\n"
+    "```\n"
+)
+
+
+def _component_md(slug, realizes):
+    return (
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug + "\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "realizes: " + realizes + "\n"
+        "sealed: false\n"
+        "---\n"
         "\n"
-        "\n"
-        "def complete(prompt, model, *, backend=None, **params):\n"
-        "    return {\"text\": \"PASS\", \"model\": model, \"backend\": \"fake\",\n"
-        "            \"model_call_error\": None}\n",
+        "# comp-" + slug + "\n"
     )
-    return repo, run_log
 
 
-def record_path(repo):
-    return repo / "verification" / "capabilities" / CAP / ".provenance.json"
+def _record_path(repo_root):
+    return repo_root / "verification" / "capabilities" / CAPABILITY_ID / ".provenance.json"
 
 
-def make_hit(tmp_path):
-    repo, run_log = build_repo(tmp_path)
-    capability_scenario_verifier.run_capability_gates(CAP, repo, model="fake-model", seed=0)
-    assert record_path(repo).is_file()
-    check = capability_scenario_verifier.check_capability_provenance(CAP, repo)
+def _read_record(repo_root):
+    return json.loads(_record_path(repo_root).read_text())
+
+
+def _lines(path):
+    path = Path(path)
+    if not path.is_file():
+        return []
+    return [line for line in path.read_text().splitlines() if line.strip()]
+
+
+@pytest.fixture
+def hit_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    author_log = logs / "author.log"
+    run_log = logs / "run.log"
+
+    _write(repo_root / "gen" / "kind-python" / "kind_python.py", _kind_python_source({}))
+    _write(
+        repo_root / "gen" / "test-author" / "test_author.py",
+        _test_author_source(author_log, _generated_test_content(run_log)),
+    )
+    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", LLM_ENDPOINT_SOURCE)
+
+    _write(repo_root / "specs" / "product" / "x.md", PRODUCT_TEXT)
+
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", _component_md("foo", "[P-X]"))
+    _write(repo_root / "gen" / "foo" / "foo.py", "VALUE = 1\n")
+
+    _write(repo_root / "specs" / "components" / "bar" / "component.md", _component_md("bar", "[]"))
+    _write(repo_root / "gen" / "bar" / "bar.py", "OTHER = 1\n")
+
+    first = capability_scenario_verifier.run_capability_gates(
+        CAPABILITY_ID, repo_root, model=MODEL, seed=0
+    )
+    assert field(first, "hit") is False
+    assert _record_path(repo_root).is_file()
+    record = _read_record(repo_root)
+    report = record["capability_scenario_report"]
+    assert report[CAPABILITY_ID]["overall"] == "pass", report
+
+    check = capability_scenario_verifier.check_capability_provenance(CAPABILITY_ID, repo_root)
     assert field(check, "hit") is True
-    return repo, run_log
+
+    return {
+        "repo_root": repo_root,
+        "author_log": author_log,
+        "run_log": run_log,
+        "record": record,
+    }
 
 
-def is_hit(repo):
-    return field(capability_scenario_verifier.check_capability_provenance(CAP, repo), "hit")
+def test_realizing_code_byte_change_is_a_miss(hit_repo):
+    repo_root = hit_repo["repo_root"]
+    code = repo_root / "gen" / "foo" / "foo.py"
+    data = bytearray(code.read_bytes())
+    index = data.index(b"1")
+    data[index] = ord("2")
+    code.write_bytes(bytes(data))
+
+    result = capability_scenario_verifier.check_capability_provenance(CAPABILITY_ID, repo_root)
+    assert field(result, "hit") is False
+    assert field(result, "capability_scenario_report") is None
 
 
-def flip_code_byte(repo):
-    path = repo / "gen/foo/foo.py"
-    data = bytearray(path.read_bytes())
-    idx = data.index(b"1")
-    data[idx] = ord("2")
-    path.write_bytes(bytes(data))
+def test_product_spec_change_is_a_miss(hit_repo):
+    repo_root = hit_repo["repo_root"]
+    product = repo_root / "specs" / "product" / "x.md"
+    product.write_text(product.read_text() + "\n")
+
+    result = capability_scenario_verifier.check_capability_provenance(CAPABILITY_ID, repo_root)
+    assert field(result, "hit") is False
 
 
-def test_code_byte_change_misses(tmp_path):
-    repo, _ = make_hit(tmp_path)
-    path = repo / "gen/foo/foo.py"
-    original = path.read_bytes()
-    flip_code_byte(repo)
-    assert is_hit(repo) is False
-    path.write_bytes(original)
-    assert is_hit(repo) is True
+def test_provisioned_python_versions_change_is_a_miss(hit_repo):
+    repo_root = hit_repo["repo_root"]
+    _write(
+        repo_root / "gen" / "kind-python" / "kind_python.py",
+        _kind_python_source({"python": "3.14.7"}),
+    )
+
+    result = capability_scenario_verifier.check_capability_provenance(CAPABILITY_ID, repo_root)
+    assert field(result, "hit") is False
 
 
-def test_product_spec_change_misses(tmp_path):
-    repo, _ = make_hit(tmp_path)
-    path = repo / "specs/product/x.md"
-    original = path.read_bytes()
-    path.write_bytes(original + b"\n")
-    assert is_hit(repo) is False
-    path.write_bytes(original)
-    assert is_hit(repo) is True
+def test_non_realizing_change_and_pycache_still_hit(hit_repo):
+    repo_root = hit_repo["repo_root"]
+    _write(repo_root / "gen" / "bar" / "bar.py", "OTHER = 2\n")
+    pycache = repo_root / "gen" / "foo" / "__pycache__" / "foo.cpython-314.pyc"
+    pycache.parent.mkdir(parents=True, exist_ok=True)
+    pycache.write_bytes(b"\x00\x01fake bytecode")
+
+    result = capability_scenario_verifier.check_capability_provenance(CAPABILITY_ID, repo_root)
+    assert field(result, "hit") is True
+    assert field(result, "capability_scenario_report") == hit_repo["record"]["capability_scenario_report"]
 
 
-def test_python_versions_change_misses(tmp_path):
-    sys.dont_write_bytecode = True
-    repo, _ = make_hit(tmp_path)
-    adapter = repo / "gen/kind-python/kind_python.py"
-    adapter.write_text(adapter_source({"python": "3.14.7"}), encoding="utf-8")
-    assert is_hit(repo) is False
-    adapter.write_text(adapter_source({}), encoding="utf-8")
-    assert is_hit(repo) is True
+def test_run_after_code_change_reruns_and_records_new_hash(hit_repo):
+    repo_root = hit_repo["repo_root"]
+    old_hash = hit_repo["record"]["content_hash"]
+    runs_before = len(_lines(hit_repo["run_log"]))
+    authored_before = len(_lines(hit_repo["author_log"]))
+    assert runs_before + authored_before >= 1
 
+    code = repo_root / "gen" / "foo" / "foo.py"
+    data = bytearray(code.read_bytes())
+    index = data.index(b"1")
+    data[index] = ord("2")
+    code.write_bytes(bytes(data))
 
-def test_unrelated_changes_still_hit(tmp_path):
-    repo, _ = make_hit(tmp_path)
-    (repo / "gen/bar/bar.py").write_text("OTHER = 2\n", encoding="utf-8")
-    assert is_hit(repo) is True
-    pyc = repo / "gen/foo/__pycache__/foo.cpython-314.pyc"
-    pyc.parent.mkdir(parents=True, exist_ok=True)
-    pyc.write_bytes(b"not really bytecode")
-    assert is_hit(repo) is True
-
-
-def test_rerun_after_code_change_writes_new_hash(tmp_path):
-    repo, run_log = make_hit(tmp_path)
-    before = json.loads(record_path(repo).read_text(encoding="utf-8"))["content_hash"]
-    runs_before = run_log.read_text().count("ran") if run_log.exists() else 0
-
-    flip_code_byte(repo)
-    assert is_hit(repo) is False
-
-    result = capability_scenario_verifier.run_capability_gates(CAP, repo, model="fake-model", seed=0)
+    result = capability_scenario_verifier.run_capability_gates(
+        CAPABILITY_ID, repo_root, model=MODEL, seed=0
+    )
     assert field(result, "hit") is False
     report = field(result, "capability_scenario_report")
-    assert CAP in report
+    assert report is not None
+    assert CAPABILITY_ID in report
 
-    runs_after = run_log.read_text().count("ran") if run_log.exists() else 0
-    assert runs_after > runs_before
+    runs_after = len(_lines(hit_repo["run_log"]))
+    authored_after = len(_lines(hit_repo["author_log"]))
+    assert runs_after > runs_before or authored_after > authored_before
 
-    after = json.loads(record_path(repo).read_text(encoding="utf-8"))["content_hash"]
-    assert after.startswith("sha256:")
-    assert after != before
-    assert is_hit(repo) is True
+    new_record = _read_record(repo_root)
+    assert new_record["content_hash"].startswith("sha256:")
+    assert new_record["content_hash"] != old_hash

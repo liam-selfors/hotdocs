@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:fe371c0bfd6977adb4233bd039c1397808e17248cb2147c9b47b426cfdd5d86b",
+  "spec_bundle_hash": "sha256:07e91b42a8d0d8343f325e1aace2689454cfd383dd5ef158ed114cc6e1ace2ea",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-24T06:01:04Z",
+  "generated_at": "2026-11-27T00:59:33Z",
   "verification_run_id": "capability-scenario-verifier-attempt-1",
   "verification_report": {
     "component_id": "comp-capability-scenario-verifier",
@@ -32,19 +32,37 @@
         "id": "AC-SCENARIO-001",
         "covers": "R-SCENARIO-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-002",
         "covers": "R-SCENARIO-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-003",
         "covers": "R-SCENARIO-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-004",
@@ -62,31 +80,61 @@
         "id": "AC-SCENARIO-005",
         "covers": "R-SCENARIO-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-006",
         "covers": "R-SCENARIO-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-007",
         "covers": "R-SCENARIO-006",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-008",
         "covers": "R-SCENARIO-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-009",
         "covers": "R-SCENARIO-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-010",
@@ -104,19 +152,37 @@
         "id": "AC-SCENARIO-011",
         "covers": "R-SCENARIO-008",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-012",
         "covers": "R-SCENARIO-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-013",
         "covers": "R-SCENARIO-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-SCENARIO-014",
@@ -142,7 +208,7 @@
       "R-SCENARIO-008": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8780487804878049,
+    "mutation_score": 0.8777777777777778,
     "mutation_error": null,
     "assets": [
       {
