@@ -1,8 +1,11 @@
-# hotdocs-criterion: sha256:5a825abfba93884471f97ebd30a9e47bf409f5f358909fdaf6ee7bf03258610e
+# hotdocs-criterion: sha256:22ccb7d7a23ac5ae304aaa9dbfc99736d78cafc694f531f37713a0f59b7b9700
+"""AC-PROV-018: write_sealed_provenance writes exactly one valid sealed
+provenance manifest at <repo_root>/<source_path>/.sealed-provenance.json."""
+
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import provenance_writer
 
@@ -19,47 +22,40 @@ EXPECTED_KEYS = [
     "written_at",
 ]
 
-SOURCE_HASH = "sha256:" + "0123456789abcdef" * 4
 OWNERS = ["pipeline-team", "alice"]
 SOURCE_PATH = "pipeline/foo/"
+SOURCE_HASH = "sha256:" + "0123456789abcdef" * 4
 VERIFIER_VERSION = "verifier-orchestrator@2.0.0"
 WRITTEN_AT_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def _criteria_dicts(results):
+    return [
+        {
+            "id": "AC-FOO-00" + str(i + 1),
+            "covers": "R-FOO-00" + str(i + 1),
+            "kind": "compiled",
+            "result": r,
+        }
+        for i, r in enumerate(results)
+    ]
 
 
-def make_report(results, overall):
-    criteria = []
-    for i, result in enumerate(results, start=1):
-        criteria.append({
-            "id": "AC-FOO-00" + str(i),
-            "covers": "R-FOO-00" + str(i),
-            "kind": "generated-test",
-            "result": result,
-        })
+def _report(results, overall):
     return {
         "component_id": "comp-foo",
-        "criteria": criteria,
-        "requirement_results": {c["covers"]: c["result"] for c in criteria},
+        "criteria": _criteria_dicts(results),
+        "requirement_results": {},
         "interface_drift": False,
         "mutation_score": None,
         "mutation_error": None,
         "assets": [],
+        "drivers": [],
         "overall": overall,
     }
 
 
-class CriterionEntry:
-    def __init__(self, id, covers, kind, result):
-        self.id = id
-        self.covers = covers
-        self.kind = kind
-        self.result = result
-
-
-def make_dataclass_inputs(report):
+def _dataclass_inputs(report):
     return provenance_writer.SealedProvenanceInputs(
         component_id="comp-foo",
         owners=list(OWNERS),
@@ -70,104 +66,110 @@ def make_dataclass_inputs(report):
     )
 
 
-def read_manifest(repo_root):
-    path = Path(repo_root) / "pipeline" / "foo" / ".sealed-provenance.json"
+def _manifest_path(repo_root):
+    return Path(repo_root) / "pipeline" / "foo" / ".sealed-provenance.json"
+
+
+def _read_manifest(repo_root):
+    path = _manifest_path(repo_root)
     assert path.is_file(), "manifest not written at " + str(path)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def now_s():
-    return datetime.now(timezone.utc).replace(microsecond=0)
-
-
-def test_pass_report_writes_exact_manifest(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    inputs = make_dataclass_inputs(make_report(["pass", "pass", "pass"], "pass"))
-
-    before = now_s()
-    provenance_writer.write_sealed_provenance("comp-foo", inputs, repo_root)
-    after = now_s()
-
-    manifest = read_manifest(repo_root)
+def _assert_common(manifest):
     assert isinstance(manifest, dict)
     assert list(manifest.keys()) == EXPECTED_KEYS
     assert manifest["kind"] == "sealed-provenance"
-    assert manifest["version"] == 1 and type(manifest["version"]) is int
-    assert manifest["characterization"] == {
-        "overall": "pass",
-        "criteria_passed": 3,
-        "criteria_total": 3,
-    }
+    assert manifest["version"] == 1
+    assert type(manifest["version"]) is int
     assert manifest["component_id"] == "comp-foo"
     assert manifest["owners"] == OWNERS
     assert manifest["source_path"] == SOURCE_PATH
     assert manifest["source_hash"] == SOURCE_HASH
     assert manifest["verifier_version"] == VERIFIER_VERSION
+    assert isinstance(manifest["written_at"], str)
+    assert WRITTEN_AT_RE.match(manifest["written_at"])
 
-    written_at = manifest["written_at"]
-    assert isinstance(written_at, str) and WRITTEN_AT_RE.match(written_at)
-    ts = datetime.strptime(written_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    assert before <= ts <= after
 
+def _assert_no_gen_or_verification(repo_root):
+    repo_root = Path(repo_root)
     assert not (repo_root / "gen").exists()
     assert not (repo_root / "verification").exists()
 
 
-def test_fail_report_characterization(tmp_path):
+def test_all_pass_report_writes_manifest(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    inputs = make_dataclass_inputs(make_report(["pass", "fail", "pass"], "fail"))
+    inputs = _dataclass_inputs(_report(["pass", "pass", "pass"], "pass"))
 
     provenance_writer.write_sealed_provenance("comp-foo", inputs, repo_root)
 
-    manifest = read_manifest(repo_root)
-    assert manifest["characterization"] == {
-        "overall": "fail",
-        "criteria_passed": 2,
-        "criteria_total": 3,
-    }
-
-
-def strip_time(manifest):
-    return {k: v for k, v in manifest.items() if k != "written_at"}
-
-
-def test_dict_inputs_and_attribute_entries_write_same_manifest(tmp_path):
-    root_a = tmp_path / "a"
-    root_b = tmp_path / "b"
-    root_a.mkdir()
-    root_b.mkdir()
-
-    dataclass_inputs = make_dataclass_inputs(make_report(["pass", "pass", "pass"], "pass"))
-    provenance_writer.write_sealed_provenance("comp-foo", dataclass_inputs, root_a)
-    reference = read_manifest(root_a)
-
-    plain_report = make_report(["pass", "pass", "pass"], "pass")
-    attr_report = dict(plain_report)
-    attr_report["criteria"] = [
-        CriterionEntry(c["id"], c["covers"], c["kind"], c["result"])
-        for c in plain_report["criteria"]
-    ]
-    dict_inputs = {
-        "component_id": "comp-foo",
-        "owners": list(OWNERS),
-        "source_path": SOURCE_PATH,
-        "source_hash": SOURCE_HASH,
-        "verifier_version": VERIFIER_VERSION,
-        "verification_report": attr_report,
-    }
-
-    provenance_writer.write_sealed_provenance("comp-foo", dict_inputs, root_b)
-    manifest = read_manifest(root_b)
-
-    assert list(manifest.keys()) == EXPECTED_KEYS
-    assert strip_time(manifest) == strip_time(reference)
+    manifest = _read_manifest(repo_root)
+    _assert_common(manifest)
     assert manifest["characterization"] == {
         "overall": "pass",
         "criteria_passed": 3,
         "criteria_total": 3,
     }
-    assert WRITTEN_AT_RE.match(manifest["written_at"])
-    assert not (root_b / "gen").exists()
-    assert not (root_b / "verification").exists()
+    assert list(manifest["characterization"].keys()) == [
+        "overall",
+        "criteria_passed",
+        "criteria_total",
+    ]
+    _assert_no_gen_or_verification(repo_root)
+
+
+def test_one_failing_criterion_characterization(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    inputs = _dataclass_inputs(_report(["pass", "fail", "pass"], "fail"))
+
+    provenance_writer.write_sealed_provenance("comp-foo", inputs, repo_root)
+
+    manifest = _read_manifest(repo_root)
+    _assert_common(manifest)
+    assert manifest["characterization"] == {
+        "overall": "fail",
+        "criteria_passed": 2,
+        "criteria_total": 3,
+    }
+    _assert_no_gen_or_verification(repo_root)
+
+
+def test_plain_dict_inputs_and_attribute_criteria(tmp_path):
+    # Reference manifest from dataclass inputs with dict criteria.
+    ref_root = tmp_path / "ref"
+    ref_root.mkdir()
+    provenance_writer.write_sealed_provenance(
+        "comp-foo", _dataclass_inputs(_report(["pass", "pass", "pass"], "pass")), ref_root
+    )
+    reference = _read_manifest(ref_root)
+
+    # Plain dict inputs; criteria entries are objects exposing `result`.
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    report = _report(["pass", "pass", "pass"], "pass")
+    report["criteria"] = [SimpleNamespace(**entry) for entry in report["criteria"]]
+    inputs = {
+        "component_id": "comp-foo",
+        "owners": list(OWNERS),
+        "source_path": SOURCE_PATH,
+        "source_hash": SOURCE_HASH,
+        "verifier_version": VERIFIER_VERSION,
+        "verification_report": report,
+    }
+
+    provenance_writer.write_sealed_provenance("comp-foo", inputs, repo_root)
+
+    manifest = _read_manifest(repo_root)
+    _assert_common(manifest)
+    assert manifest["characterization"] == {
+        "overall": "pass",
+        "criteria_passed": 3,
+        "criteria_total": 3,
+    }
+    without_time = {k: v for k, v in manifest.items() if k != "written_at"}
+    ref_without_time = {k: v for k, v in reference.items() if k != "written_at"}
+    assert without_time == ref_without_time
+    assert list(manifest.keys()) == list(reference.keys())
+    _assert_no_gen_or_verification(repo_root)

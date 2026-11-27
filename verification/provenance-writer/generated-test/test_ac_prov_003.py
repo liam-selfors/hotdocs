@@ -1,4 +1,5 @@
-# hotdocs-criterion: sha256:952f89bad13a8fd5a6cbcfd087f822aa1fb686842f66ba2b6ea3f635ea037b43
+# hotdocs-criterion: sha256:55663948d9bb4721a38c4421e51bb2de1bb10c4e78d4a3f5a87cd1f4424f1b04
+import copy
 import json
 from pathlib import Path
 
@@ -9,84 +10,68 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-REPORTED_VERSIONS = {
-    "cache_manager": "cache-manager@2.4.1",
-    "criterion_compiler": "compiler@1.7.0+sealed.3",
+REPORTED_GATE_VERSIONS = {
+    "cache_manager": "cache-manager@1.7.2",
+    "criterion_compiler": "compiler@2.3.0+5e1fa09c",
     "license_scanner": "license_scanner@4.0.3+9f2c41ab07de",
 }
 
 
-def _inputs(component_id, gate_versions):
+def _minimal_inputs(gate_versions):
     return {
-        "component_id": component_id,
+        "component_id": "comp-foo",
         "generation_result": {"files": {}},
         "verification_report": None,
         "license_scan_result": {},
         "secret_scan_result": {},
         "provenance_hit": False,
         "attempts": 1,
-        "attempt_history": [],
         "gate_versions": gate_versions,
     }
 
 
-def _read_manifests(repo_root, slug):
-    gen_path = Path(repo_root) / "gen" / slug / ".provenance.json"
-    ver_path = Path(repo_root) / "verification" / slug / ".provenance.json"
-    assert gen_path.is_file(), "missing manifest at " + str(gen_path)
-    assert ver_path.is_file(), "missing manifest at " + str(ver_path)
-    return [
-        json.loads(gen_path.read_text(encoding="utf-8")),
-        json.loads(ver_path.read_text(encoding="utf-8")),
-    ]
+def _read_manifest(path):
+    assert path.is_file(), "manifest missing at " + str(path)
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_gate_versions_contains_exactly_the_three_reported_values_unmodified(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    component_id = "comp-prov-gate-sample"
-    slug = "prov-gate-sample"
+def test_gate_versions_are_exactly_the_reported_values_unmodified(tmp_path):
+    repo_root = Path(tmp_path)
+    gate_versions = copy.deepcopy(REPORTED_GATE_VERSIONS)
+    inputs = _minimal_inputs(gate_versions)
 
-    gate_versions = dict(REPORTED_VERSIONS)
-    result = provenance_writer.write_provenance(
-        component_id, _inputs(component_id, gate_versions), repo_root
+    provenance_writer.write_provenance("comp-foo", inputs, repo_root)
+
+    gen_manifest = _read_manifest(repo_root / "gen" / "foo" / ".provenance.json")
+    ver_manifest = _read_manifest(
+        repo_root / "verification" / "foo" / ".provenance.json"
     )
-    assert result is None
 
-    # The input mapping itself is not altered by the writer.
-    assert gate_versions == REPORTED_VERSIONS
-
-    for manifest in _read_manifests(repo_root, slug):
+    for manifest in (gen_manifest, ver_manifest):
         written = field(manifest, "gate_versions")
         assert isinstance(written, dict)
-        # Exactly those three keys, no invented or hardcoded extras.
-        assert set(written.keys()) == set(REPORTED_VERSIONS.keys())
-        assert len(written) == 3
-        # Each value is the gate's own reported version, unmodified.
-        for key, value in REPORTED_VERSIONS.items():
+        # Exactly the three reported values: no extra, no missing, none altered.
+        assert written == REPORTED_GATE_VERSIONS
+        assert set(written.keys()) == set(REPORTED_GATE_VERSIONS.keys())
+        for key, value in REPORTED_GATE_VERSIONS.items():
             assert written[key] == value
-            assert isinstance(written[key], str)
-        assert written == REPORTED_VERSIONS
+
+    # The caller's reported values are not modified either.
+    assert gate_versions == REPORTED_GATE_VERSIONS
 
 
-def test_gate_versions_follow_whatever_was_reported_not_a_hardcoded_table(tmp_path):
-    # A second, different set of reported versions must appear verbatim too,
-    # proving the values come from the inputs rather than from the writer.
-    repo_root = tmp_path / "repo2"
-    repo_root.mkdir()
-    component_id = "comp-prov-gate-other"
-    slug = "prov-gate-other"
-
+def test_gate_versions_follow_the_reported_values_not_hardcoded(tmp_path):
     other_versions = {
-        "cache_manager": "cache-manager@9.0.0-rc.1",
-        "criterion_compiler": "compiler@0.0.1",
+        "cache_manager": "cache-manager@9.9.9-test",
+        "criterion_compiler": "compiler@0.0.1+deadbeef",
         "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     }
+    repo_root = Path(tmp_path)
 
     provenance_writer.write_provenance(
-        component_id, _inputs(component_id, dict(other_versions)), repo_root
+        "comp-foo", _minimal_inputs(copy.deepcopy(other_versions)), repo_root
     )
 
-    for manifest in _read_manifests(repo_root, slug):
-        written = field(manifest, "gate_versions")
-        assert written == other_versions
+    for sub in ("gen", "verification"):
+        manifest = _read_manifest(repo_root / sub / "foo" / ".provenance.json")
+        assert field(manifest, "gate_versions") == other_versions

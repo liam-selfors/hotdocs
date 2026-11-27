@@ -1,8 +1,14 @@
-# hotdocs-criterion: sha256:38a55f5dddd627fa738b85f0d42f8fcc1282499fa6a40251d46d9c5a3739fe37
+# hotdocs-criterion: sha256:3ec0ac36326cbd14bb23d230b01914a2c3f2e0bc371093872ef17d02d114e369
 import json
 from pathlib import Path
 
+import pytest
+
 import provenance_writer
+
+
+COMPONENT_ID = "comp-foo"
+SLUG = "foo"
 
 
 def field(value, name):
@@ -11,7 +17,7 @@ def field(value, name):
 
 def clean_license_scan_result():
     return {
-        "component_id": "comp-foo",
+        "component_id": COMPONENT_ID,
         "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
         "evaluated": True,
         "reason": None,
@@ -39,15 +45,15 @@ def clean_secret_scan_result():
     }
 
 
-def generation_result():
+def generation_result(files):
     return {
-        "component_id": "comp-foo",
-        "spec_bundle_hash": "sha256:" + "0" * 64,
+        "component_id": COMPONENT_ID,
+        "spec_bundle_hash": "sha256:" + "a" * 64,
         "model": "claude-sonnet-5",
         "prompt_version": "v12",
         "cache_hit": False,
-        "files": {},
-        "model_call_error": {"category": "network", "message": "unreachable"},
+        "files": files,
+        "model_call_error": None,
         "refused": None,
         "retry_feedback": None,
         "mode": "single",
@@ -58,49 +64,83 @@ def generation_result():
     }
 
 
-def read_manifest(path):
-    assert path.is_file(), "manifest not written at " + str(path)
-    return json.loads(path.read_text(encoding="utf-8"))
+def verification_report():
+    return {
+        "component_id": COMPONENT_ID,
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 0.92,
+        "mutation_error": None,
+        "assets": [
+            {
+                "kind": "python",
+                "path": ".",
+                "definition_sha256": None,
+                "adapter_sha256": "sha256:" + "b" * 64,
+                "versions": {"python": "3.12.4"},
+                "lockfile_sha256": None,
+            }
+        ],
+        "drivers": [],
+        "overall": "pass",
+    }
 
 
-def test_clean_scans_are_still_recorded_in_manifest(tmp_path):
-    repo_root = Path(tmp_path)
-    license_result = clean_license_scan_result()
-    secret_result = clean_secret_scan_result()
-    inputs = {
-        "component_id": "comp-foo",
-        "generation_result": generation_result(),
-        "verification_report": None,
-        "license_scan_result": license_result,
-        "secret_scan_result": secret_result,
+def build_inputs(files, report):
+    return {
+        "component_id": COMPONENT_ID,
+        "generation_result": generation_result(files),
+        "verification_report": report,
+        "license_scan_result": clean_license_scan_result(),
+        "secret_scan_result": clean_secret_scan_result(),
         "provenance_hit": False,
         "attempts": 1,
         "attempt_history": [],
-        "gate_versions": {},
+        "gate_versions": {"compiler": "1.0.0", "license_scanner": "license_scanner@4.0.3+9f2c41ab07de"},
+        "spec_bundle_parts": None,
     }
 
-    provenance_writer.write_provenance("comp-foo", inputs, repo_root)
 
+def read_manifests(repo_root):
     paths = [
-        repo_root / "gen" / "foo" / ".provenance.json",
-        repo_root / "verification" / "foo" / ".provenance.json",
+        Path(repo_root) / "gen" / SLUG / ".provenance.json",
+        Path(repo_root) / "verification" / SLUG / ".provenance.json",
     ]
-    for path in paths:
-        manifest = read_manifest(path)
-        assert isinstance(manifest, dict)
+    manifests = []
+    for p in paths:
+        assert p.is_file(), "manifest missing at " + str(p)
+        manifests.append(json.loads(p.read_text(encoding="utf-8")))
+    return manifests
 
-        assert "license_scan" in manifest, "license_scan missing from " + str(path)
-        assert "secret_scan" in manifest, "secret_scan missing from " + str(path)
 
-        license_scan = field(manifest, "license_scan")
-        secret_scan = field(manifest, "secret_scan")
+@pytest.mark.parametrize(
+    "files,report",
+    [
+        ({}, None),
+        ({"foo.py": "x = 1\n"}, "report"),
+    ],
+    ids=["no-candidate", "verified-candidate"],
+)
+def test_clean_scans_are_still_recorded(tmp_path, files, report):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    inputs = build_inputs(files, verification_report() if report else None)
 
-        assert license_scan is not None, "license_scan is null in " + str(path)
-        assert secret_scan is not None, "secret_scan is null in " + str(path)
+    result = provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
+    assert result is None
 
-        assert license_scan == license_result
-        assert secret_scan == secret_result
-
+    for manifest in read_manifests(repo_root):
+        assert "license_scan" in manifest
+        assert "secret_scan" in manifest
+        license_scan = manifest["license_scan"]
+        secret_scan = manifest["secret_scan"]
+        assert license_scan is not None
+        assert secret_scan is not None
+        assert license_scan == clean_license_scan_result()
+        assert secret_scan == clean_secret_scan_result()
         assert field(license_scan, "blocked") is False
         assert field(license_scan, "matches") == []
         assert field(secret_scan, "flagged") is False

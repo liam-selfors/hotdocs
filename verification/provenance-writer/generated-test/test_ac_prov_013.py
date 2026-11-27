@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:948af14e4b3e7c8a296ca94e1f47434841a69e6dd67304afd2659fea0f55fee6
+# hotdocs-criterion: sha256:5eb5c9e4a8b4ba95916a14ae76e6f2a6d4f3b9467bdae4e47d0557df9f49ccc7
 import json
 from pathlib import Path
 
@@ -19,7 +19,7 @@ def make_inputs():
             "prompt_version": "v12",
             "cache_hit": False,
             "files": {},
-            "model_call_error": {"category": "network", "message": "down"},
+            "model_call_error": {"category": "network", "message": "boom"},
             "refused": None,
             "retry_feedback": None,
             "mode": "single",
@@ -39,8 +39,8 @@ def make_inputs():
 
 
 def read_manifests(repo_root):
-    gen_path = Path(repo_root) / "gen" / "foo" / ".provenance.json"
-    ver_path = Path(repo_root) / "verification" / "foo" / ".provenance.json"
+    gen_path = repo_root / "gen" / "foo" / ".provenance.json"
+    ver_path = repo_root / "verification" / "foo" / ".provenance.json"
     assert gen_path.is_file(), "missing " + str(gen_path)
     assert ver_path.is_file(), "missing " + str(ver_path)
     return (
@@ -49,30 +49,34 @@ def read_manifests(repo_root):
     )
 
 
-def test_verification_run_id_is_deterministic_slug_attempt(tmp_path):
-    root_a = tmp_path / "a"
-    root_a.mkdir()
-    provenance_writer.write_provenance("comp-foo", make_inputs(), root_a)
-    gen_a, ver_a = read_manifests(root_a)
+def test_ac_prov_013_verification_run_id_is_deterministic(tmp_path):
+    root_one = tmp_path / "run1"
+    root_two = tmp_path / "run2"
+    root_one.mkdir()
+    root_two.mkdir()
 
-    assert field(gen_a, "verification_run_id") == "foo-attempt-2"
-    assert field(ver_a, "verification_run_id") == "foo-attempt-2"
+    provenance_writer.write_provenance("comp-foo", make_inputs(), root_one)
+    gen_one, ver_one = read_manifests(root_one)
 
-    root_b = tmp_path / "b"
-    root_b.mkdir()
-    provenance_writer.write_provenance("comp-foo", make_inputs(), root_b)
-    gen_b, ver_b = read_manifests(root_b)
+    assert field(gen_one, "verification_run_id") == "foo-attempt-2"
+    assert field(ver_one, "verification_run_id") == "foo-attempt-2"
 
-    assert field(gen_b, "verification_run_id") == field(gen_a, "verification_run_id")
-    assert field(ver_b, "verification_run_id") == field(ver_a, "verification_run_id")
-    assert field(gen_b, "verification_run_id") == "foo-attempt-2"
+    provenance_writer.write_provenance("comp-foo", make_inputs(), root_two)
+    gen_two, ver_two = read_manifests(root_two)
+
+    assert field(gen_two, "verification_run_id") == field(gen_one, "verification_run_id")
+    assert field(ver_two, "verification_run_id") == field(ver_one, "verification_run_id")
+    assert field(gen_two, "verification_run_id") == "foo-attempt-2"
 
 
-def test_verification_run_id_identical_on_rewrite_same_root(tmp_path):
+def test_ac_prov_013_same_root_rerun_identical_run_id(tmp_path):
     provenance_writer.write_provenance("comp-foo", make_inputs(), tmp_path)
-    first, _ = read_manifests(tmp_path)
-    provenance_writer.write_provenance("comp-foo", make_inputs(), tmp_path)
-    second, _ = read_manifests(tmp_path)
+    first_gen, _ = read_manifests(tmp_path)
+    first_id = field(first_gen, "verification_run_id")
 
-    assert field(first, "verification_run_id") == "foo-attempt-2"
-    assert field(second, "verification_run_id") == field(first, "verification_run_id")
+    provenance_writer.write_provenance("comp-foo", make_inputs(), tmp_path)
+    second_gen, second_ver = read_manifests(tmp_path)
+
+    assert first_id == "foo-attempt-2"
+    assert field(second_gen, "verification_run_id") == first_id
+    assert field(second_ver, "verification_run_id") == first_id

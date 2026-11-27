@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:50925742fb525683ac5afae511e26f3ee5482fc4cc66d1b5ed7062bf286a23bd
+# hotdocs-criterion: sha256:4cd1ae49fb2d3e1db8385d1757ca8131b58adf1e37609eedac7ba9d514ae29c8
 import json
 from pathlib import Path
 
@@ -22,20 +22,15 @@ def _contains_key(value, key):
     return False
 
 
-def _contains_text(text, needle):
-    return needle in text
-
-
-def test_ac_prov_002_generation_fields_copied_and_no_sample_index(tmp_path):
-    repo_root = Path(tmp_path)
+def _inputs():
     generation_result = {
         "component_id": "comp-foo",
-        "spec_bundle_hash": "sha256:" + "0" * 64,
+        "spec_bundle_hash": "sha256:" + "a" * 64,
         "model": "claude-sonnet-5",
         "prompt_version": "v1",
         "cache_hit": False,
         "files": {},
-        "model_call_error": {"category": "network", "message": "unreachable"},
+        "model_call_error": {"category": "network", "message": "boom"},
         "refused": None,
         "retry_feedback": ["R-FOO-002"],
         "mode": "single",
@@ -43,8 +38,10 @@ def test_ac_prov_002_generation_fields_copied_and_no_sample_index(tmp_path):
         "turns": 1,
         "tool_calls": 0,
         "isolation": None,
+        # An extra field that must never be written into the manifest.
+        "sample_index": 3,
     }
-    inputs = {
+    return {
         "component_id": "comp-foo",
         "generation_result": generation_result,
         "verification_report": None,
@@ -56,22 +53,27 @@ def test_ac_prov_002_generation_fields_copied_and_no_sample_index(tmp_path):
         "gate_versions": {},
     }
 
-    provenance_writer.write_provenance("comp-foo", inputs, repo_root)
+
+def test_ac_prov_002_fields_copied_from_generation_result_and_no_sample_index(tmp_path):
+    repo_root = Path(tmp_path)
+
+    result = provenance_writer.write_provenance("comp-foo", _inputs(), repo_root)
+    assert result is None
 
     paths = [
         repo_root / "gen" / "foo" / ".provenance.json",
         repo_root / "verification" / "foo" / ".provenance.json",
     ]
     for path in paths:
-        assert path.is_file(), "manifest not written at " + repr(str(path))
-        text = path.read_text(encoding="utf-8")
-        manifest = json.loads(text)
+        assert path.is_file(), "manifest missing at " + str(path)
+        manifest = json.loads(path.read_text(encoding="utf-8"))
         assert isinstance(manifest, dict)
+
         assert field(manifest, "model_pin") == "claude-sonnet-5"
         assert field(manifest, "prompt_version") == "v1"
         assert field(manifest, "retry_feedback") == ["R-FOO-002"]
-        assert field(manifest, "spec_bundle_hash") == "sha256:" + "0" * 64
+        assert field(manifest, "spec_bundle_hash") == "sha256:" + "a" * 64
+
         assert not _contains_key(manifest, "sample_index"), (
-            "sample_index field present in " + repr(str(path))
+            "sample_index must not appear anywhere in " + str(path)
         )
-        assert not _contains_text(text, '"sample_index"')

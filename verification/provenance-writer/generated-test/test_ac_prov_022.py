@@ -1,12 +1,8 @@
-# hotdocs-criterion: sha256:50302db7be56b7bac97cb79cd6deadf9bee75f7029fa3f1cecfa2507521d3697
+# hotdocs-criterion: sha256:c644c7b860ca5ef1a88f02e4b20bc65a2d6376436e957475f488beb79fd5605f
 import json
 from pathlib import Path
 
 import provenance_writer
-
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 ATTEMPT_KEYS = {
@@ -19,31 +15,25 @@ ATTEMPT_KEYS = {
 }
 
 
-def manifest_paths(repo_root, slug):
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _manifest_paths(repo_root, slug):
     return [
         Path(repo_root) / "gen" / slug / ".provenance.json",
         Path(repo_root) / "verification" / slug / ".provenance.json",
     ]
 
 
-def base_inputs(component_id):
-    return {
-        "component_id": component_id,
-        "verification_report": None,
-        "license_scan_result": {},
-        "secret_scan_result": {},
-        "provenance_hit": False,
-        "attempts": 1,
-        "gate_versions": {},
-    }
-
-
-def test_agentic_generation_and_attempt_history_filtered(tmp_path):
+def test_ac_prov_022_agentic_generation_and_attempt_history_filtered(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     component_id = "comp-foo"
-    inputs = base_inputs(component_id)
-    inputs["generation_result"] = {
+
+    generation_result = {
         "component_id": component_id,
-        "spec_bundle_hash": "sha256:b",
+        "spec_bundle_hash": "sha256:bundle",
         "model": "claude-sonnet-5",
         "prompt_version": "v12",
         "cache_hit": False,
@@ -58,9 +48,7 @@ def test_agentic_generation_and_attempt_history_filtered(tmp_path):
         "isolation": "sandbox-exec",
         "transcript": "RAW-TRANSCRIPT",
     }
-    inputs["gate_versions"] = {"generator": "generator@3.0.0+v11"}
-    inputs["attempts"] = 2
-    inputs["attempt_history"] = [
+    attempt_history = [
         {
             "number": 1,
             "outcome": "verification_failed",
@@ -79,12 +67,25 @@ def test_agentic_generation_and_attempt_history_filtered(tmp_path):
             "transcript_sha256": "sha256:a2",
         },
     ]
+    inputs = {
+        "component_id": component_id,
+        "generation_result": generation_result,
+        "verification_report": None,
+        "license_scan_result": {},
+        "secret_scan_result": {},
+        "provenance_hit": False,
+        "attempts": 2,
+        "attempt_history": attempt_history,
+        "gate_versions": {"generator": "generator@3.0.0+v11"},
+    }
 
-    provenance_writer.write_provenance(component_id, inputs, tmp_path)
+    provenance_writer.write_provenance(component_id, inputs, repo_root)
 
-    for path in manifest_paths(tmp_path, "foo"):
+    for path in _manifest_paths(repo_root, "foo"):
         assert path.is_file(), str(path)
         text = path.read_text(encoding="utf-8")
+        assert "RAW-TRANSCRIPT" not in text
+        assert "EXTRA-NOTE" not in text
         manifest = json.loads(text)
 
         assert manifest["generation"] == {
@@ -101,19 +102,38 @@ def test_agentic_generation_and_attempt_history_filtered(tmp_path):
         assert len(history) == 2
         for entry in history:
             assert set(entry.keys()) == ATTEMPT_KEYS
-        assert "RAW-TRANSCRIPT" not in text
-        assert "EXTRA-NOTE" not in text
+        assert history[0]["number"] == 1
+        assert history[0]["outcome"] == "verification_failed"
+        assert history[0]["failed_requirements"] == ["R-FOO-002"]
+        assert history[0]["transcript_sha256"] == "sha256:a1"
+        assert history[1]["number"] == 2
+        assert history[1]["outcome"] == "passed"
+        assert history[1]["retry_feedback"] == ["R-FOO-002"]
+        assert history[1]["transcript_sha256"] == "sha256:a2"
 
 
-def test_absent_attempt_history_and_mode_default(tmp_path):
+def test_ac_prov_022_absent_history_and_mode_defaults(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     component_id = "comp-bar"
-    inputs = base_inputs(component_id)
-    inputs["generation_result"] = {"files": {}}
 
-    provenance_writer.write_provenance(component_id, inputs, tmp_path)
+    inputs = {
+        "component_id": component_id,
+        "generation_result": {"files": {}},
+        "verification_report": None,
+        "license_scan_result": {},
+        "secret_scan_result": {},
+        "provenance_hit": False,
+        "attempts": 1,
+        "gate_versions": {},
+    }
 
-    for path in manifest_paths(tmp_path, "bar"):
+    provenance_writer.write_provenance(component_id, inputs, repo_root)
+
+    for path in _manifest_paths(repo_root, "bar"):
         assert path.is_file(), str(path)
         manifest = json.loads(path.read_text(encoding="utf-8"))
         assert manifest["attempt_history"] == []
         assert manifest["generation"]["mode"] == "single"
+        assert manifest["generation"]["generator_version"] is None
+        assert manifest["attempts"] == 1
