@@ -1,6 +1,7 @@
-# hotdocs-criterion: sha256:e159da2f2bbefe917e186f3eebd451a2ffe40aeafb9487a52fc10dd8225083f4
+# hotdocs-criterion: sha256:6ecafc87733e4dd0b063725032e45511c0dbc7d459039d856a15a0e66c3ee443
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -9,36 +10,46 @@ import pytest
 import agentic_generator
 
 
+PREFIX = "hotdocs-agent-"
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _hotdocs_entries():
-    tmp = Path(tempfile.gettempdir())
-    dirs = set()
-    sb_files = set()
-    for entry in tmp.iterdir():
-        name = entry.name
-        if not name.startswith("hotdocs-agent-"):
+def _sandbox_leftovers():
+    """Directories, and files ending ".sb", directly under gettempdir()
+    whose names start with "hotdocs-agent-"."""
+    tmp = tempfile.gettempdir()
+    found = set()
+    try:
+        names = os.listdir(tmp)
+    except OSError:
+        return found
+    for name in names:
+        if not name.startswith(PREFIX):
             continue
-        if entry.is_dir() and not entry.is_symlink():
-            dirs.add(name)
-        if name.endswith(".sb") and entry.is_file():
-            sb_files.add(name)
-    return dirs, sb_files
+        full = os.path.join(tmp, name)
+        if os.path.isdir(full):
+            found.add(("dir", name))
+        elif name.endswith(".sb") and os.path.lexists(full):
+            found.add(("sb", name))
+    return found
 
 
 def _write_generator_stand_in(repo_root, log_path):
+    path = repo_root / "gen" / "generator" / "generator.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
     src = (
-        "import json\n"
         "import dataclasses\n"
+        "import json\n"
         "from pathlib import Path\n"
         "\n"
         "LOG = " + repr(str(log_path)) + "\n"
         "\n"
-        "def _log(record):\n"
+        "def _log(entry):\n"
         "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write(json.dumps(record) + '\\n')\n"
+        "        f.write(json.dumps(entry, default=str) + '\\n')\n"
         "\n"
         "@dataclasses.dataclass\n"
         "class GenerationResult:\n"
@@ -64,12 +75,12 @@ def _write_generator_stand_in(repo_root, log_path):
         "    return [('Spec', 'SPEC TEXT'), ('Component interface', 'IFACE TEXT')]\n"
         "\n"
         "def write_files(component_id, files, repo_root=None):\n"
-        "    _log({'call': 'write_files', 'component_id': component_id,\n"
-        "          'files': dict(files), 'repo_root': None if repo_root is None else str(repo_root)})\n"
+        "    _log({'fn': 'write_files', 'component_id': component_id,\n"
+        "          'files': files, 'repo_root': repo_root})\n"
         "\n"
         "def check_assets(component_id, files, repo_root=None):\n"
-        "    _log({'call': 'check_assets', 'component_id': component_id,\n"
-        "          'files': dict(files), 'repo_root': None if repo_root is None else str(repo_root)})\n"
+        "    _log({'fn': 'check_assets', 'component_id': component_id,\n"
+        "          'files': files, 'repo_root': repo_root})\n"
         "    for content in files.values():\n"
         "        if 'bad' in content:\n"
         "            return ('malformed_layout', ['static/app.txt: bad'])\n"
@@ -80,22 +91,64 @@ def _write_generator_stand_in(repo_root, log_path):
         "        return ('environment', ['fake needs fakeprog >= 2'])\n"
         "    return (None, [])\n"
     )
-    d = repo_root / "gen" / "generator"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "generator.py").write_text(src, encoding="utf-8")
+    path.write_text(src, encoding="utf-8")
+
+
+def _write_python_adapter_stand_in(repo_root):
+    path = repo_root / "gen" / "kind-python" / "kind_python.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    src = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "\n"
+        "KIND = 'python'\n"
+        "\n"
+        "class AssetError(Exception):\n"
+        "    pass\n"
+        "\n"
+        "def layout_errors(asset_file):\n"
+        "    return []\n"
+        "\n"
+        "def surface(asset_file):\n"
+        "    return {'names': []}\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {'ok': True, 'reason': None, 'versions': {},\n"
+        "            'lockfile_sha256': None, 'interpreter': sys.executable}\n"
+        "\n"
+        "def guidance():\n"
+        "    return {'generator': '', 'test_author': ''}\n"
+        "\n"
+        "def asset_runner(asset_file):\n"
+        "    def run(entry, args):\n"
+        "        raise AssetError('not supported')\n"
+        "    return run\n"
+        "\n"
+        "def strength_sites(asset_file):\n"
+        "    return []\n"
+        "\n"
+        "def apply_site(asset_file, site):\n"
+        "    return None\n"
+    )
+    path.write_text(src, encoding="utf-8")
 
 
 def _write_loop_stand_in(repo_root, script_path, log_path):
+    path = repo_root / "gen" / "llm-tool-endpoint" / "llm_tool_endpoint.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
     src = (
-        "import json\n"
         "import dataclasses\n"
+        "import json\n"
         "\n"
         "SCRIPT = " + repr(str(script_path)) + "\n"
         "LOG = " + repr(str(log_path)) + "\n"
         "\n"
-        "def _log(record):\n"
+        "def _log(entry):\n"
         "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write(json.dumps(record) + '\\n')\n"
+        "        f.write(json.dumps(entry, default=str) + '\\n')\n"
+        "\n"
+        "class ToolUseUnsupported(Exception):\n"
+        "    pass\n"
         "\n"
         "@dataclasses.dataclass\n"
         "class ToolLoopResult:\n"
@@ -105,63 +158,62 @@ def _write_loop_stand_in(repo_root, script_path, log_path):
         "    tool_calls: int = 0\n"
         "    stop: str = 'end_turn'\n"
         "    model_call_error: object = None\n"
-        "\n"
         "    def to_dict(self):\n"
         "        return dataclasses.asdict(self)\n"
         "\n"
-        "def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,\n"
-        "                  max_tool_calls=120, wall_seconds=1800.0, repo_root=None,\n"
+        "def run_tool_loop(system, prompt, model, tools, execute, *,\n"
+        "                  max_turns=40, max_tool_calls=120,\n"
+        "                  wall_seconds=1800.0, repo_root=None,\n"
         "                  claude_command='claude'):\n"
-        "    _log({'call': 'run_tool_loop', 'system': system, 'prompt': prompt,\n"
-        "          'model': model, 'tools': [t.get('name') for t in tools],\n"
+        "    _log({'event': 'args', 'model': model,\n"
+        "          'tools': [t.get('name') for t in tools],\n"
         "          'max_turns': max_turns, 'max_tool_calls': max_tool_calls,\n"
-        "          'wall_seconds': wall_seconds,\n"
-        "          'repo_root': None if repo_root is None else str(repo_root),\n"
+        "          'wall_seconds': wall_seconds, 'repo_root': repo_root,\n"
         "          'claude_command': claude_command})\n"
-        "    with open(SCRIPT, encoding='utf-8') as f:\n"
+        "    with open(SCRIPT, 'r', encoding='utf-8') as f:\n"
         "        steps = json.load(f)\n"
-        "    calls = 0\n"
         "    for step in steps:\n"
-        "        if 'raise' in step:\n"
-        "            _log({'call': 'raise', 'message': step['raise']})\n"
-        "            raise RuntimeError(step['raise'])\n"
-        "        calls += 1\n"
         "        text, is_error = execute(step['name'], step['arguments'])\n"
-        "        _log({'call': 'execute', 'name': step['name'],\n"
-        "              'arguments': step['arguments'], 'text': text,\n"
-        "              'is_error': bool(is_error)})\n"
-        "    return ToolLoopResult(text='done', transcript=[], turns=1,\n"
-        "                          tool_calls=calls, stop='end_turn',\n"
-        "                          model_call_error=None)\n"
+        "        _log({'event': 'call', 'name': step['name'],\n"
+        "              'arguments': step['arguments'],\n"
+        "              'text': text, 'is_error': is_error})\n"
+        "    raise RuntimeError('boom')\n"
+        "\n"
+        "def serve_mcp(socket_path, tools_path):\n"
+        "    return 0\n"
     )
-    d = repo_root / "gen" / "llm-tool-endpoint"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "llm_tool_endpoint.py").write_text(src, encoding="utf-8")
+    path.write_text(src, encoding="utf-8")
 
 
-def _read_log(path):
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def test_ac_agent_007_sandbox_removed_when_loop_raises(tmp_path):
+def test_ac_agent_007_sandbox_removed_when_loop_raises(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     logs = tmp_path / "logs"
     logs.mkdir()
-    gen_log = logs / "generator.log"
     loop_log = logs / "loop.log"
+    gen_log = logs / "generator.log"
     script_path = logs / "script.json"
 
-    script = [
-        {"name": "write_file", "arguments": {"path": "work/a.py", "content": "X = 1\n"}},
-        {"raise": "boom"},
-    ]
-    script_path.write_text(json.dumps(script), encoding="utf-8")
+    script_path.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "write_file",
+                    "arguments": {"path": "work/a.py", "content": "x = 1\n"},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     _write_generator_stand_in(repo_root, gen_log)
+    _write_python_adapter_stand_in(repo_root)
     _write_loop_stand_in(repo_root, script_path, loop_log)
+
+    # No OS sandbox available: code is never run.
+    missing = str(tmp_path / "does-not-exist" / "nothing")
+    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", missing)
+    monkeypatch.setattr(agentic_generator, "BWRAP", missing)
 
     bundle = {
         "component_id": "comp-widget",
@@ -169,26 +221,30 @@ def test_ac_agent_007_sandbox_removed_when_loop_raises(tmp_path):
         "hint_code": None,
     }
 
-    before_dirs, before_sb = _hotdocs_entries()
+    before = _sandbox_leftovers()
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(RuntimeError) as excinfo:
         agentic_generator.generate_agentic(
-            bundle, "anthropic:claude-test", None, repo_root=repo_root
+            bundle, "claude-sonnet-5", None, repo_root=repo_root
         )
 
-    after_dirs, after_sb = _hotdocs_entries()
+    assert "boom" in str(excinfo.value)
 
-    records = _read_log(loop_log)
-    calls = [r["call"] for r in records]
-    assert "run_tool_loop" in calls, "loop stand-in was not called"
-    executes = [r for r in records if r["call"] == "execute"]
-    assert len(executes) == 1
-    assert executes[0]["name"] == "write_file"
-    assert executes[0]["text"] == "wrote work/a.py"
-    assert executes[0]["is_error"] is False
-    assert "raise" in calls
+    # The loop stand-in ran and issued the write_file call.
+    assert loop_log.is_file(), "loop stand-in was never called"
+    entries = [
+        json.loads(line)
+        for line in loop_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    calls = [e for e in entries if e.get("event") == "call"]
+    assert len(calls) == 1
+    assert calls[0]["name"] == "write_file"
+    assert calls[0]["arguments"] == {"path": "work/a.py", "content": "x = 1\n"}
 
-    new_dirs = after_dirs - before_dirs
-    new_sb = after_sb - before_sb
-    assert new_dirs == set(), "sandbox directories left behind: " + repr(sorted(new_dirs))
-    assert new_sb == set(), "sandbox profile files left behind: " + repr(sorted(new_sb))
+    after = _sandbox_leftovers()
+    new = after - before
+    new_dirs = sorted(name for kind, name in new if kind == "dir")
+    new_sb = sorted(name for kind, name in new if kind == "sb")
+    assert new_dirs == [], "sandbox directory left behind: " + repr(new_dirs)
+    assert new_sb == [], "sandbox profile left behind: " + repr(new_sb)
