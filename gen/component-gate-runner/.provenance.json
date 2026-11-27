@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:35ac507c89ba917b96228796992269208819d6ba998d9afa37f1d21136bebdad",
+  "spec_bundle_hash": "sha256:289f1c9b6108ced5a3796a0240c2dd14256b1f64c6e6c01069ed526089bc0b53",
   "spec_bundle_parts": {
     "spec": "sha256:eba67460af8f2fad9c00dd8792c79f04457cef7d704abdd5bc2ffee1532a6723",
-    "dependency_code": "sha256:a234ceb707fc0595cd38899b4b182d57ff7ea8278462951e91820735c42658a4"
+    "dependency_code": "sha256:0a41c80b36361fea9a99e46c2aed9cf92b3bcbe73c1fcbcf68a158068d0ac898"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T18:25:28Z",
+  "generated_at": "2026-11-27T23:10:06Z",
   "verification_run_id": "component-gate-runner-attempt-1",
   "verification_report": {
     "component_id": "comp-component-gate-runner",
@@ -257,7 +257,7 @@
     "matches": [],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": false
+    "cache_hit": true
   },
   "secret_scan": {
     "scope": "full",
@@ -269,12 +269,6 @@
         "risk_tier": "low",
         "file": "verification/generator/generated-test/test_ac_gen_018.py",
         "line": 7
-      },
-      {
-        "rule_id": "Hex High Entropy String",
-        "risk_tier": "low",
-        "file": "verification/graph-query-engine/generated-test/test_ac_gqe_005.py",
-        "line": 144
       },
       {
         "rule_id": "Hex High Entropy String",
