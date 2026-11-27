@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:df4fd0ca5f81013ca6862d9152ee5c8622e3a0c8296b117625fb21125478c2fe
+# hotdocs-criterion: sha256:dd7705376247a9e849666b45017b1663d680c80202cde1acf7ff4e25b6e1e4df
 from pathlib import Path
 
 import citation_checker
@@ -17,106 +17,118 @@ def build_fixture(repo_root):
     specs = repo_root / "specs"
 
     write(
-        specs / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "- **Widget** — a small thing used in tests.\n",
-    )
-
-    write(
         specs / "architecture" / "target.md",
-        "---\n"
-        "id: arch-target\n"
-        "title: Target Document\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Target Document\n"
-        "\n"
-        "Some introductory text.\n"
-        "\n"
-        "## Query surface\n"
-        "\n"
-        "The query surface is described here.\n",
+        "\n".join(
+            [
+                "---",
+                "id: arch-target",
+                "title: Target",
+                "status: draft",
+                "owners: [pipeline-team]",
+                "depends_on: []",
+                "---",
+                "",
+                "# Target",
+                "",
+                "Some intro text.",
+                "",
+                "## Query surface",
+                "",
+                "The query surface is described here.",
+                "",
+            ]
+        ),
     )
 
-    comp = specs / "components" / "foo"
+    comp = specs / "components" / "widget"
     write(
         comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "A fixture component.\n",
+        "\n".join(
+            [
+                "---",
+                "id: comp-widget",
+                "title: Widget",
+                "status: draft",
+                "owners: [pipeline-team]",
+                "depends_on: []",
+                "sealed: true",
+                "source_path: legacy/widget/",
+                "---",
+                "",
+                "# Widget",
+                "",
+                "A small fixture component.",
+                "",
+            ]
+        ),
     )
 
     write(
-        comp / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "foo() -> None\n"
-        "```\n",
+        comp / "requirements" / "R-WID-001.md",
+        "\n".join(
+            [
+                "# R-WID-001",
+                "",
+                "**R-WID-001** — The widget MUST answer queries as",
+                "`specs/architecture/target.md`'s \"Query surface\" section",
+                "describes.",
+                "",
+            ]
+        ),
+    )
+    write(
+        comp / "requirements" / "R-WID-002.md",
+        "\n".join(
+            [
+                "# R-WID-002",
+                "",
+                "**R-WID-002** — The widget MUST behave as",
+                "`specs/architecture/target.md`'s \"Nonexistent Heading\" section",
+                "describes.",
+                "",
+            ]
+        ),
     )
 
     write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
-        "\n"
-        "**R-FOO-001** — Foo MUST behave as\n"
-        "  `specs/architecture/target.md`'s \"Query surface\" section states.\n",
+        comp / "acceptance" / "AC-WID-001.md",
+        "\n".join(
+            [
+                "# AC-WID-001",
+                "",
+                "Covers: R-WID-001",
+                "Kind: generated-test",
+                "",
+                "```gherkin",
+                "Given a widget",
+                "When it is queried",
+                "Then it answers",
+                "```",
+                "",
+            ]
+        ),
     )
     write(
-        comp / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002\n"
-        "\n"
-        "**R-FOO-002** — Foo MUST behave as\n"
-        "  `specs/architecture/target.md`'s \"Nonexistent Heading\" section states.\n",
-    )
-
-    write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given foo\n"
-        "When foo runs\n"
-        "Then it behaves\n"
-        "```\n",
-    )
-    write(
-        comp / "acceptance" / "AC-FOO-002.md",
-        "# AC-FOO-002\n"
-        "\n"
-        "Covers: R-FOO-002\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given foo\n"
-        "When foo runs\n"
-        "Then it behaves\n"
-        "```\n",
+        comp / "acceptance" / "AC-WID-002.md",
+        "\n".join(
+            [
+                "# AC-WID-002",
+                "",
+                "Covers: R-WID-002",
+                "Kind: generated-test",
+                "",
+                "```gherkin",
+                "Given a widget",
+                "When it runs",
+                "Then it behaves",
+                "```",
+                "",
+            ]
+        ),
     )
 
 
-def norm(p):
-    return str(p).replace("\\", "/")
-
-
-def test_ac_cite_002_only_missing_section_is_flagged(tmp_path):
+def test_ac_cite_002_only_missing_heading_is_flagged(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
@@ -124,22 +136,28 @@ def test_ac_cite_002_only_missing_section_is_flagged(tmp_path):
     findings = citation_checker.check(repo_root)
     assert isinstance(findings, list)
 
-    cite2 = [f for f in findings if field(f, "rule_id") == "R-CITE-002"]
+    cite_002 = [f for f in findings if field(f, "rule_id") == "R-CITE-002"]
 
-    good_file = "specs/components/foo/requirements/R-FOO-001.md"
-    bad_file = "specs/components/foo/requirements/R-FOO-002.md"
+    good_rel = "specs/components/widget/requirements/R-WID-001.md"
+    bad_rel = "specs/components/widget/requirements/R-WID-002.md"
 
-    flagged_files = [norm(field(f, "file")) for f in cite2]
+    def norm(p):
+        return str(p).replace("\\", "/")
 
-    assert good_file not in flagged_files, (
-        "the valid 'Query surface' citation must not be flagged: " + repr(cite2)
+    good_hits = [f for f in cite_002 if norm(field(f, "file")) == good_rel]
+    bad_hits = [f for f in cite_002 if norm(field(f, "file")) == bad_rel]
+
+    assert good_hits == [], "valid 'Query surface' citation was flagged: " + repr(good_hits)
+    assert len(bad_hits) >= 1, (
+        "missing 'Nonexistent Heading' citation was not flagged: " + repr(findings)
     )
-    assert flagged_files == [bad_file], (
-        "expected exactly one R-CITE-002 finding, on the "
-        "'Nonexistent Heading' citation: " + repr(cite2)
-    )
 
-    finding = cite2[0]
-    assert field(finding, "severity") in ("fail", "warn")
-    assert isinstance(field(finding, "line"), int)
-    assert isinstance(field(finding, "message"), str)
+    other = [
+        f for f in cite_002 if norm(field(f, "file")) not in (good_rel, bad_rel)
+    ]
+    assert other == [], "unexpected R-CITE-002 findings: " + repr(other)
+
+    for f in bad_hits:
+        assert field(f, "severity") in ("fail", "warn")
+        assert isinstance(field(f, "line"), int)
+        assert isinstance(field(f, "message"), str)

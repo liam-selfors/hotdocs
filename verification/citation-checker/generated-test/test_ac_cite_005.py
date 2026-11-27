@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:9db2e2ba74b36c5e992e913f58fd7d30616d08131ece05a72a650dff509c0f2b
+# hotdocs-criterion: sha256:6bb015a6e2d3ce70146b0d223bb52f417eb8111f4bf2f3c3323cd992481913c8
 from pathlib import Path
 
 import citation_checker
@@ -13,7 +13,7 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def decision_text(doc_id, title, builds_on):
+def decision_source(doc_id, title, builds_on):
     return (
         "---\n"
         + "id: " + doc_id + "\n"
@@ -23,44 +23,45 @@ def decision_text(doc_id, title, builds_on):
         + "builds_on: [" + ", ".join(builds_on) + "]\n"
         + "---\n"
         + "\n"
-        + "# " + title + "\n"
+        + "# " + doc_id + " " + title + "\n"
         + "\n"
         + "A decision record used as a test fixture.\n"
     )
 
 
-def test_ac_cite_005_only_unresolved_builds_on_is_flagged(tmp_path):
-    repo_root = tmp_path / "repo"
+def build_corpus(repo_root):
     specs = repo_root / "specs"
-
     write(
         specs / "glossary.md",
-        "# Glossary\n\n- **Fixture term** \u2014 a term used only by this fixture.\n",
+        "# Glossary\n"
+        "\n"
+        "- **Fixture term** — a term used only by this test fixture.\n",
     )
-
-    # First record: builds_on names a decision number with no file.
     write(
         specs / "decisions" / "D200.md",
-        decision_text("D200", "Builds on a missing decision", ["D9999"]),
+        decision_source("D200", "Dangling builds on", ["D999"]),
     )
-    # Second record: builds_on names D7, one of D1-D14, never formalized.
     write(
         specs / "decisions" / "D201.md",
-        decision_text("D201", "Builds on an informal decision", ["D7"]),
+        decision_source("D201", "Builds on informal decision", ["D7"]),
     )
+
+
+def test_ac_cite_005_builds_on_unresolved_flagged_but_d1_to_d14_exempt(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_corpus(repo_root)
 
     findings = citation_checker.check(repo_root)
+    assert isinstance(findings, list)
 
     cite5 = [f for f in findings if field(f, "rule_id") == "R-CITE-005"]
-    files = [field(f, "file") for f in cite5]
 
     assert len(cite5) == 1, cite5
-    assert files[0].replace("\\", "/") == "specs/decisions/D200.md"
-    assert not any(
-        f.replace("\\", "/") == "specs/decisions/D201.md" for f in files
-    )
+    only = cite5[0]
+    assert field(only, "file").replace("\\", "/") == "specs/decisions/D200.md"
+    assert field(only, "severity") in ("fail", "warn")
+    assert isinstance(field(only, "line"), int)
 
-    finding = cite5[0]
-    assert field(finding, "severity") in ("fail", "warn")
-    assert isinstance(field(finding, "line"), int)
-    assert isinstance(field(finding, "message"), str)
+    flagged_files = [field(f, "file").replace("\\", "/") for f in cite5]
+    assert "specs/decisions/D201.md" not in flagged_files

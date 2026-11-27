@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:afeb4d6bf0c3f4d7447f7acffc40b9ce6548d6e2178d1cb28845b67befe0aaaf
+# hotdocs-criterion: sha256:bebf8f01f0b11512cd7caaefe47be6de519409258289decbc97fe7879b5cdeeb
 from pathlib import Path
 
 import citation_checker
@@ -13,89 +13,85 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def make_component(repo_root, slug, body_text):
-    base = repo_root / "specs" / "components" / slug
-    upper = slug.upper()
-    write(
-        base / "component.md",
+def component_md(slug, title, body):
+    return (
         "---\n"
-        + "id: comp-" + slug + "\n"
-        + "title: " + slug.capitalize() + " Component\n"
-        + "status: draft\n"
-        + "owners: [pipeline-team]\n"
-        + "depends_on: []\n"
-        + "sealed: true\n"
-        + "source_path: legacy/" + slug + "/\n"
-        + "---\n"
-        + "\n"
-        + "# " + slug.capitalize() + " Component\n"
-        + "\n"
-        + body_text
-        + "\n",
+        "id: comp-" + slug + "\n"
+        "title: " + title + "\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "---\n"
+        "\n"
+        "# " + title + "\n"
+        "\n"
+        + body
     )
-    write(
-        base / "requirements" / ("R-" + upper + "-001.md"),
-        "# R-" + upper + "-001\n"
-        + "\n"
-        + "**R-" + upper + "-001** — The component MUST return a value.\n",
-    )
-    write(
-        base / "acceptance" / ("AC-" + upper + "-001.md"),
-        "# AC-" + upper + "-001\n"
-        + "\n"
-        + "Covers: R-" + upper + "-001\n"
-        + "Kind: generated-test\n"
-        + "\n"
-        + "```gherkin\n"
-        + "Given the component\n"
-        + "When it runs\n"
-        + "Then it returns a value\n"
-        + "```\n",
+
+
+def decision_md(n):
+    return (
+        "---\n"
+        "id: D" + str(n) + "\n"
+        "title: Decision " + str(n) + "\n"
+        "status: ratified\n"
+        "last_ratified_commit: 0000000\n"
+        "owners: [pipeline-team]\n"
+        "---\n"
+        "\n"
+        "# D" + str(n) + "\n"
+        "\n"
+        "A real decision record.\n"
     )
 
 
 def build_fixture(repo_root):
+    specs = repo_root / "specs"
+    write(specs / "glossary.md", "# Glossary\n\n- **Widget** — a thing.\n")
+    # One real decision record, so specs/decisions/ exists but has no D9999 or D7.
+    write(specs / "decisions" / "D500.md", decision_md(500))
+
     write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n"
-        + "\n"
-        + "- **Widget** — a small thing used in tests.\n",
+        specs / "components" / "alpha" / "component.md",
+        component_md(
+            "alpha",
+            "Alpha",
+            "Alpha stores widgets as described by D9999, which picked the format.\n",
+        ),
     )
-    # First: cites a decision number with no specs/decisions/ file.
-    make_component(
-        repo_root,
-        "alpha",
-        "This behavior follows `D999`, which was decided long ago.\n",
-    )
-    # Second: cites D7 from notes/initial-ideas.md's informal D1-D14 numbering.
-    make_component(
-        repo_root,
-        "beta",
-        "This behavior follows D7 in `notes/initial-ideas.md`, its informal "
-        "numbering never formalized as a decision file.\n",
+    write(
+        specs / "components" / "beta" / "component.md",
+        component_md(
+            "beta",
+            "Beta",
+            "Beta follows D7 of `notes/initial-ideas.md`, whose informal\n"
+            "numbering was never formalized as decision files.\n",
+        ),
     )
 
 
-def test_ac_cite_001_only_unresolved_formal_citation_flagged(tmp_path):
+def test_ac_cite_001_only_unresolved_decision_citation_is_flagged(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
 
     findings = citation_checker.check(repo_root)
+    assert isinstance(findings, list)
 
-    cite_findings = [f for f in findings if field(f, "rule_id") == "R-CITE-001"]
+    cite_001 = [f for f in findings if field(f, "rule_id") == "R-CITE-001"]
 
-    alpha_file = "specs/components/alpha/component.md"
-    beta_file = "specs/components/beta/component.md"
+    alpha_rel = "specs/components/alpha/component.md"
+    beta_rel = "specs/components/beta/component.md"
 
-    files = [str(field(f, "file")).replace("\\", "/") for f in cite_findings]
+    files = [str(field(f, "file")).replace("\\", "/") for f in cite_001]
 
-    assert alpha_file in files, cite_findings
-    assert beta_file not in files, cite_findings
-    assert all(p == alpha_file for p in files), cite_findings
-    assert len(cite_findings) == 1, cite_findings
+    assert len(cite_001) == 1, cite_001
+    assert files == [alpha_rel], cite_001
+    assert beta_rel not in files
 
-    only = cite_findings[0]
-    assert field(only, "severity") in ("fail", "warn")
-    assert isinstance(field(only, "line"), int)
-    assert isinstance(field(only, "message"), str)
+    finding = cite_001[0]
+    assert field(finding, "severity") in ("fail", "warn")
+    assert isinstance(field(finding, "line"), int)
+    assert isinstance(field(finding, "message"), str)

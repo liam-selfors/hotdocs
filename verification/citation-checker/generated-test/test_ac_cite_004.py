@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:33585dfc56f0892c76ab8e96a7f894fe49c972f7344ce00640df5a61b1c67093
+# hotdocs-criterion: sha256:29ec153fa4780c1176bac4e7bb12de117151e056f17aec87898d86a27534a83a
 from pathlib import Path
 
 import citation_checker
@@ -8,16 +8,23 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def decision(repo_root, num, status, supersedes=None):
+def _base_corpus(repo_root):
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a small test thing.\n",
+    )
+
+
+def _decision(repo_root, n, status, supersedes=None):
     lines = [
         "---",
-        "id: D" + str(num),
-        "title: Decision " + str(num),
+        "id: D" + str(n),
+        "title: " + "Decision " + str(n),
         "status: " + status,
         "owners: [pipeline-team]",
     ]
@@ -27,75 +34,81 @@ def decision(repo_root, num, status, supersedes=None):
         lines.append("supersedes: " + supersedes)
     lines.append("---")
     lines.append("")
-    lines.append("# Decision " + str(num))
+    lines.append("# Decision " + str(n))
     lines.append("")
-    lines.append("A decision about topic number " + str(num) + ".")
+    lines.append("A test decision record covering one topic.")
     lines.append("")
-    write(repo_root / "specs" / "decisions" / ("D" + str(num) + ".md"), "\n".join(lines))
-
-
-def base_corpus(repo_root):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a small thing.\n",
+    _write(
+        repo_root / "specs" / "decisions" / ("D" + str(n) + ".md"),
+        "\n".join(lines),
     )
 
 
-def cite_findings(findings, rel_file):
+def _cite4_findings(repo_root):
+    findings = citation_checker.check(repo_root)
     out = []
     for f in findings:
-        if field(f, "rule_id") != "R-CITE-004":
-            continue
-        if str(field(f, "file")).replace("\\", "/") == rel_file:
+        if field(f, "rule_id") == "R-CITE-004":
             out.append(f)
     return out
 
 
-def test_supersedes_nonexistent_decision(tmp_path):
+def _norm(p):
+    return str(p).replace("\\", "/")
+
+
+def _for_file(findings, rel):
+    return [f for f in findings if _norm(field(f, "file")) == rel]
+
+
+def test_supersedes_nonexistent_decision_gets_finding(tmp_path):
     repo_root = tmp_path / "repo"
-    base_corpus(repo_root)
-    decision(repo_root, 20, "ratified", supersedes="D99")
+    repo_root.mkdir()
+    _base_corpus(repo_root)
+    _decision(repo_root, 100, "ratified", supersedes="D999")
 
-    findings = citation_checker.check(repo_root)
+    findings = _cite4_findings(repo_root)
+    hits = _for_file(findings, "specs/decisions/D100.md")
+    assert hits, "expected an R-CITE-004 finding for D100.md, got: " + repr(findings)
+    for f in hits:
+        assert isinstance(field(f, "line"), int)
+        assert field(f, "severity") in ("fail", "warn")
 
-    hits = cite_findings(findings, "specs/decisions/D20.md")
-    assert hits, "expected an R-CITE-004 finding for D20 superseding missing D99; got " + repr(findings)
-    for h in hits:
-        assert field(h, "severity") in ("fail", "warn")
-        assert isinstance(field(h, "line"), int)
 
-
-def test_supersedes_decision_not_deprecated(tmp_path):
+def test_supersedes_still_ratified_decision_gets_finding_naming_it(tmp_path):
     repo_root = tmp_path / "repo"
-    base_corpus(repo_root)
-    decision(repo_root, 22, "ratified")
-    decision(repo_root, 21, "ratified", supersedes="D22")
+    repo_root.mkdir()
+    _base_corpus(repo_root)
+    _decision(repo_root, 101, "ratified")
+    _decision(repo_root, 102, "ratified", supersedes="D101")
 
-    findings = citation_checker.check(repo_root)
-
-    hits = cite_findings(findings, "specs/decisions/D21.md")
-    assert hits, "expected an R-CITE-004 finding on superseding record D21; got " + repr(findings)
-    assert any("D22" in str(field(h, "message")) for h in hits), (
-        "expected the finding to name D22; got " + repr(hits)
+    findings = _cite4_findings(repo_root)
+    hits = _for_file(findings, "specs/decisions/D102.md")
+    assert hits, "expected an R-CITE-004 finding for D102.md, got: " + repr(findings)
+    assert any("D101" in str(field(f, "message")) for f in hits), (
+        "expected a finding message naming D101, got: " + repr(hits)
     )
 
 
-def test_deprecated_not_named_by_any_supersedes(tmp_path):
+def test_deprecated_record_not_superseded_gets_finding(tmp_path):
     repo_root = tmp_path / "repo"
-    base_corpus(repo_root)
-    decision(repo_root, 23, "deprecated")
-    # A consistent pair as a control.
-    decision(repo_root, 31, "deprecated")
-    decision(repo_root, 30, "ratified", supersedes="D31")
+    repo_root.mkdir()
+    _base_corpus(repo_root)
+    _decision(repo_root, 103, "deprecated")
+    _decision(repo_root, 104, "ratified")
 
-    findings = citation_checker.check(repo_root)
+    findings = _cite4_findings(repo_root)
+    hits = _for_file(findings, "specs/decisions/D103.md")
+    assert hits, "expected an R-CITE-004 finding for D103.md, got: " + repr(findings)
 
-    hits = cite_findings(findings, "specs/decisions/D23.md")
-    assert hits, "expected an R-CITE-004 finding for orphan deprecated D23; got " + repr(findings)
 
-    assert not cite_findings(findings, "specs/decisions/D31.md"), (
-        "D31 is superseded by D30 and should not be flagged; got " + repr(findings)
-    )
-    assert not cite_findings(findings, "specs/decisions/D30.md"), (
-        "D30 supersedes a deprecated D31 and should not be flagged; got " + repr(findings)
-    )
+def test_consistent_supersession_pair_has_no_finding(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _base_corpus(repo_root)
+    _decision(repo_root, 110, "deprecated")
+    _decision(repo_root, 111, "ratified", supersedes="D110")
+
+    findings = _cite4_findings(repo_root)
+    assert not _for_file(findings, "specs/decisions/D110.md"), repr(findings)
+    assert not _for_file(findings, "specs/decisions/D111.md"), repr(findings)
