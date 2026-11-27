@@ -1,6 +1,6 @@
-# hotdocs-criterion: sha256:ad7926e826ab1df2ee66616ee6b43de618553f5436c0d52be72e81d038db8a9e
+# hotdocs-criterion: sha256:843d74901ed9058753156281f537ec40ad7d80fa04bd316605ea87aef9633a58
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import test_author
 
@@ -8,36 +8,31 @@ import test_author
 COMPONENT_ID = "comp-widget-maker"
 SLUG = "widget-maker"
 CRITERION_ID = "AC-WIDGET-MAKER-001"
-EXPECTED_FILENAME = "test_ac_widget_maker_001.py"
+EXPECTED_REL = "verification/widget-maker/generated-test/test_ac_widget_maker_001.py"
 
-GOOD_TEST = "import widget_maker\n\n\ndef test_it():\n    assert widget_maker.make() is not None\n"
+GOOD_TEST = "import widget_maker\n\n\ndef test_widget():\n    assert widget_maker.make() is not None\n"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def body(content):
-    first, _, rest = content.partition("\n")
-    return rest if first.startswith("# hotdocs-criterion:") else content
-
-
-def _bundle():
+def make_bundle():
     return {
         "component_id": COMPONENT_ID,
         "criterion_id": CRITERION_ID,
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 - A widget MUST be made.",
+        "criterion_text": "Given a widget When made Then it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 A widget MUST be made.",
         "interface": "make() -> Widget",
         "glossary": "",
         "dependency_interfaces": {},
     }
 
 
-def _write_probe_stand_in(repo_root, log_path):
+def plant_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
-    probe_dir.mkdir(parents=True, exist_ok=True)
+    probe_dir.mkdir(parents=True)
     source = (
         "class _Report:\n"
         "    def __init__(self):\n"
@@ -51,8 +46,7 @@ def _write_probe_stand_in(repo_root, log_path):
         "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None, drivers=None):\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
         "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
         "        fh.write('probe\\n')\n"
         "    return _Report()\n"
@@ -60,76 +54,74 @@ def _write_probe_stand_in(repo_root, log_path):
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def _mock_backend(prompt, model, **params):
+def mock_backend(prompt, model, **params):
     nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
     text = (
         "-----BEGIN FILE " + nonce + "-----\n"
         + GOOD_TEST
         + "\n-----END FILE " + nonce + "-----"
     )
-    return {
-        "text": text,
-        "model": model,
-        "backend": "mock",
-        "model_call_error": None,
-    }
+    return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
 
-def _files_under(path):
-    if not path.exists():
-        return set()
-    return {p.resolve() for p in path.rglob("*") if p.is_file()}
+def all_files(root):
+    if not root.exists():
+        return []
+    return sorted(p for p in root.rglob("*") if p.is_file())
 
 
-def test_written_file_is_only_under_generated_test_dir(tmp_path, monkeypatch):
+def test_written_file_is_under_verification_generated_test_only(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
     log_path = tmp_path / "probe_calls.log"
-    _write_probe_stand_in(repo_root, log_path)
+    plant_probe_stand_in(repo_root, log_path)
+    monkeypatch.chdir(repo_root)
 
-    gen_before = _files_under(repo_root / "gen")
+    gen_before = set(all_files(repo_root / "gen"))
 
     result = test_author.author_test(
-        _bundle(), "mock", 0, repo_root=repo_root, llm_backend=_mock_backend
+        make_bundle(), "mock", 0, repo_root=repo_root, llm_backend=mock_backend
     )
 
+    # Precondition: a successful call.
     assert field(result, "model_call_error") is None
     assert log_path.is_file()
     assert log_path.read_text(encoding="utf-8").count("probe\n") >= 1
 
-    file = field(result, "file")
-    assert file is not None
-    rel_path = field(file, "path")
-    assert isinstance(rel_path, str)
+    file_entry = field(result, "file")
+    assert file_entry is not None
+    rel = field(file_entry, "path")
+    rel_posix = PurePosixPath(str(rel).replace("\\", "/"))
 
-    # The reported path is exactly the generated-test location with the glossary filename.
-    expected_rel = "verification/" + SLUG + "/generated-test/" + EXPECTED_FILENAME
-    assert Path(rel_path).as_posix() == expected_rel
+    # The path is relative to repo_root and is exactly under verification/<slug>/generated-test/.
+    assert not rel_posix.is_absolute()
+    assert str(rel_posix) == EXPECTED_REL
+    parts = rel_posix.parts
+    assert len(parts) == 4
+    assert parts[0] == "verification"
+    assert parts[1] == SLUG
+    assert parts[2] == "generated-test"
+    assert parts[3] == "test_ac_widget_maker_001.py"
 
-    written = (repo_root / rel_path).resolve()
+    # Not under gen/<component>/, nor under criterion-compiler's own output directory.
+    assert parts[0] != "gen"
+    assert "compiled" not in parts
+    assert not str(rel_posix).startswith("gen/")
+    assert not str(rel_posix).startswith("verification/" + SLUG + "/compiled")
+
+    # The file really was written there.
+    written = repo_root / Path(*parts)
     assert written.is_file()
+    assert written.read_text(encoding="utf-8") == field(file_entry, "content")
 
-    generated_dir = (repo_root / "verification" / SLUG / "generated-test").resolve()
-    # Directly under generated-test/, no further nesting.
-    assert written.parent == generated_dir
-    assert written.name == EXPECTED_FILENAME
+    # Nothing else was written under verification/: exactly the one file.
+    verification_files = all_files(repo_root / "verification")
+    assert verification_files == [written]
 
-    # Not under gen/<component>/ (nor anywhere under gen/).
-    gen_root = (repo_root / "gen").resolve()
-    assert gen_root not in written.parents
-    assert not (repo_root / "gen" / SLUG).exists() or not _files_under(repo_root / "gen" / SLUG)
-    assert _files_under(repo_root / "gen") == gen_before
-
-    # Not under criterion-compiler's own output directory.
-    compiled_dir = (repo_root / "verification" / SLUG / "compiled").resolve()
-    assert compiled_dir not in written.parents
-    assert not _files_under(repo_root / "verification" / SLUG / "compiled")
-
-    # The only file written under verification/ is this one.
-    assert _files_under(repo_root / "verification") == {written}
-
-    # The written file holds the returned content, whose body is the model's file.
-    content = field(file, "content")
-    assert written.read_text(encoding="utf-8") == content
-    assert body(content) == GOOD_TEST
+    # Nothing written under gen/<component>/ or criterion-compiler's directory.
+    assert all_files(repo_root / "gen" / SLUG) == []
+    assert not (repo_root / "gen" / SLUG).exists()
+    assert not (repo_root / "verification" / SLUG / "compiled").exists()
+    gen_after = set(all_files(repo_root / "gen"))
+    new_gen_files = [p for p in gen_after - gen_before if p.suffix != ".pyc"]
+    assert new_gen_files == []

@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:298f873cdf2028d9844b2b6fd2b2b6a3fab1edcf0c17311800be009868926097
+# hotdocs-criterion: sha256:23db89ca011b60fc2bf1350689efe6745ed69de7c1be2e0fe5ed7bd162c91c52
 import re
-from pathlib import Path
 
 import test_author
 
@@ -19,7 +18,7 @@ def _write_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
-        "class _Report:\n"
+        "class ProbeReport:\n"
         "    def __init__(self):\n"
         "        self.ok = True\n"
         "        self.findings = []\n"
@@ -35,10 +34,11 @@ def _write_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, **kwargs):\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
+        "          interpreter=None, assets=None, drivers=None):\n"
         "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
         "        fh.write('probe\\n')\n"
-        "    return _Report()\n"
+        "    return ProbeReport()\n"
     )
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
@@ -48,15 +48,15 @@ def _bundle():
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget, When made, Then it exists.",
-        "requirement_text": "R-WIDGET-MAKER-001: The maker MUST make widgets.",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 — The maker MUST make widgets.",
         "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
 
 
-def test_prompt_contains_sealed_fixture_block_realizes_line(tmp_path, monkeypatch):
+def test_prompt_holds_r_author_013_realizes_line(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
@@ -65,15 +65,21 @@ def test_prompt_contains_sealed_fixture_block_realizes_line(tmp_path, monkeypatc
     _write_probe_stand_in(repo_root, log_path)
 
     prompts = []
+    test_file = (
+        "import widget_maker\n"
+        "\n"
+        "\n"
+        "def test_make():\n"
+        "    assert widget_maker.make_widget('a')\n"
+    )
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
         nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
         nonce = nonces[-1] if nonces else "0" * 32
-        body = "import widget_maker\n\n\ndef test_x():\n    widget_maker.make_widget('a')\n"
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + body
+            + test_file
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -87,6 +93,7 @@ def test_prompt_contains_sealed_fixture_block_realizes_line(tmp_path, monkeypatc
         _bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert field(result, "model_call_error") is None
     assert prompts, "the mock model was never called"
-    assert EXPECTED_LINE in prompts[0].splitlines()
+    assert field(result, "model_call_error") is None
+    first_prompt = prompts[0]
+    assert EXPECTED_LINE in first_prompt.splitlines()
