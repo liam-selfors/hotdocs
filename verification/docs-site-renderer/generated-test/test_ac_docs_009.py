@@ -1,19 +1,43 @@
-# hotdocs-criterion: sha256:7ac3cdd0af1ebb9077a743b99403030844ad577725c0950f508921bd0b355741
-"""AC-DOCS-009 (covers R-DOCS-008): layoutGraph lays out the DAG by type column."""
-
+# hotdocs-criterion: sha256:299e712b9606c9cfa6547cbf606a0e44e59e6ac062a3f353fd5114d0a5b69eef
 import copy
 
-import docs_site_renderer  # noqa: F401  (module under test; the asset is its own file)
+import docs_site_renderer  # noqa: F401  (module under test; asset lives beside it)
+
+
+ASSET = "static/app.js"
+
+
+def _nodes():
+    return [
+        {"id": "P-A", "type": "capability"},
+        {"id": "VAR-X", "type": "var"},
+        {"id": "comp-a", "type": "component"},
+        {"id": "P-B", "type": "capability"},
+        {"id": "comp-b", "type": "component"},
+        {"id": "comp-c", "type": "component"},
+        {"id": "zz", "type": "glossary"},
+    ]
+
+
+def _edges():
+    return [
+        {"from": "comp-a", "to": "comp-b", "kind": "depends_on"},
+        {"from": "comp-a", "to": "P-A", "kind": "realizes"},
+        {"from": "comp-b", "to": "VAR-X", "kind": "uses_var"},
+        {"from": "comp-c", "to": "gone", "kind": "depends_on"},
+        {"from": "gone", "to": "comp-c", "kind": "realizes"},
+        {"from": "zz", "to": "P-B", "kind": "mentions"},
+    ]
 
 
 def _node(id_, x, y, label_x, label_y):
     return {"id": id_, "x": x, "y": y, "labelX": label_x, "labelY": label_y}
 
 
-def _edge(index, frm, to, x1, y1, x2, y2, color):
+def _edge(index, from_, to, x1, y1, x2, y2, color):
     return {
         "index": index,
-        "from": frm,
+        "from": from_,
         "to": to,
         "x1": x1,
         "y1": y1,
@@ -23,25 +47,10 @@ def _edge(index, frm, to, x1, y1, x2, y2, color):
     }
 
 
-def test_layout_graph_full_example(asset_runner):
-    run = asset_runner("static/app.js")
-    nodes = [
-        {"id": "P-A", "type": "capability"},
-        {"id": "VAR-X", "type": "var"},
-        {"id": "comp-a", "type": "component"},
-        {"id": "P-B", "type": "capability"},
-        {"id": "comp-b", "type": "component"},
-        {"id": "comp-c", "type": "component"},
-        {"id": "zz", "type": "glossary"},
-    ]
-    edges = [
-        {"from": "comp-a", "to": "comp-b", "kind": "depends_on"},
-        {"from": "comp-a", "to": "P-A", "kind": "realizes"},
-        {"from": "comp-b", "to": "VAR-X", "kind": "uses_var"},
-        {"from": "comp-c", "to": "gone", "kind": "depends_on"},
-        {"from": "gone", "to": "comp-c", "kind": "realizes"},
-        {"from": "zz", "to": "P-B", "kind": "mentions"},
-    ]
+def test_layout_graph_columns_rows_edges_and_height(asset_runner):
+    run = asset_runner(ASSET)
+    nodes = _nodes()
+    edges = _edges()
     nodes_before = copy.deepcopy(nodes)
     edges_before = copy.deepcopy(edges)
 
@@ -67,19 +76,25 @@ def test_layout_graph_full_example(asset_runner):
         ],
     }
     assert result == expected
-    # The test's own inputs are untouched (they are serialized to the runner).
     assert nodes == nodes_before
     assert edges == edges_before
 
 
+def test_layout_graph_same_input_same_output(asset_runner):
+    run = asset_runner(ASSET)
+    first = run("layoutGraph", [_nodes(), _edges()])
+    second = run("layoutGraph", [_nodes(), _edges()])
+    assert first == second
+
+
 def test_layout_graph_empty(asset_runner):
-    run = asset_runner("static/app.js")
+    run = asset_runner(ASSET)
     result = run("layoutGraph", [[], []])
     assert result == {"width": 1100, "height": 100, "nodes": [], "edges": []}
 
 
-def test_layout_graph_single_var_self_loop(asset_runner):
-    run = asset_runner("static/app.js")
+def test_layout_graph_single_var_self_edge(asset_runner):
+    run = asset_runner(ASSET)
     result = run(
         "layoutGraph",
         [
@@ -90,6 +105,17 @@ def test_layout_graph_single_var_self_loop(asset_runner):
     assert result == {
         "width": 1100,
         "height": 100,
-        "nodes": [_node("v", 640, 30, 652, 34)],
-        "edges": [_edge(0, "v", "v", 640, 30, 640, 30, "#2e7d32")],
+        "nodes": [{"id": "v", "x": 640, "y": 30, "labelX": 652, "labelY": 34}],
+        "edges": [
+            {
+                "index": 0,
+                "from": "v",
+                "to": "v",
+                "x1": 640,
+                "y1": 30,
+                "x2": 640,
+                "y2": 30,
+                "color": "#2e7d32",
+            }
+        ],
     }

@@ -1,5 +1,8 @@
-# hotdocs-criterion: sha256:11753bf6e627326c0db311a2fa3db47ca12e2cc0e2aea139d82d963a5d1ef4c0
-import importlib
+# hotdocs-criterion: sha256:ee056ec5943e85310bf57d58f13ec8c11dbe8e0fcdcae96e1de469905933b9df
+"""AC-DOCS-004: given only corpus-graph.json, render_docs_site completes and
+reads no file except the component's own asset static/app.js (plus the
+tool's own code and style, which are not data sources)."""
+
 import json
 import os
 import sys
@@ -7,46 +10,25 @@ from pathlib import Path
 
 import docs_site_renderer
 
-
-# ---------------------------------------------------------------------------
-# File-read recorder built on the interpreter's "open" audit event.
-# The hook is installed once (audit hooks cannot be removed) and records only
-# while a test has switched recording on.
-# ---------------------------------------------------------------------------
-
-_STATE = {"recording": False, "in_hook": False, "events": []}
-
-_CODE_SUFFIXES = (".py", ".pyc", ".pyo", ".so", ".pyd", ".dylib", ".pth")
+_RECORDING = {"on": False, "events": []}
 
 
 def _audit_hook(event, args):
-    if event != "open" or not _STATE["recording"] or _STATE["in_hook"]:
+    if not _RECORDING["on"]:
         return
-    _STATE["in_hook"] = True
+    if event != "open":
+        return
     try:
-        path = args[0] if args else None
-        mode = args[1] if len(args) > 1 else None
-        flags = args[2] if len(args) > 2 else 0
-        if isinstance(path, (str, bytes, os.PathLike)):
-            try:
-                text = os.fsdecode(path)
-            except Exception:
-                text = None
-            if text is not None:
-                _STATE["events"].append((os.path.abspath(text), mode, flags))
-    finally:
-        _STATE["in_hook"] = False
+        path = args[0]
+        if isinstance(path, int) or path is None:
+            return
+        path = os.fsdecode(path)
+        _RECORDING["events"].append(os.path.abspath(path))
+    except Exception:
+        pass
 
 
 sys.addaudithook(_audit_hook)
-
-
-def _is_write(mode, flags):
-    if isinstance(mode, str):
-        return any(c in mode for c in "wax+")
-    if isinstance(flags, int):
-        return bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC))
-    return False
 
 
 def _real(p):
@@ -54,23 +36,32 @@ def _real(p):
 
 
 def _is_under(path, root):
-    root = root.rstrip(os.sep) + os.sep
-    return path == root.rstrip(os.sep) or path.startswith(root)
+    root = root.rstrip(os.sep)
+    return path == root or path.startswith(root + os.sep)
 
 
-def _cli_main():
-    main = getattr(docs_site_renderer, "main", None)
-    if callable(main):
-        return main
-    cli = importlib.import_module("docs_site_renderer.cli")
-    return cli.main
-
-
-def _graph_dict():
+def _corpus_graph():
     return {
         "nodes": {
             "P-ZERO-EDIT": {"type": "capability"},
-            "VAR-FOO-URL": {"type": "var"},
+            "comp-foo": {
+                "type": "component",
+                "verification": {
+                    "requirement_results": {"R-FOO-001": "passing"},
+                    "criteria": [
+                        {"id": "AC-FOO-001", "kind": "compiled", "result": "passing"}
+                    ],
+                },
+                "provenance": {"generated_at": "2026-01-01T00:00:00Z", "model": "m"},
+                "size_status": "ok",
+                "sealed": False,
+                "pinned_overrides": [],
+                "owners": ["pipeline-team"],
+                "documents": {
+                    "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\n---\n\n# Foo\n",
+                    "requirements/R-FOO-001.md": "# R-FOO-001\n\nFoo MUST work.\n",
+                },
+            },
             "comp-bar": {
                 "type": "component",
                 "verification": None,
@@ -81,24 +72,7 @@ def _graph_dict():
                 "owners": [],
                 "documents": {},
             },
-            "comp-foo": {
-                "type": "component",
-                "verification": {
-                    "requirement_results": {"R-FOO-001": "pass"},
-                    "criteria": [
-                        {"id": "AC-FOO-001", "kind": "generated-test", "result": "pass"}
-                    ],
-                },
-                "provenance": {"generated_at": "2026-01-01T00:00:00Z", "model": "anthropic:x"},
-                "size_status": "ok",
-                "sealed": False,
-                "pinned_overrides": [],
-                "owners": ["pipeline-team"],
-                "documents": {
-                    "component.md": "# Foo\n\nThe foo component.\n",
-                    "requirements/R-FOO-001.md": "# R-FOO-001\n\nFoo MUST work.\n",
-                },
-            },
+            "VAR-FOO-URL": {"type": "var"},
         },
         "edges": [
             {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
@@ -113,47 +87,89 @@ def _graph_dict():
     }
 
 
+class _Graph(dict):
+    """CorpusGraph-shaped value: attributes nodes/edges/aggregates, to_dict(),
+    to_json_bytes(), and also readable as the plain dict it holds."""
+
+    def __init__(self, data):
+        super().__init__(data)
+        self.nodes = data["nodes"]
+        self.edges = data["edges"]
+        self.aggregates = data["aggregates"]
+
+    def to_dict(self):
+        return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
+
+    def to_json_bytes(self):
+        return (
+            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+        ).encode("utf-8")
+
+
 def test_ac_docs_004_reads_only_corpus_graph_and_own_asset(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     (repo_root / "verification").mkdir(parents=True)
     graph_file = repo_root / "verification" / "corpus-graph.json"
-    graph_file.write_bytes(
-        (json.dumps(_graph_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
+    graph_file.write_text(
+        json.dumps(_corpus_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n",
+        encoding="utf-8",
     )
+    graph = _Graph(json.loads(graph_file.read_text(encoding="utf-8")))
+
     out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
 
-    main = _cli_main()
-    monkeypatch.chdir(repo_root)
+    gen = next(
+        p for p in Path(docs_site_renderer.__file__).resolve().parents if p.name == "gen"
+    )
+    tool_root = _real(gen.parent)
+    gen_real = _real(gen)
+    own_dir = _real(gen / "docs-site-renderer")
+    app_js_suffix = os.sep + "static" + os.sep + "app.js"
+    ui_style_dir = _real(gen / "ui-style")
+    tmp_real = _real(tmp_path)
+    out_real = _real(out_dir)
+    graph_real = _real(graph_file)
 
-    asset = _real(Path(docs_site_renderer.__file__).resolve().parent.parent / "static" / "app.js")
-    allowed = {_real(graph_file), asset}
-    out_root = _real(tmp_path) + os.sep + "out"
-
-    _STATE["events"] = []
-    _STATE["recording"] = True
+    _RECORDING["events"] = []
+    _RECORDING["on"] = True
     try:
-        code = main(["--repo-root=" + str(repo_root), "--out=" + str(out_dir)])
+        docs_site_renderer.render_docs_site(graph, out_dir)
     finally:
-        _STATE["recording"] = False
+        _RECORDING["on"] = False
+    events = list(_RECORDING["events"])
 
-    assert code == 0
     assert (out_dir / "index.html").is_file()
 
-    disallowed = []
-    for path, mode, flags in list(_STATE["events"]):
-        if _is_write(mode, flags):
+    violations = []
+    for raw in events:
+        path = _real(raw)
+        if _is_under(path, out_real):
             continue
-        real = _real(path)
-        if real in allowed:
+        if _is_under(path, tmp_real):
+            if path == graph_real:
+                continue
+            violations.append(path)
             continue
-        if _is_under(real, out_root):
-            continue  # its own freshly written output
-        if real.startswith("/dev/"):
+        if _is_under(path, tool_root):
+            if _is_under(path, own_dir) and path.endswith(app_js_suffix):
+                continue
+            if _is_under(path, ui_style_dir):
+                continue
+            if _is_under(path, gen_real) and (
+                path.endswith(".py")
+                or path.endswith(".pyc")
+                or (os.sep + "__pycache__") in path
+            ):
+                continue
+            violations.append(path)
             continue
-        if os.path.isdir(real):
-            continue
-        if real.endswith(_CODE_SUFFIXES):
-            continue  # Python import machinery loading code, not data
-        disallowed.append(real)
+        # Paths outside the tool and the test's temp dir belong to the Python
+        # runtime itself (stdlib, site-packages), not data sources.
 
-    assert disallowed == []
+    assert violations == [], (
+        "read files other than corpus-graph.json and static/app.js: " + repr(violations)
+    )

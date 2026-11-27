@@ -1,16 +1,24 @@
-# hotdocs-criterion: sha256:ccdd1bb5c4615aedb1ef02574581cc53d60693f5b7de9f52131d9f90cba9b3a5
+# hotdocs-criterion: sha256:ca8f2561ca04eab4b2cea1ad425f0f7a322c1d380f4059f2be79ff6e21dcbb4c
 import importlib
 import json
 from pathlib import Path
+
+import pytest
 
 import docs_site_renderer
 
 
 def _main():
-    cli = getattr(docs_site_renderer, "cli", None)
-    if cli is None or not hasattr(cli, "main"):
+    main = getattr(docs_site_renderer, "main", None)
+    if callable(main):
+        return main
+    if hasattr(docs_site_renderer, "__path__"):
         cli = importlib.import_module("docs_site_renderer.cli")
-    return cli.main
+        return cli.main
+    cli = getattr(docs_site_renderer, "cli", None)
+    if cli is not None and callable(getattr(cli, "main", None)):
+        return cli.main
+    raise AssertionError("docs_site_renderer exposes no main")
 
 
 def _valid_graph():
@@ -35,10 +43,10 @@ def _valid_graph():
                 "verification": None,
                 "provenance": None,
                 "size_status": "unknown",
-                "sealed": True,
+                "sealed": False,
                 "pinned_overrides": [],
                 "owners": [],
-                "documents": {"component.md": "# Bar\n"},
+                "documents": {},
             },
             "VAR-FOO-URL": {"type": "var"},
         },
@@ -55,11 +63,11 @@ def _valid_graph():
     }
 
 
-def _write_graph(repo_root):
+def _write_graph(repo_root: Path):
     verification = repo_root / "verification"
     verification.mkdir(parents=True, exist_ok=True)
     data = json.dumps(_valid_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
-    (verification / "corpus-graph.json").write_text(data, encoding="utf-8")
+    (verification / "corpus-graph.json").write_bytes(data.encode("utf-8"))
 
 
 def test_valid_graph_renders_site_and_returns_0(tmp_path, monkeypatch):
@@ -95,37 +103,23 @@ def test_missing_graph_returns_1_with_one_error_line(tmp_path, monkeypatch, caps
     err = captured.err
     if err.endswith("\n"):
         err = err[:-1]
-    assert err != ""
-    assert "\n" not in err
-    assert "\r" not in err
-    assert err.startswith("error: ")
-    assert err.endswith(
+    lines = err.split("\n")
+    assert len(lines) == 1, captured.err
+    line = lines[0]
+    assert line.startswith("error: ")
+    assert line.endswith(
         "verification/corpus-graph.json is missing; run hotdocs corpus-graph build first"
     )
-    assert "  " not in err
+    assert "  " not in line
 
 
-def test_unknown_flag_returns_2(tmp_path, monkeypatch):
-    work = tmp_path / "cwd"
-    work.mkdir()
-    monkeypatch.chdir(work)
-
-    assert _main()(["--bogus"]) == 2
-
-
-def test_flag_without_value_returns_2(tmp_path, monkeypatch):
-    work = tmp_path / "cwd"
-    work.mkdir()
-    monkeypatch.chdir(work)
-
-    assert _main()(["--out"]) == 2
-
-
-def test_usage_errors_return_2_with_valid_repo_root(tmp_path, monkeypatch):
+@pytest.mark.parametrize("argv", [["--bogus"], ["--out"]])
+def test_usage_errors_return_2(tmp_path, monkeypatch, argv):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _write_graph(repo_root)
     monkeypatch.chdir(repo_root)
 
-    assert _main()(["--bogus"]) == 2
-    assert _main()(["--out"]) == 2
+    code = _main()(list(argv))
+
+    assert code == 2

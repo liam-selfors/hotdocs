@@ -1,4 +1,4 @@
-"""Command line entry point: hotdocs docs-site build."""
+"""Command line for `hotdocs docs-site build`."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from . import render_docs_site
 
 USAGE = "usage: hotdocs docs-site build [--repo-root=<dir>] [--out=<dir>]"
 
+_FLAGS = {"--repo-root": "repo_root", "--out": "out"}
+
 
 def _usage_error(cause: str) -> int:
     print(f"usage error: {cause}", file=sys.stderr)
@@ -18,35 +20,30 @@ def _usage_error(cause: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if argv is None:
-        argv = sys.argv[1:]
-    tokens = list(argv)
-    values: dict[str, str | None] = {"--repo-root": ".", "--out": None}
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
+    args = sys.argv[1:] if argv is None else list(argv)
+    values = {"repo_root": ".", "out": "dist/docs-site/"}
+    index = 0
+    while index < len(args):
+        token = args[index]
         name, sep, value = token.partition("=")
-        if name not in values:
+        if name not in _FLAGS:
             return _usage_error(f"unknown argument {token}")
         if not sep:
-            if i + 1 >= len(tokens):
+            if index + 1 == len(args):
                 return _usage_error(f"{name} needs a value")
-            i += 1
-            value = tokens[i]
-        values[name] = value
-        i += 1
+            index += 1
+            value = args[index]
+        values[_FLAGS[name]] = value
+        index += 1
 
-    repo_root = Path(values["--repo-root"])
-    out_dir = Path(values["--out"]) if values["--out"] is not None else repo_root / "dist" / "docs-site"
-    path = repo_root / "verification" / "corpus-graph.json"
+    path = Path(values["repo_root"]) / "verification" / "corpus-graph.json"
     if not path.is_file():
         print(f"error: {path} is missing; run hotdocs corpus-graph build first", file=sys.stderr)
         return 1
     try:
         graph = json.loads(path.read_text(encoding="utf-8"))
-    except ValueError as exc:
-        print(f"error: {path} is not valid JSON: {exc}", file=sys.stderr)
+    except ValueError:
+        print(f"error: {path} is not valid JSON", file=sys.stderr)
         return 1
-    render_docs_site(graph, out_dir)
-    print(out_dir)
+    render_docs_site(graph, Path(values["out"]))
     return 0

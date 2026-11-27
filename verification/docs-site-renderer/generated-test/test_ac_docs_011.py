@@ -1,22 +1,22 @@
-# hotdocs-criterion: sha256:168e92cb861227108467d341a28af4d613934a35693ef7bb6c52eec7a81518cb
-"""AC-DOCS-011 (covers R-DOCS-001): index.html inlines static/app.js exactly
-once as <script type="module"> + asset text + "\\ninit(document);\\n", holds
-#search, svg#dag and one li.node per node sorted by id, and no other page
-carries a script."""
+# hotdocs-criterion: sha256:6de7d9de68cb40dd8ced1020e0ba862703097bfae2d9d7d42919c0c9459d9b55
+"""AC-DOCS-011: index.html inlines static/app.js exactly once as the page's
+only <script type="module"> element, followed by init(document); it holds the
+search field, the empty DAG svg and one li.node per node sorted by id; no
+other page carries a script."""
 
-from dataclasses import dataclass, field as dc_field
+import dataclasses
+import json
 from html.parser import HTMLParser
 from pathlib import Path
-import json
 
 import docs_site_renderer
 
 
-@dataclass
+@dataclasses.dataclass
 class CorpusGraph:
-    nodes: dict = dc_field(default_factory=dict)
-    edges: list = dc_field(default_factory=list)
-    aggregates: dict = dc_field(default_factory=dict)
+    nodes: dict
+    edges: list
+    aggregates: dict
 
     def to_dict(self):
         return {
@@ -32,29 +32,17 @@ class CorpusGraph:
         ).encode("utf-8")
 
 
-class _Collector(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.elements = []
-
-    def handle_starttag(self, tag, attrs):
-        self.elements.append((tag, dict(attrs)))
-
-    def handle_startendtag(self, tag, attrs):
-        self.elements.append((tag, dict(attrs)))
-
-
 def _graph():
     nodes = {
         "comp-foo": {
             "type": "component",
             "verification": None,
             "provenance": None,
-            "size_status": "ok",
+            "size_status": "unknown",
             "sealed": False,
             "pinned_overrides": [],
             "owners": [],
-            "documents": {},
+            "documents": {"component.md": "# Foo\n\nThe foo component.\n"},
         },
         "P-FOO": {"type": "capability"},
     }
@@ -67,31 +55,42 @@ def _graph():
     return CorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
-def test_ac_docs_011_index_inlines_app_js_once(tmp_path):
-    out_dir = tmp_path / "out"
-    out_dir.mkdir()
+class _Collector(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.elements = []
 
+    def handle_starttag(self, tag, attrs):
+        self.elements.append((tag, dict(attrs)))
+
+    def handle_startendtag(self, tag, attrs):
+        self.elements.append((tag, dict(attrs)))
+
+
+def _asset_text():
+    init_file = Path(docs_site_renderer.__file__).resolve()
+    asset = init_file.parent.parent / "static" / "app.js"
+    return asset.read_text(encoding="utf-8")
+
+
+def test_ac_docs_011(tmp_path):
+    out_dir = tmp_path / "site"
     docs_site_renderer.render_docs_site(_graph(), out_dir)
 
     index = out_dir / "index.html"
     assert index.is_file()
     html = index.read_text(encoding="utf-8")
 
-    # Exactly one "<script", and it is <script type="module">.
+    # Exactly one script element, and it is <script type="module">.
     assert html.count("<script") == 1
-    open_tag = '<script type="module">'
-    start = html.find("<script")
-    assert html[start:start + len(open_tag)] == open_tag
+    opening = '<script type="module">'
+    assert html.count(opening) == 1
+    start = html.index(opening) + len(opening)
+    end = html.index("</script>", start)
+    script_text = html[start:end]
 
-    # Element text is exactly the asset's text + "\ninit(document);\n".
-    asset_path = (
-        Path(docs_site_renderer.__file__).parent.parent / "static" / "app.js"
-    )
-    asset_text = asset_path.read_text(encoding="utf-8")
-    body_start = start + len(open_tag)
-    body_end = html.find("</script>", body_start)
-    assert body_end != -1
-    assert html[body_start:body_end] == asset_text + "\ninit(document);\n"
+    asset_text = _asset_text()
+    assert script_text == asset_text + "\ninit(document);\n"
 
     # Structural elements.
     collector = _Collector()
@@ -111,9 +110,9 @@ def test_ac_docs_011_index_inlines_app_js_once(tmp_path):
     ]
     assert node_ids == ["P-FOO", "comp-foo"]
 
-    # No other .html file under out_dir carries a script.
-    index_resolved = index.resolve()
-    for page in out_dir.rglob("*.html"):
-        if page.resolve() == index_resolved:
-            continue
-        assert "<script" not in page.read_text(encoding="utf-8"), str(page)
+    # No other page carries a script.
+    others = [p for p in out_dir.rglob("*.html") if p.resolve() != index.resolve()]
+    assert others, "expected detail and dashboard pages besides index.html"
+    for page in others:
+        text = page.read_text(encoding="utf-8")
+        assert "<script" not in text, str(page)

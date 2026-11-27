@@ -1,157 +1,124 @@
-# hotdocs-criterion: sha256:995e56aee22978226260b99e33a9cd01729ab42bbf4e00003cc2423df00defc7
+# hotdocs-criterion: sha256:87aeb15e62726e914e0ee6171e2485e51d1feef4b038b742566c42d0d26796bd
+"""AC-DOCS-008: document text is HTML-escaped in a detail view, and a
+component node with null verification/provenance and empty owners renders
+without error."""
+
+import dataclasses
 import json
-from dataclasses import dataclass, field as dc_field
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlsplit, unquote
+from urllib.parse import unquote, urlsplit
 
 import docs_site_renderer
 
 
+XSS_TEXT = "<script>alert(1)</script> & more"
 RAW_SCRIPT = "<script>alert(1)</script>"
-DOC_TEXT = RAW_SCRIPT + " & more"
-
-VOID_TAGS = (
-    "area", "base", "br", "col", "embed", "hr", "img", "input",
-    "link", "meta", "param", "source", "track", "wbr",
-)
 
 
-@dataclass
-class CorpusGraph:
-    nodes: dict = dc_field(default_factory=dict)
-    edges: list = dc_field(default_factory=list)
-    aggregates: dict = dc_field(default_factory=dict)
+@dataclasses.dataclass
+class FakeCorpusGraph:
+    nodes: dict
+    edges: list
+    aggregates: dict
 
     def to_dict(self):
-        return {
-            "nodes": self.nodes,
-            "edges": self.edges,
-            "aggregates": self.aggregates,
-        }
+        return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
 
     def to_json_bytes(self):
         return (
-            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True)
-            + "\n"
+            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
         ).encode("utf-8")
 
 
-class NodeLinkParser(HTMLParser):
-    """Collects, for each `.node` item with `data-id`, the href of the `a` inside it."""
+class _NodeLinkParser(HTMLParser):
+    """Collects, for each `#nodes .node` list item, its data-id and the
+    href of the first `a` inside it."""
 
     def __init__(self):
         super().__init__()
         self.links = {}
-        self._stack = []  # entries: (tag, node_id or None)
-        self._current_node = None
+        self._stack = []  # list of (tag, node_id or None)
+        self._current = None
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         classes = (attrs.get("class") or "").split()
-        node_id = None
-        if "node" in classes and attrs.get("data-id") is not None:
-            node_id = attrs.get("data-id")
-            self._current_node = node_id
-        if tag == "a" and self._current_node is not None:
+        if tag == "li" and "node" in classes and attrs.get("data-id") is not None:
+            self._current = attrs.get("data-id")
+            self._stack.append((tag, self._current))
+            return
+        if tag == "a" and self._current is not None and self._current not in self.links:
             href = attrs.get("href")
-            if href is not None and self._current_node not in self.links:
-                self.links[self._current_node] = href
-        if tag not in VOID_TAGS:
-            self._stack.append((tag, node_id))
-
-    def handle_startendtag(self, tag, attrs):
-        attrs_dict = dict(attrs)
-        if tag == "a" and self._current_node is not None:
-            href = attrs_dict.get("href")
-            if href is not None and self._current_node not in self.links:
-                self.links[self._current_node] = href
+            if href is not None:
+                self.links[self._current] = href
 
     def handle_endtag(self, tag):
-        if tag in VOID_TAGS:
-            return
-        if not any(t == tag for t, _ in self._stack):
-            return
-        while self._stack:
-            t, _nid = self._stack.pop()
-            if t == tag:
-                break
-        self._current_node = None
-        for _t, nid in reversed(self._stack):
-            if nid is not None:
-                self._current_node = nid
-                break
+        if tag == "li" and self._stack:
+            self._stack.pop()
+            self._current = self._stack[-1][1] if self._stack else None
 
 
-def _component_node(documents, verification, provenance, owners):
-    return {
-        "type": "component",
-        "verification": verification,
-        "provenance": provenance,
-        "size_status": "unknown",
-        "sealed": False,
-        "pinned_overrides": [],
-        "owners": owners,
-        "documents": documents,
-    }
-
-
-def _detail_page(out_dir, index_text, node_id):
-    parser = NodeLinkParser()
-    parser.feed(index_text)
-    parser.close()
-    assert node_id in parser.links, "no detail link for " + node_id
+def _detail_page(out_dir, node_id):
+    index = out_dir / "index.html"
+    assert index.is_file(), "index.html was not written"
+    parser = _NodeLinkParser()
+    parser.feed(index.read_text(encoding="utf-8"))
+    assert node_id in parser.links, "no detail link found for " + repr(node_id)
     href = parser.links[node_id]
-    parts = urlsplit(href)
-    path_part = unquote(parts.path)
+    path_part = unquote(urlsplit(href).path)
     if path_part == "":
-        target = out_dir / "index.html"
+        target = index
     else:
-        target = (out_dir / path_part).resolve()
-    if target.is_dir():
-        target = target / "index.html"
-    assert target.is_file(), "detail page missing: " + str(target)
+        target = (index.parent / path_part).resolve()
+    assert target.is_file(), "detail page " + repr(str(target)) + " does not exist"
     return target.read_text(encoding="utf-8")
 
 
-def test_ac_docs_008(tmp_path):
-    graph = CorpusGraph(
-        nodes={
-            "comp-alpha": _component_node(
-                documents={"component.md": DOC_TEXT},
-                verification=None,
-                provenance=None,
-                owners=["pipeline-team"],
-            ),
-            "comp-beta": _component_node(
-                documents={"component.md": "Beta component text."},
-                verification=None,
-                provenance=None,
-                owners=[],
-            ),
+def _graph():
+    nodes = {
+        "comp-xss": {
+            "type": "component",
+            "verification": None,
+            "provenance": None,
+            "size_status": "ok",
+            "sealed": False,
+            "pinned_overrides": [],
+            "owners": ["pipeline-team"],
+            "documents": {
+                "component.md": XSS_TEXT,
+                "requirements/R-XSS-001.md": "# R-XSS-001\n\n" + XSS_TEXT + "\n",
+            },
         },
-        edges=[],
-        aggregates={
-            "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
-            "orphan_var_rate": 0.0,
+        "comp-bare": {
+            "type": "component",
+            "verification": None,
+            "provenance": None,
+            "size_status": "unknown",
+            "sealed": False,
+            "pinned_overrides": [],
+            "owners": [],
+            "documents": {"component.md": "# Bare\n\nNothing else.\n"},
         },
-    )
+    }
+    edges = []
+    aggregates = {
+        "orphan_capability_rate": 0.0,
+        "orphan_component_rate": 1.0,
+        "orphan_var_rate": 0.0,
+    }
+    return FakeCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
+
+def test_ac_docs_008_escapes_document_text_and_renders_null_fields(tmp_path):
     out_dir = tmp_path / "site"
-    out_dir.mkdir()
+    docs_site_renderer.render_docs_site(_graph(), out_dir)
 
-    # Must render without raising, including for the null/empty second node.
-    docs_site_renderer.render_docs_site(graph, out_dir)
+    first = _detail_page(out_dir, "comp-xss")
+    assert "&lt;script&gt;" in first
+    assert "&amp; more" in first
+    assert RAW_SCRIPT not in first
 
-    index = out_dir / "index.html"
-    assert index.is_file()
-    index_text = index.read_text(encoding="utf-8")
-
-    alpha_text = _detail_page(out_dir, index_text, "comp-alpha")
-    assert "&lt;script&gt;" in alpha_text
-    assert "&amp; more" in alpha_text
-    assert RAW_SCRIPT not in alpha_text
-
-    beta_text = _detail_page(out_dir, index_text, "comp-beta")
-    assert beta_text.strip() != ""
+    second = _detail_page(out_dir, "comp-bare")
+    assert second.strip() != ""
+    assert RAW_SCRIPT not in second
