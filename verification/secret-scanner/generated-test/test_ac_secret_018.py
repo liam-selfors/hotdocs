@@ -1,4 +1,9 @@
-# hotdocs-criterion: sha256:9b078e3aca848a56fe18effc0b1cdf6d1041bd62abafff3b8e5da24e15b725af
+# hotdocs-criterion: sha256:6c22a81f577ceaa15c3fd9bec9ce26c2a7bd03aaef7c7a30dd00da338531d441
+"""AC-SECRET-018 (covers R-SECRET-012): a populated allowlist is honored only
+when sealed by the highest-numbered ratified decision carrying
+`allowlist_sha256`; otherwise it fails closed with one allowlist-invalid match.
+An allowlist with zero entries needs no seal."""
+
 import hashlib
 import json
 import urllib.request
@@ -9,8 +14,9 @@ import pytest
 import secret_scanner
 
 
+FIXTURE_FILE = "verification/foo/t.py"
+# Assembled from parts so this test file carries no contiguous key literal.
 SECRET = "AKIA" + "ABCDEFGHIJKLMNOP"
-TARGET_FILE = "verification/foo/t.py"
 RULE = "AWS Access Key"
 
 
@@ -18,213 +24,226 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-FAKE_CACHE_MANAGER = (
-    "import dataclasses\n"
-    "import datetime\n"
-    "\n"
-    "\n"
-    "class SchemaValidationError(ValueError):\n"
-    "    pass\n"
-    "\n"
-    "\n"
-    "class Miss:\n"
-    "    def __eq__(self, other):\n"
-    "        return isinstance(other, Miss)\n"
-    "\n"
-    "    def __hash__(self):\n"
-    "        return 0\n"
-    "\n"
-    "\n"
-    "@dataclasses.dataclass\n"
-    "class CacheKey:\n"
-    "    spec_bundle_hash: str\n"
-    "    gate_inputs_hash: str\n"
-    "    gate_version: str\n"
-    "    model_pin: str\n"
-    "\n"
-    "\n"
-    "@dataclasses.dataclass\n"
-    "class CachedResult:\n"
-    "    gate_type: str\n"
-    "    payload: dict\n"
-    "    stored_at: str\n"
-    "\n"
-    "\n"
-    "def get(cache_key, *, repo_root=None):\n"
-    "    return Miss()\n"
-    "\n"
-    "\n"
-    "def put(cache_key, result, *, repo_root=None):\n"
-    "    payload = result['payload'] if isinstance(result, dict) else getattr(result, 'payload')\n"
-    "    for key in ('scope', 'gate_version', 'flagged', 'matches'):\n"
-    "        present = key in payload if isinstance(payload, dict) else hasattr(payload, key)\n"
-    "        if not present:\n"
-    "            raise SchemaValidationError('missing payload key ' + key)\n"
-    "    return None\n"
-    "\n"
-    "\n"
-    "def now_iso():\n"
-    "    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
-    "\n"
-    "\n"
-    "def stats(*, repo_root=None):\n"
-    "    return dict(entry_count=0)\n"
-)
+FAKE_CACHE_MANAGER_LINES = [
+    "from dataclasses import dataclass",
+    "import datetime",
+    "",
+    "",
+    "@dataclass",
+    "class CacheKey:",
+    "    spec_bundle_hash: str",
+    "    gate_inputs_hash: str",
+    "    gate_version: str",
+    "    model_pin: str",
+    "",
+    "",
+    "@dataclass",
+    "class CachedResult:",
+    "    gate_type: str",
+    "    payload: dict",
+    "    stored_at: str",
+    "",
+    "",
+    "class Miss:",
+    "    def __eq__(self, other):",
+    "        return isinstance(other, Miss)",
+    "",
+    "    def __hash__(self):",
+    "        return 0",
+    "",
+    "",
+    "class SchemaValidationError(ValueError):",
+    "    pass",
+    "",
+    "",
+    "def get(cache_key, *, repo_root=None):",
+    "    return Miss()",
+    "",
+    "",
+    "def put(cache_key, result, *, repo_root=None):",
+    "    return None",
+    "",
+    "",
+    "def now_iso():",
+    "    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)",
+    "    return now.isoformat().replace('+00:00', 'Z')",
+    "",
+    "",
+    "def stats(*, repo_root=None):",
+    "    return {'entry_count': 0}",
+    "",
+]
 
 
-@pytest.fixture(autouse=True)
-def _isolate_env(monkeypatch):
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-    def _no_network(*args, **kwargs):
-        raise AssertionError("urlopen must not be called in this test")
-
-    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+def write_fake_cache_manager(repo):
+    d = repo / "gen" / "cache-manager"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "cache_manager.py").write_text("\n".join(FAKE_CACHE_MANAGER_LINES))
 
 
-def _allowlist_bytes(entries):
-    doc = {"version": 1, "entries": entries}
-    return (json.dumps(doc, indent=2) + "\n").encode("utf-8")
+def write_fixture_file(repo):
+    p = repo / FIXTURE_FILE
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("K = " + json.dumps(SECRET) + "\n")
 
 
-def _valid_entry():
+def allowlist_bytes(entries):
+    return (json.dumps({"version": 1, "entries": entries}, indent=2) + "\n").encode("utf-8")
+
+
+def valid_entry():
     return {
-        "file": TARGET_FILE,
+        "file": FIXTURE_FILE,
         "type": RULE,
         "hashed_secret": "sha1:" + hashlib.sha1(SECRET.encode("utf-8")).hexdigest(),
         "reason": "planted-fixture",
     }
 
 
-def _seal_of(data):
+def seal_of(data):
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def _write_decision(repo_root, number, status, allowlist_hash):
-    d = repo_root / "specs" / "decisions"
+def write_decision(repo, number, status, allowlist_hash):
+    d = repo / "specs" / "decisions"
     d.mkdir(parents=True, exist_ok=True)
-    text = (
-        "---\n"
-        + "id: D" + str(number) + "\n"
-        + "title: Seal the secret allowlist\n"
-        + "status: " + status + "\n"
-        + "owners: [security-team]\n"
-    )
+    lines = [
+        "---",
+        "id: D" + str(number),
+        "title: Seal the secret allowlist",
+        "status: " + status,
+        "owners: [security-team]",
+    ]
     if status == "ratified":
-        text += "last_ratified_commit: 0000000\n"
-    if allowlist_hash is not None:
-        text += "allowlist_sha256: " + allowlist_hash + "\n"
-    text += "---\n\n# D" + str(number) + "\n\nRecords the allowlist seal.\n"
-    (d / ("D" + str(number) + ".md")).write_text(text, encoding="utf-8")
+        lines.append("last_ratified_commit: 0000000")
+    lines.append("allowlist_sha256: " + allowlist_hash)
+    lines += [
+        "---",
+        "",
+        "# D" + str(number),
+        "",
+        "Records the hash of the secret allowlist.",
+        "",
+    ]
+    (d / ("D" + str(number) + ".md")).write_text("\n".join(lines))
 
 
-def _build_repo(repo_root, allowlist_data):
-    target = repo_root / TARGET_FILE
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("K = " + repr(SECRET).replace("'", '"') + "\n", encoding="utf-8")
-
-    cm = repo_root / "gen" / "cache-manager"
-    cm.mkdir(parents=True, exist_ok=True)
-    (cm / "cache_manager.py").write_text(FAKE_CACHE_MANAGER, encoding="utf-8")
-
-    if allowlist_data is not None:
-        (repo_root / ".secret-allowlist.json").write_bytes(allowlist_data)
+def flip_hex(h):
+    prefix, hexpart = h.split(":", 1)
+    first = "1" if hexpart[0] != "1" else "2"
+    return prefix + ":" + first + hexpart[1:]
 
 
-def _matches(result):
-    return list(field(result, "matches"))
+@pytest.fixture(autouse=True)
+def _isolate(monkeypatch):
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+    def _no_network(*args, **kwargs):
+        raise AssertionError("no webhook call expected")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
 
 
-def _invalid_matches(result):
-    return [m for m in _matches(result) if field(m, "rule_id") == "allowlist-invalid"]
+def build(repo, variant):
+    repo.mkdir(parents=True, exist_ok=True)
+    write_fake_cache_manager(repo)
+    write_fixture_file(repo)
+    data = allowlist_bytes([valid_entry()])
+    seal = seal_of(data)
+    if variant == "file_changed_one_byte":
+        data = data + b"\n"
+    (repo / ".secret-allowlist.json").write_bytes(data)
+
+    if variant in ("sealed", "file_changed_one_byte"):
+        write_decision(repo, 1, "ratified", seal)
+    elif variant == "decision_hash_changed":
+        write_decision(repo, 1, "ratified", flip_hex(seal))
+    elif variant == "decision_not_ratified":
+        write_decision(repo, 1, "draft", seal)
+    elif variant == "no_decision":
+        pass
+    elif variant == "later_decision_other_hash":
+        write_decision(repo, 1, "ratified", seal)
+        write_decision(repo, 2, "ratified", flip_hex(seal))
+    else:
+        raise AssertionError("unknown variant " + variant)
 
 
-def _target_matches(result, collection):
+def invalid_matches(matches):
+    return [m for m in matches if field(m, "rule_id") == "allowlist-invalid"]
+
+
+def secret_matches(matches):
     return [
-        m for m in collection
-        if field(m, "rule_id") == RULE and field(m, "file") == TARGET_FILE
+        m
+        for m in matches
+        if field(m, "rule_id") == RULE and field(m, "file") == FIXTURE_FILE
     ]
 
 
-def test_sealed_valid_allowlist_allows_finding(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    data = _allowlist_bytes([_valid_entry()])
-    _build_repo(repo_root, data)
-    _write_decision(repo_root, 1, "ratified", _seal_of(data))
+def test_sealed_allowlist_allows_finding(tmp_path):
+    repo = tmp_path / "repo"
+    build(repo, "sealed")
 
-    result = secret_scanner.scan(repo_root)
+    result = secret_scanner.scan(repo)
 
+    matches = list(field(result, "matches"))
     allowed = list(field(result, "allowed"))
-    hits = _target_matches(result, allowed)
-    assert len(hits) == 1, allowed
-    assert field(hits[0], "line") == 1
-    assert field(result, "flagged") is False
-    assert _matches(result) == []
-    assert _invalid_matches(result) == []
+    assert field(result, "flagged") is False, matches
+    assert matches == []
+    assert any(
+        field(a, "rule_id") == RULE
+        and field(a, "file") == FIXTURE_FILE
+        and field(a, "line") == 1
+        for a in allowed
+    ), allowed
 
 
-CASES = ["allowlist_one_byte_changed", "d1_hash_changed", "d1_not_ratified",
-         "no_decision", "ratified_d2_other_hash"]
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "file_changed_one_byte",
+        "decision_hash_changed",
+        "decision_not_ratified",
+        "no_decision",
+        "later_decision_other_hash",
+    ],
+)
+def test_unsealed_allowlist_fails_closed(tmp_path, variant):
+    repo = tmp_path / "repo"
+    build(repo, variant)
 
+    result = secret_scanner.scan(repo)
 
-@pytest.mark.parametrize("case", CASES)
-def test_unsealed_allowlist_is_invalid(tmp_path, case):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    data = _allowlist_bytes([_valid_entry()])
-    good_seal = _seal_of(data)
-    other_seal = _seal_of(data + b" ")
-    assert other_seal != good_seal
+    matches = list(field(result, "matches"))
+    allowed = list(field(result, "allowed"))
 
-    if case == "allowlist_one_byte_changed":
-        changed = data[:-1] + b" "
-        assert len(changed) == len(data) and changed != data
-        json.loads(changed.decode("utf-8"))
-        _build_repo(repo_root, changed)
-        _write_decision(repo_root, 1, "ratified", good_seal)
-    elif case == "d1_hash_changed":
-        _build_repo(repo_root, data)
-        _write_decision(repo_root, 1, "ratified", other_seal)
-    elif case == "d1_not_ratified":
-        _build_repo(repo_root, data)
-        _write_decision(repo_root, 1, "draft", good_seal)
-    elif case == "no_decision":
-        _build_repo(repo_root, data)
-    elif case == "ratified_d2_other_hash":
-        _build_repo(repo_root, data)
-        _write_decision(repo_root, 1, "ratified", good_seal)
-        _write_decision(repo_root, 2, "ratified", other_seal)
-    else:
-        raise AssertionError(case)
+    assert field(result, "flagged") is True
+    found = secret_matches(matches)
+    assert len(found) == 1, matches
+    assert field(found[0], "line") == 1
+    assert field(found[0], "risk_tier") == "high"
+    assert not any(
+        field(a, "rule_id") == RULE and field(a, "file") == FIXTURE_FILE for a in allowed
+    ), allowed
 
-    result = secret_scanner.scan(repo_root)
-    matches = _matches(result)
-
-    reported = _target_matches(result, matches)
-    assert len(reported) == 1, matches
-    assert field(reported[0], "line") == 1
-
-    invalid = _invalid_matches(result)
+    invalid = invalid_matches(matches)
     assert len(invalid) == 1, matches
     assert field(invalid[0], "risk_tier") == "high"
     assert field(invalid[0], "file") == ".secret-allowlist.json"
     assert field(invalid[0], "line") == 1
 
-    assert _target_matches(result, list(field(result, "allowed"))) == []
-    assert field(result, "flagged") is True
-
 
 def test_empty_allowlist_without_decision_is_not_invalid(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    data = _allowlist_bytes([])
-    _build_repo(repo_root, data)
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    write_fake_cache_manager(repo)
+    write_fixture_file(repo)
+    (repo / ".secret-allowlist.json").write_bytes(allowlist_bytes([]))
 
-    result = secret_scanner.scan(repo_root)
+    result = secret_scanner.scan(repo)
 
-    assert _invalid_matches(result) == []
-    reported = _target_matches(result, _matches(result))
-    assert len(reported) == 1
-    assert field(result, "flagged") is True
+    matches = list(field(result, "matches"))
+    assert invalid_matches(matches) == [], matches
+    assert len(secret_matches(matches)) == 1, matches

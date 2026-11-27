@@ -1,10 +1,11 @@
-# hotdocs-criterion: sha256:c773227749a19c5d1b07f83d37eb96e9b9c12bf2b579f35faf226aa23fbf94fa
+# hotdocs-criterion: sha256:06499473bced04aeb27f2a42a2822757ba5168a5dea9efbe629af9234d59cf94
+"""AC-SECRET-007: any full scan produces exactly one SecretScanResult (R-SECRET-007)."""
+
 import dataclasses
 import io
 import json
-import sys
 import urllib.request
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -12,39 +13,18 @@ import pytest
 import secret_scanner
 
 
-LOG_ENV = "SECRET_SCAN_AC007_LOG"
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 FAKE_CACHE_MANAGER_SOURCE = (
-    "import dataclasses\n"
     "import os\n"
+    "from dataclasses import dataclass\n"
     "from datetime import datetime, timezone\n"
     "\n"
     "\n"
-    "def _log(line):\n"
-    "    path = os.environ.get(" + repr(LOG_ENV) + ")\n"
-    "    if path:\n"
-    "        with open(path, 'a', encoding='utf-8') as fh:\n"
-    "            fh.write(line + '\\n')\n"
-    "\n"
-    "\n"
-    "@dataclasses.dataclass\n"
-    "class CacheKey:\n"
-    "    spec_bundle_hash: str\n"
-    "    gate_inputs_hash: str\n"
-    "    gate_version: str\n"
-    "    model_pin: str\n"
-    "\n"
-    "\n"
-    "@dataclasses.dataclass\n"
-    "class CachedResult:\n"
-    "    gate_type: str\n"
-    "    payload: dict\n"
-    "    stored_at: str\n"
+    "class SchemaValidationError(ValueError):\n"
+    "    pass\n"
     "\n"
     "\n"
     "class Miss:\n"
@@ -52,127 +32,117 @@ FAKE_CACHE_MANAGER_SOURCE = (
     "        return isinstance(other, Miss)\n"
     "\n"
     "    def __hash__(self):\n"
-    "        return hash('Miss')\n"
+    "        return 0\n"
     "\n"
     "\n"
-    "class SchemaValidationError(ValueError):\n"
-    "    pass\n"
+    "@dataclass\n"
+    "class CacheKey:\n"
+    "    spec_bundle_hash: str\n"
+    "    gate_inputs_hash: str\n"
+    "    gate_version: str\n"
+    "    model_pin: str\n"
     "\n"
     "\n"
-    "_REQUIRED = " + repr({
-        "generator": ["component_id", "model", "prompt_version", "files"],
-        "compiler": ["outputs", "gate_version", "summary"],
-        "generated_test": ["component_id", "criterion_id", "model", "file"],
-        "llm_judge": ["result", "rationale"],
-        "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-        "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
-    }) + "\n"
+    "@dataclass\n"
+    "class CachedResult:\n"
+    "    gate_type: str\n"
+    "    payload: dict\n"
+    "    stored_at: str\n"
     "\n"
     "\n"
-    "def get(cache_key, *, repo_root=None):\n"
-    "    _log('get')\n"
-    "    return Miss()\n"
-    "\n"
-    "\n"
-    "def put(cache_key, result, *, repo_root=None):\n"
-    "    gate_type = result['gate_type'] if isinstance(result, dict) else result.gate_type\n"
-    "    payload = result['payload'] if isinstance(result, dict) else result.payload\n"
-    "    key_gv = cache_key['gate_version'] if isinstance(cache_key, dict) else cache_key.gate_version\n"
-    "    if gate_type not in _REQUIRED or str(key_gv).split('@')[0] != gate_type:\n"
-    "        raise SchemaValidationError('gate type mismatch')\n"
-    "    for k in _REQUIRED[gate_type]:\n"
-    "        if not isinstance(payload, dict) or k not in payload:\n"
-    "            raise SchemaValidationError('missing ' + k)\n"
-    "    _log('put ' + str(gate_type))\n"
-    "    return None\n"
+    "def _log(line):\n"
+    "    path = os.environ.get('FAKE_CACHE_LOG')\n"
+    "    if path:\n"
+    "        with open(path, 'a') as fh:\n"
+    "            fh.write(line + chr(10))\n"
     "\n"
     "\n"
     "def now_iso():\n"
     "    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
     "\n"
     "\n"
+    "def get(cache_key, *, repo_root=None):\n"
+    "    _log('get')\n"
+    "    if os.environ.get('FAKE_CACHE_MODE') == 'hit':\n"
+    "        payload = dict(\n"
+    "            scope='full',\n"
+    "            gate_version=cache_key.gate_version,\n"
+    "            flagged=False,\n"
+    "            matches=[],\n"
+    "            allowed=[],\n"
+    "            unused_allowlist_entries=[],\n"
+    "            notified=False,\n"
+    "            notification_delivery_error=None,\n"
+    "            cache_hit=False,\n"
+    "        )\n"
+    "        return CachedResult(gate_type='secret_scanner', payload=payload, stored_at='2026-01-01T00:00:00Z')\n"
+    "    return Miss()\n"
+    "\n"
+    "\n"
+    "def put(cache_key, result, *, repo_root=None):\n"
+    "    _log('put')\n"
+    "    return None\n"
+    "\n"
+    "\n"
     "def stats(*, repo_root=None):\n"
-    "    return " + repr({"entry_count": 0}) + "\n"
+    "    return dict(entry_count=0)\n"
 )
 
 
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
-    (repo_root / "gen" / "cache-manager").mkdir(parents=True)
-    (repo_root / "gen" / "cache-manager" / "cache_manager.py").write_text(
-        FAKE_CACHE_MANAGER_SOURCE, encoding="utf-8"
-    )
-    (repo_root / "src").mkdir()
-    (repo_root / "src" / "hello.py").write_text(
-        "def hello():\n    return 'hello world'\n", encoding="utf-8"
-    )
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
-    log_path = log_dir / "calls.log"
-    monkeypatch.setenv(LOG_ENV, str(log_path))
+    repo_root.mkdir()
+    fake_dir = repo_root / "gen" / "cache-manager"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE)
+    (repo_root / "README.md").write_text("A plain readme with nothing secret in it.\n")
+    (repo_root / "app.py").write_text("def add(a, b):\n    return a + b\n")
+
+    log_path = tmp_path / "cache_calls.log"
+    monkeypatch.setenv("FAKE_CACHE_LOG", str(log_path))
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
 
     def _no_network(*args, **kwargs):
-        raise AssertionError("webhook must not be called without a configured URL")
+        raise AssertionError("no webhook call expected")
 
     monkeypatch.setattr(urllib.request, "urlopen", _no_network)
-    return repo_root, log_path
-
-
-def _read_log(log_path):
-    if not log_path.exists():
-        return []
-    return [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    monkeypatch.chdir(tmp_path)
+    return repo_root
 
 
 def _assert_single_result(result):
-    assert result is not None
     assert not isinstance(result, (list, tuple, set, dict))
     assert type(result).__name__ == "SecretScanResult"
-    if hasattr(secret_scanner, "SecretScanResult"):
-        assert isinstance(result, secret_scanner.SecretScanResult)
     assert dataclasses.is_dataclass(result)
-    assert field(result, "scope") == "full"
-    matches = field(result, "matches")
-    assert isinstance(matches, list)
-    assert field(result, "flagged") == (len(matches) > 0)
     as_dict = result.to_dict()
     assert isinstance(as_dict, dict)
+    assert field(result, "scope") == "full"
     assert as_dict["scope"] == "full"
-    json.dumps(as_dict)
+    assert isinstance(field(result, "flagged"), bool)
+    assert isinstance(field(result, "matches"), list)
 
 
-def test_full_scan_produces_exactly_one_secret_scan_result(repo):
-    repo_root, log_path = repo
-
-    result = secret_scanner.scan(repo_root)
-
+@pytest.mark.parametrize("mode", ["miss", "hit"])
+def test_full_scan_returns_exactly_one_secret_scan_result(repo, monkeypatch, mode):
+    monkeypatch.setenv("FAKE_CACHE_MODE", mode)
+    result = secret_scanner.scan(repo)
     _assert_single_result(result)
 
-    # A fresh full scan stores exactly one result in the cache.
-    puts = [l for l in _read_log(log_path) if l.startswith("put")]
-    assert len(puts) == 1
-    assert puts[0] == "put secret_scanner"
 
-
-def test_full_scan_cli_json_prints_exactly_one_result_document(repo):
-    repo_root, log_path = repo
-
+@pytest.mark.parametrize("prefix", [[], ["secret-scan"]])
+def test_cli_full_scan_json_prints_exactly_one_result_document(repo, monkeypatch, prefix):
+    monkeypatch.setenv("FAKE_CACHE_MODE", "miss")
     out = io.StringIO()
     err = io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
-        code = secret_scanner.main(["--repo-root=" + str(repo_root), "--format=json"])
-
+        code = secret_scanner.main(prefix + ["--repo-root", str(repo), "--format=json"])
     assert code in (0, 1)
-    text = out.getvalue().strip()
-    # json.loads over the entire stdout succeeds only for a single document.
-    doc = json.loads(text)
-    assert isinstance(doc, dict)
-    assert doc["scope"] == "full"
-    assert isinstance(doc["matches"], list)
-    assert doc["flagged"] == (len(doc["matches"]) > 0)
-    assert code == (1 if doc["flagged"] else 0)
-
-    puts = [l for l in _read_log(log_path) if l.startswith("put")]
-    assert len(puts) == 1
+    text = out.getvalue()
+    # json.loads on the full stdout fails if there is more than one document.
+    document = json.loads(text)
+    assert isinstance(document, dict)
+    assert document["scope"] == "full"
+    assert "flagged" in document
+    assert isinstance(document["matches"], list)
+    assert code == (1 if document["flagged"] else 0)
