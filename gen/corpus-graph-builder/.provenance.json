@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:85d49d6aa7f83ad35d4eb09712eeb18905a0bdfbbe23fbfa7d59d269e5c80d9d",
+  "spec_bundle_hash": "sha256:7052b5162f32545d817fec3ef4026bbbc4fc77eb6fc661e0a97e5e50fcbe720f",
   "spec_bundle_parts": {
     "spec": "sha256:96ab7bd5747a2772022c578464b9b5900c695a9496e5340522953ffd658f3fd6",
-    "dependency_code": "sha256:783c265d16fce7bf65bf75ddb045fd2a6cc39fb95c99c0f931a0ad1b0e436104"
+    "dependency_code": "sha256:1fb1b2f85172d3c873e842b9619a10822124b24998c3f7d8966320c16fee4a47"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T18:26:25Z",
+  "generated_at": "2026-11-27T23:11:02Z",
   "verification_run_id": "corpus-graph-builder-attempt-1",
   "verification_report": {
     "component_id": "comp-corpus-graph-builder",
@@ -159,7 +159,7 @@
     "matches": [],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": false
+    "cache_hit": true
   },
   "secret_scan": {
     "scope": "full",
@@ -171,12 +171,6 @@
         "risk_tier": "low",
         "file": "verification/generator/generated-test/test_ac_gen_018.py",
         "line": 7
-      },
-      {
-        "rule_id": "Hex High Entropy String",
-        "risk_tier": "low",
-        "file": "verification/graph-query-engine/generated-test/test_ac_gqe_005.py",
-        "line": 144
       },
       {
         "rule_id": "Hex High Entropy String",
