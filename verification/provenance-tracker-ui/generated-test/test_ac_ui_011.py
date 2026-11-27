@@ -1,5 +1,6 @@
-# hotdocs-criterion: sha256:cb56cde00135c9017d7efb0108d9f1f0af7d500999031b645b3a58794f1c2c13
+# hotdocs-criterion: sha256:9106698276e91e0ac0c337111c5889684755ea2089551b373f2ae73a8cb5c5b8
 import json
+import re
 from pathlib import Path
 
 import provenance_tracker_ui
@@ -17,18 +18,10 @@ def _verification_report():
         ],
         "requirement_results": {"R-FOO-001": "pass"},
         "interface_drift": False,
-        "mutation_score": 0.92,
+        "mutation_score": None,
         "mutation_error": None,
-        "assets": [
-            {
-                "kind": "python",
-                "path": ".",
-                "definition_sha256": None,
-                "adapter_sha256": "sha256:00",
-                "versions": {"python": "3.12.4"},
-                "lockfile_sha256": None,
-            }
-        ],
+        "assets": [],
+        "drivers": [],
         "overall": "pass",
     }
 
@@ -56,7 +49,7 @@ def _verify_report():
                 "hit": True,
                 "reason": None,
                 "verification_report": _verification_report(),
-                "license_scan": {"blocked": False},
+                "license_scan": {"blocked": False, "flagged": False, "matches": []},
                 "secret_scan": _secret_scan(),
             }
         },
@@ -70,7 +63,6 @@ def _write_fake_tracker(repo_root, log_path):
     fake_dir = repo_root / "gen" / "provenance-tracker"
     fake_dir.mkdir(parents=True, exist_ok=True)
     source = (
-        "import copy\n"
         "REPORT = " + repr(_verify_report()) + "\n"
         "LOG_PATH = " + repr(str(log_path)) + "\n"
         "\n"
@@ -80,6 +72,7 @@ def _write_fake_tracker(repo_root, log_path):
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
         "    _log('check_readiness')\n"
+        "    import copy\n"
         "    report = copy.deepcopy(REPORT)\n"
         "    report['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
         "    return report\n"
@@ -87,9 +80,6 @@ def _write_fake_tracker(repo_root, log_path):
         "def last_requirement_failures(component_id, repo_root):\n"
         "    _log('last_requirement_failures ' + str(component_id))\n"
         "    return []\n"
-        "\n"
-        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
-        "    raise RuntimeError('not used')\n"
     )
     (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
 
@@ -125,11 +115,12 @@ def _write_corpus_graph(repo_root):
 def test_ac_ui_011_module_script_is_asset_plus_init(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    out_dir = tmp_path / "out"
     log_path = tmp_path / "fake_calls.log"
-
     _write_fake_tracker(repo_root, log_path)
     _write_corpus_graph(repo_root)
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
 
     provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
@@ -137,23 +128,21 @@ def test_ac_ui_011_module_script_is_asset_plus_init(tmp_path):
     calls = log_path.read_text(encoding="utf-8").splitlines()
     assert calls.count("check_readiness") == 1
 
-    index = out_dir / "index.html"
-    assert index.is_file()
-    html = index.read_bytes().decode("utf-8")
+    html = (out_dir / "index.html").read_text(encoding="utf-8")
 
     asset_path = Path(provenance_tracker_ui.__file__).parent / "static" / "app.js"
-    asset_text = asset_path.read_bytes().decode("utf-8")
+    asset_text = asset_path.read_text(encoding="utf-8")
     assert asset_text != ""
 
-    module_open = '<script type="module">'
-    json_open = '<script type="application/json" id="tracker-snapshot">'
+    module_tag = '<script type="module">'
+    assert html.count(module_tag) == 1
 
-    assert html.count(module_open) == 1
-    assert html.count(json_open) == 1
-    assert html.count("<script") == 2
+    assert len(re.findall(r"<script", html, flags=re.IGNORECASE)) == 2
+    assert html.count('<script type="application/json" id="tracker-snapshot">') == 1
 
-    start = html.index(module_open) + len(module_open)
-    end = html.index("</script>", start)
+    start = html.index(module_tag) + len(module_tag)
+    end = html.find("</script>", start)
+    assert end != -1
     module_text = html[start:end]
     assert module_text == asset_text + "\ninit(document);\n"
 

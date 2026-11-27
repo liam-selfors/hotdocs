@@ -1,12 +1,4 @@
-# hotdocs-criterion: sha256:e55c82bd595f3caf8853ac407c2e153ce521a80520f694abc924b16db9c539f7
-"""AC-UI-006: the rendered index.html needs no server of any kind.
-
-Given a rendered index.html, when it is inspected for anything requiring
-a server, then it contains no "fetch(", no "XMLHttpRequest", no
-"http://", and no "https://", and the module exposes no serve function
-and main treats a "serve" subcommand as a usage error returning 2.
-"""
-
+# hotdocs-criterion: sha256:71f3ff3235c6c5bb28b57bda98cc9affe93ecf8b3644e1d925c2d4ff23689fb3
 import json
 from pathlib import Path
 
@@ -17,46 +9,19 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-FAKE_TRACKER_BODY = '''
-import json
-from pathlib import Path
-
-
-def _log(line):
-    with open(LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(line + "\\n")
-
-
-def _verification_report(component_id, overall):
-    req_result = "pass" if overall == "pass" else "fail"
-    crit_result = "pass" if overall == "pass" else "fail"
-    criterion = {
-        "id": "AC-" + component_id.upper() + "-001",
-        "covers": "R-" + component_id.upper() + "-001",
-        "kind": "compiled",
-        "result": crit_result,
-    }
-    if crit_result == "fail":
-        criterion["failure_detail"] = {"message": "x equals 1 failed", "expected": 1, "actual": 2}
-        criterion["failure_origin"] = "implementation"
+def _verification_report():
     return {
-        "component_id": component_id,
-        "criteria": [criterion],
-        "requirement_results": {"R-" + component_id.upper() + "-001": req_result},
+        "component_id": "comp-foo",
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
         "interface_drift": False,
         "mutation_score": 0.9,
         "mutation_error": None,
-        "assets": [
-            {
-                "kind": "python",
-                "path": ".",
-                "definition_sha256": None,
-                "adapter_sha256": "sha256:00",
-                "versions": {"python": "3.12.4"},
-                "lockfile_sha256": None,
-            }
-        ],
-        "overall": overall,
+        "assets": [],
+        "drivers": [],
+        "overall": "pass",
     }
 
 
@@ -74,98 +39,94 @@ def _secret_scan():
     }
 
 
-def _hit(component_id, overall):
+def _verify_report():
     return {
-        "hit": True,
-        "reason": None,
-        "verification_report": _verification_report(component_id, overall),
-        "license_scan": {"blocked": False},
-        "secret_scan": _secret_scan(),
-    }
-
-
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    _log("check_readiness")
-    components = {
-        "comp-alpha": _hit("comp-alpha", "pass"),
-        "comp-beta": _hit("comp-beta", "fail"),
-        "comp-gamma": {
-            "hit": False,
-            "reason": "no manifest",
-            "verification_report": None,
-            "license_scan": None,
-            "secret_scan": None,
-        },
-    }
-    capabilities = {}
-    reasons = [
-        "comp-beta: verification failed",
-        "comp-gamma: no provenance for current spec state - run hotdocs generate comp-gamma",
-    ]
-    return {
-        "scope": "blast-radius" if changed_ids is not None else "whole-corpus",
+        "scope": "whole-corpus",
         "ready": False,
-        "components": components,
-        "capabilities": capabilities,
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "reason": None,
+                "verification_report": _verification_report(),
+                "license_scan": {"blocked": False, "matches": []},
+                "secret_scan": _secret_scan(),
+            },
+            "comp-bar": {
+                "hit": False,
+                "reason": "no manifest",
+                "verification_report": None,
+                "license_scan": None,
+                "secret_scan": None,
+            },
+        },
+        "capabilities": {
+            "P-ZERO-EDIT": {
+                "hit": True,
+                "capability_scenario_report": {
+                    "P-ZERO-EDIT": {"overall": "pass", "scenarios": []}
+                },
+            },
+        },
         "secret_scan": _secret_scan(),
-        "not_ready_reasons": reasons,
+        "not_ready_reasons": [
+            "comp-bar: no provenance for current spec state — run hotdocs generate comp-bar"
+        ],
     }
 
 
-def last_requirement_failures(component_id, repo_root):
-    _log("last_requirement_failures " + component_id)
-    if component_id == "comp-beta":
-        return ["R-COMP-BETA-001"]
-    return []
-'''
-
-
-def _build_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "tracker_calls.log"
-
+def _write_fake_tracker(repo_root, log_path):
     fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True)
-    source = "LOG_PATH = " + repr(str(log_path)) + "\n" + FAKE_TRACKER_BODY
-    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
+    fake_dir.mkdir(parents=True, exist_ok=True)
+    src = (
+        "from pathlib import Path\n"
+        "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "REPORT = " + repr(_verify_report()) + "\n"
+        "\n"
+        "def _log(line):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write(line + '\\n')\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    _log('check_readiness')\n"
+        "    import copy\n"
+        "    return copy.deepcopy(REPORT)\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    _log('last_requirement_failures ' + component_id)\n"
+        "    return []\n"
+    )
+    (fake_dir / "provenance_tracker.py").write_text(src, encoding="utf-8")
 
+
+def _write_corpus_graph(repo_root):
     graph = {
         "nodes": {
-            "comp-alpha": {
+            "P-ZERO-EDIT": {"type": "capability"},
+            "comp-foo": {
                 "type": "component",
                 "verification": None,
                 "provenance": None,
                 "size_status": "ok",
-                "sealed": True,
+                "sealed": False,
                 "pinned_overrides": [],
                 "owners": ["pipeline-team"],
                 "documents": {},
             },
-            "comp-beta": {
+            "comp-bar": {
                 "type": "component",
                 "verification": None,
                 "provenance": None,
                 "size_status": "ok",
-                "sealed": True,
-                "pinned_overrides": [],
-                "owners": ["pipeline-team"],
-                "documents": {},
-            },
-            "comp-gamma": {
-                "type": "component",
-                "verification": None,
-                "provenance": None,
-                "size_status": "ok",
-                "sealed": True,
+                "sealed": False,
                 "pinned_overrides": [],
                 "owners": ["pipeline-team"],
                 "documents": {},
             },
         },
         "edges": [
-            {"from": "comp-alpha", "to": "comp-beta", "kind": "depends_on"},
-            {"from": "comp-beta", "to": "comp-gamma", "kind": "depends_on"},
+            {"from": "comp-bar", "to": "comp-foo", "kind": "depends_on"},
+            {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
         ],
         "aggregates": {
             "orphan_capability_rate": 0.0,
@@ -173,26 +134,30 @@ def _build_repo(tmp_path):
             "orphan_var_rate": 0.0,
         },
     }
-    verification = repo_root / "verification"
-    verification.mkdir()
-    (verification / "corpus-graph.json").write_text(
-        json.dumps(graph, sort_keys=True, indent=2), encoding="utf-8"
+    vdir = repo_root / "verification"
+    vdir.mkdir(parents=True, exist_ok=True)
+    (vdir / "corpus-graph.json").write_text(
+        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
+
+
+def _build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "fake_calls.log"
+    _write_fake_tracker(repo_root, log_path)
+    _write_corpus_graph(repo_root)
     return repo_root, log_path
 
 
-def test_rendered_page_needs_no_server(tmp_path):
+def test_rendered_index_needs_no_server(tmp_path):
     repo_root, log_path = _build_repo(tmp_path)
     out_dir = tmp_path / "out"
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
-
-    # The fake dependency was really used.
-    calls = log_path.read_text(encoding="utf-8").splitlines()
-    assert calls.count("check_readiness") == 1
-
-    node_ids = [field(n, "id") for n in field(snapshot, "nodes")]
-    assert "comp-alpha" in node_ids
+    assert snapshot is not None
+    assert log_path.is_file()
+    assert "check_readiness" in log_path.read_text(encoding="utf-8").splitlines()
 
     index = out_dir / "index.html"
     assert index.is_file()
@@ -210,17 +175,12 @@ def test_module_exposes_no_serve_function():
 
 
 def test_main_serve_subcommand_is_usage_error(tmp_path, capsys):
-    repo_root, _ = _build_repo(tmp_path)
-
-    code = provenance_tracker_ui.main(["track", "ui", "serve"])
-    assert code == 2
-    captured = capsys.readouterr()
-    assert "Traceback" not in captured.err
-    assert "usage error" in captured.err
-
-    code = provenance_tracker_ui.main(
+    repo_root, _log = _build_repo(tmp_path)
+    rc = provenance_tracker_ui.main(["track", "ui", "serve"])
+    assert rc == 2
+    rc = provenance_tracker_ui.main(
         ["track", "ui", "serve", "--repo-root=" + str(repo_root)]
     )
-    assert code == 2
+    assert rc == 2
     captured = capsys.readouterr()
     assert "Traceback" not in captured.err
