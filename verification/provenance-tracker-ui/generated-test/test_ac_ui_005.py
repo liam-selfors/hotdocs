@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:188d43aaac2e30b49ad72255c636f61c824b301b3f0409327e810ac56d3191f3
+# hotdocs-criterion: sha256:9f0ff17ae0873642101e5421069bc3abe286cb37bb5909dad90081debff76e5d
 import json
 from pathlib import Path
 
@@ -9,62 +9,47 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-ATTEMPT_ID = "2026-10-25T14:32:01Z-a1b2c3"
-
-
-def _miss():
-    return {
-        "hit": False,
-        "reason": "no manifest",
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-    }
-
-
-def _report():
-    return {
-        "scope": "whole-corpus",
-        "ready": False,
-        "components": {
-            "comp-new": _miss(),
-            "comp-old": _miss(),
-        },
-        "capabilities": {},
-        "secret_scan": None,
-        "not_ready_reasons": [
-            "comp-new: no provenance for current spec state \u2014 run hotdocs generate comp-new",
-            "comp-old: no provenance for current spec state \u2014 run hotdocs generate comp-old",
-        ],
-    }
-
-
 def _write_fake_tracker(repo_root, log_path):
     fake_dir = repo_root / "gen" / "provenance-tracker"
     fake_dir.mkdir(parents=True, exist_ok=True)
-    src = (
-        "import copy\n"
-        "LOG = " + repr(str(log_path)) + "\n"
-        "REPORT = " + repr(_report()) + "\n"
+    source = (
+        "import json\n"
+        "from pathlib import Path\n"
+        "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
         "\n"
         "def _log(line):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
         "        fh.write(line + '\\n')\n"
+        "\n"
+        "def _miss():\n"
+        "    return {\n"
+        "        'hit': False,\n"
+        "        'reason': 'no manifest',\n"
+        "        'verification_report': None,\n"
+        "        'license_scan': None,\n"
+        "        'secret_scan': None,\n"
+        "    }\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
         "    _log('check_readiness')\n"
-        "    report = copy.deepcopy(REPORT)\n"
-        "    report['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
-        "    return report\n"
+        "    return {\n"
+        "        'scope': 'blast-radius' if changed_ids is not None else 'whole-corpus',\n"
+        "        'ready': False,\n"
+        "        'components': {'comp-new': _miss(), 'comp-old': _miss()},\n"
+        "        'capabilities': {},\n"
+        "        'secret_scan': None,\n"
+        "        'not_ready_reasons': [\n"
+        "            " + repr("comp-new: no provenance for current spec state \u2014 run hotdocs generate comp-new") + ",\n"
+        "            " + repr("comp-old: no provenance for current spec state \u2014 run hotdocs generate comp-old") + ",\n"
+        "        ],\n"
+        "    }\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    _log('last_requirement_failures ' + str(component_id))\n"
         "    return []\n"
-        "\n"
-        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
-        "    raise RuntimeError('not used in this test')\n"
     )
-    (fake_dir / "provenance_tracker.py").write_text(src, encoding="utf-8")
+    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
 
 
 def _component_node():
@@ -72,7 +57,7 @@ def _component_node():
         "type": "component",
         "verification": None,
         "provenance": None,
-        "size_status": "unknown",
+        "size_status": "ok",
         "sealed": True,
         "pinned_overrides": [],
         "owners": ["pipeline-team"],
@@ -89,7 +74,7 @@ def _write_corpus_graph(repo_root):
         "edges": [],
         "aggregates": {
             "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 1.0,
+            "orphan_component_rate": 0.0,
             "orphan_var_rate": 0.0,
         },
     }
@@ -101,8 +86,9 @@ def _write_corpus_graph(repo_root):
 
 
 def _write_attempt(repo_root):
+    attempt_id = "2026-10-25T14:32:01Z-a1b2c3"
     record = {
-        "attempt_id": ATTEMPT_ID,
+        "attempt_id": attempt_id,
         "component_id": "comp-old",
         "timestamp": "2026-10-25T14:32:01Z",
         "spec_bundle_hash": "sha256:" + "0" * 64,
@@ -113,7 +99,7 @@ def _write_attempt(repo_root):
             "prompt_version": "v12",
             "cache_hit": False,
             "files": {},
-            "model_call_error": {"category": "environment", "message": "fake failure"},
+            "model_call_error": {"category": "network", "message": "connection reset"},
             "refused": None,
             "retry_feedback": None,
             "mode": "single",
@@ -126,57 +112,56 @@ def _write_attempt(repo_root):
     }
     adir = repo_root / ".hotdocs" / "attempts" / "comp-old"
     adir.mkdir(parents=True, exist_ok=True)
-    (adir / (ATTEMPT_ID + ".json")).write_text(json.dumps(record, indent=2), encoding="utf-8")
-
-
-def _build_repo(tmp_path, with_attempt):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir(parents=True, exist_ok=True)
-    log_path = tmp_path / "fake_calls.log"
-    _write_fake_tracker(repo_root, log_path)
-    _write_corpus_graph(repo_root)
-    if with_attempt:
-        _write_attempt(repo_root)
-    return repo_root, log_path
+    (adir / (attempt_id + ".json")).write_text(json.dumps(record, indent=2), encoding="utf-8")
 
 
 def _statuses(snapshot):
-    result = {}
-    for node in field(snapshot, "nodes"):
-        result[field(node, "id")] = field(node, "status")
-    return result
+    return {field(n, "id"): field(n, "status") for n in field(snapshot, "nodes")}
 
 
-def test_not_attempted_distinct_from_missing(tmp_path, browser):
-    repo_root, log_path = _build_repo(tmp_path, with_attempt=True)
+def _setup(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "fake_tracker.log"
+    _write_fake_tracker(repo_root, log_path)
+    _write_corpus_graph(repo_root)
+    return repo_root, log_path
+
+
+def test_never_attempted_component_is_not_attempted_and_labeled(tmp_path, browser):
+    repo_root, log_path = _setup(tmp_path)
+    _write_attempt(repo_root)
     assert not (repo_root / ".hotdocs" / "attempts" / "comp-new").exists()
 
-    out_dir = tmp_path
+    out_dir = tmp_path / "ui"
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    calls = log_path.read_text(encoding="utf-8").splitlines()
-    assert calls.count("check_readiness") == 1
+    assert log_path.is_file()
+    assert "check_readiness" in log_path.read_text(encoding="utf-8").splitlines()
 
     statuses = _statuses(snapshot)
     assert statuses["comp-new"] == "not-attempted"
     assert statuses["comp-old"] == "missing"
 
-    assert (out_dir / "index.html").is_file()
-    page = browser.open(out_dir / "index.html")
-    new_text = page.find(css='li[data-node-id="comp-new"]').text()
-    assert "not yet attempted" in new_text
+    index = out_dir / "index.html"
+    assert index.is_file()
+
+    page = browser.open(index)
+    texts = page.find(css='li[data-node-id="comp-new"]').texts()
+    assert len(texts) == 1
+    assert "not yet attempted" in texts[0].lower()
 
 
-def test_no_hotdocs_directory_still_writes_page(tmp_path):
-    repo_root, log_path = _build_repo(tmp_path, with_attempt=False)
+def test_no_hotdocs_directory_writes_page_and_all_not_attempted(tmp_path):
+    repo_root, log_path = _setup(tmp_path)
     assert not (repo_root / ".hotdocs").exists()
 
-    out_dir = tmp_path / "out"
+    out_dir = tmp_path / "ui"
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
     assert (out_dir / "index.html").is_file()
-    calls = log_path.read_text(encoding="utf-8").splitlines()
-    assert calls.count("check_readiness") == 1
+    assert log_path.is_file()
+    assert "check_readiness" in log_path.read_text(encoding="utf-8").splitlines()
 
     statuses = _statuses(snapshot)
     assert statuses["comp-new"] == "not-attempted"

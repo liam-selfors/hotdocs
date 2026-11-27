@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:065d8e0dd83cd2afd828e3bb1f3ad18812b27f6a8461b02f4cfa7ac11c315428",
+  "spec_bundle_hash": "sha256:f1ee848a38bf18decc8904bb6766a274a42a785a6b9e19ef6b09bd5aa1613d73",
   "spec_bundle_parts": {
-    "spec": "sha256:ae101c17c952f451b55f3c2e5891c333ac1489477b768c074df20a28c626a5a5",
-    "dependency_code": "sha256:7e932a3a96cb887469a79fc7cb95096903e33d8d81f0e907d0adc271513bc6b1"
+    "spec": "sha256:a5d33551ea8a1d2a9b231c7aa83b1c8d0afd3a8c1fbfc6b992866c87f9ab890c",
+    "dependency_code": "sha256:35d1dc442d3af16e46ada625eceac544200edda15bae2e2c16497f9b56a37b41"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T15:28:45Z",
+  "generated_at": "2026-11-27T23:40:50Z",
   "verification_run_id": "provenance-tracker-ui-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-tracker-ui",
@@ -48,13 +48,7 @@
         "id": "AC-UI-003",
         "covers": "R-UI-003",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-UI-004",
@@ -108,6 +102,24 @@
         "id": "AC-UI-012",
         "covers": "R-UI-010",
         "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-UI-013",
+        "covers": "R-UI-002",
+        "kind": "generated-test",
+        "result": "pass"
+      },
+      {
+        "id": "AC-UI-014",
+        "covers": "R-UI-001",
+        "kind": "generated-test",
         "result": "pass"
       }
     ],
@@ -124,7 +136,7 @@
       "R-UI-010": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9117647058823529,
+    "mutation_score": 0.9615384615384616,
     "mutation_error": null,
     "assets": [
       {
@@ -152,8 +164,8 @@
     "drivers": [
       {
         "name": "browser",
-        "definition_sha256": "sha256:6cc4ade0a2ce8f5267881c8ab8572e3801e306d747ec77cb1d9c9f725520073b",
-        "adapter_sha256": "sha256:f05ff802f66c942f8003d163a2932a7b172f385dcc6ad9cea9008f7844570498",
+        "definition_sha256": "sha256:e916ab0760fff5042671fff8f71dfaa4c33abd82fd44b6833d62eae545481f0f",
+        "adapter_sha256": "sha256:51af085eba0f707dd97abd07546f27033fe1543df7ef27d388907d9a7644c331",
         "versions": {
           "playwright": "1.64.1",
           "chromium": "156.0.8078.4"
@@ -404,8 +416,8 @@
   "drivers": [
     {
       "name": "browser",
-      "definition_sha256": "sha256:6cc4ade0a2ce8f5267881c8ab8572e3801e306d747ec77cb1d9c9f725520073b",
-      "adapter_sha256": "sha256:f05ff802f66c942f8003d163a2932a7b172f385dcc6ad9cea9008f7844570498",
+      "definition_sha256": "sha256:e916ab0760fff5042671fff8f71dfaa4c33abd82fd44b6833d62eae545481f0f",
+      "adapter_sha256": "sha256:51af085eba0f707dd97abd07546f27033fe1543df7ef27d388907d9a7644c331",
       "versions": {
         "playwright": "1.64.1",
         "chromium": "156.0.8078.4"

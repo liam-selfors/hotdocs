@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a0bf5ad040410e0acd2552aefdefd676fdf4b0520e7e0e133ea2db846f1b37bc
+# hotdocs-criterion: sha256:418f461b3aab85b0d83a23d8f476f764295b04c4861ed6f6f4a3d5bdf3594484
 import json
 from html.parser import HTMLParser
 from pathlib import Path
@@ -27,11 +27,15 @@ EXPECTED = [
 ]
 
 
-@pytest.mark.parametrize("flt,expected", EXPECTED)
-def test_hidden_by_status_table(asset_runner, flt, expected):
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+@pytest.mark.parametrize("filt,expected", EXPECTED)
+def test_hidden_by_status_table(asset_runner, filt, expected):
     run = asset_runner("static/app.js")
     nodes = [dict(n) for n in NODES]
-    result = run("hiddenByStatus", [nodes, flt])
+    result = run("hiddenByStatus", [nodes, filt])
     assert result == expected
 
 
@@ -42,13 +46,34 @@ def test_hidden_by_status_empty_nodes(asset_runner):
 
 
 # ---------------------------------------------------------------------------
-# Rendered page: filter buttons and initial visibility
+# Rendered page: filter buttons and initial node visibility
 # ---------------------------------------------------------------------------
 
-PASSING_ID = "comp-alpha"
-FAILING_ID = "comp-bravo"
-MISSING_ID = "comp-charlie"
-NOT_ATTEMPTED_ID = "comp-delta"
+
+def _verification_report(component_id, overall):
+    result = "pass" if overall == "pass" else "fail"
+    r_id = "R-" + component_id.upper().replace("COMP-", "") + "-001"
+    ac_id = "AC-" + component_id.upper().replace("COMP-", "") + "-001"
+    criterion = {
+        "id": ac_id,
+        "covers": r_id,
+        "kind": "compiled",
+        "result": result,
+    }
+    if result == "fail":
+        criterion["failure_detail"] = {"message": "failed", "expected": 1, "actual": 0}
+        criterion["failure_origin"] = "implementation"
+    return {
+        "component_id": component_id,
+        "criteria": [criterion],
+        "requirement_results": {r_id: result},
+        "interface_drift": False,
+        "mutation_score": 0.9,
+        "mutation_error": None,
+        "assets": [],
+        "drivers": [],
+        "overall": overall,
+    }
 
 
 def _secret_scan():
@@ -65,37 +90,12 @@ def _secret_scan():
     }
 
 
-def _verification_report(component_id, overall):
-    rid = "R-" + component_id.upper().replace("COMP-", "") + "-001"
-    result = "pass" if overall == "pass" else "fail"
-    criterion = {
-        "id": "AC-" + component_id.upper().replace("COMP-", "") + "-001",
-        "covers": rid,
-        "kind": "compiled",
-        "result": result,
-    }
-    if result == "fail":
-        criterion["failure_detail"] = {"message": "x failed", "expected": 1, "actual": 2}
-        criterion["failure_origin"] = "implementation"
-    return {
-        "component_id": component_id,
-        "criteria": [criterion],
-        "requirement_results": {rid: result},
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "mutation_error": None,
-        "assets": [],
-        "drivers": [],
-        "overall": overall,
-    }
-
-
 def _hit(component_id, overall):
     return {
         "hit": True,
         "reason": None,
         "verification_report": _verification_report(component_id, overall),
-        "license_scan": {"blocked": False, "flagged": False, "matches": []},
+        "license_scan": {"blocked": False},
         "secret_scan": _secret_scan(),
     }
 
@@ -110,39 +110,86 @@ def _miss():
     }
 
 
-def _verify_report():
-    return {
+def _build_repo(repo_root):
+    components = {
+        "comp-a": _hit("comp-a", "pass"),
+        "comp-b": _hit("comp-b", "fail"),
+        "comp-c": _miss(),
+        "comp-d": _miss(),
+    }
+    report = {
         "scope": "whole-corpus",
         "ready": False,
-        "components": {
-            PASSING_ID: _hit(PASSING_ID, "pass"),
-            FAILING_ID: _hit(FAILING_ID, "fail"),
-            MISSING_ID: _miss(),
-            NOT_ATTEMPTED_ID: _miss(),
-        },
+        "components": components,
         "capabilities": {},
         "secret_scan": _secret_scan(),
         "not_ready_reasons": [
-            FAILING_ID + ": verification failed",
-            MISSING_ID + ": no provenance for current spec state — run hotdocs generate " + MISSING_ID,
-            NOT_ATTEMPTED_ID + ": no provenance for current spec state — run hotdocs generate " + NOT_ATTEMPTED_ID,
+            "comp-b: verification failed",
+            "comp-c: no provenance for current spec state — run hotdocs generate comp-c",
+            "comp-d: no provenance for current spec state — run hotdocs generate comp-d",
         ],
     }
 
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True)
+    src = (
+        "REPORT = " + repr(report) + "\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    import copy\n"
+        "    return copy.deepcopy(REPORT)\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    return []\n"
+        "\n"
+        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
+        "    raise NotImplementedError('not used')\n"
+        "\n"
+        "def main(argv=None):\n"
+        "    return 0\n"
+    )
+    (fake_dir / "provenance_tracker.py").write_text(src, encoding="utf-8")
 
-def _attempt_record(component_id):
-    return {
-        "attempt_id": "2026-10-25T14:32:01Z-a1b2c3",
-        "component_id": component_id,
+    graph = {
+        "nodes": {},
+        "edges": [],
+        "aggregates": {
+            "orphan_capability_rate": 0.0,
+            "orphan_component_rate": 0.0,
+            "orphan_var_rate": 0.0,
+        },
+    }
+    for cid in ["comp-a", "comp-b", "comp-c", "comp-d"]:
+        graph["nodes"][cid] = {
+            "type": "component",
+            "verification": None,
+            "provenance": None,
+            "size_status": "ok",
+            "sealed": False,
+            "pinned_overrides": [],
+            "owners": ["pipeline-team"],
+            "documents": {},
+        }
+    (repo_root / "verification").mkdir(parents=True)
+    (repo_root / "verification" / "corpus-graph.json").write_text(
+        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+
+    attempt_dir = repo_root / ".hotdocs" / "attempts" / "comp-c"
+    attempt_dir.mkdir(parents=True)
+    attempt_id = "2026-10-25T14:32:01Z-a1b2c3"
+    record = {
+        "attempt_id": attempt_id,
+        "component_id": "comp-c",
         "timestamp": "2026-10-25T14:32:01Z",
         "spec_bundle_hash": "sha256:" + "0" * 64,
         "generation": {
-            "component_id": component_id,
+            "component_id": "comp-c",
             "spec_bundle_hash": "sha256:" + "0" * 64,
             "model": "claude-sonnet-5",
             "prompt_version": "v12",
             "cache_hit": False,
-            "files": {"x.py": "print(1)\n"},
+            "files": {"c.py": "x = 1\n"},
             "model_call_error": None,
             "refused": None,
             "retry_feedback": None,
@@ -152,64 +199,10 @@ def _attempt_record(component_id):
             "tool_calls": 0,
             "isolation": None,
         },
-        "verification": _verification_report(component_id, "fail"),
+        "verification": _verification_report("comp-c", "fail"),
     }
-
-
-def _component_graph_node():
-    return {
-        "type": "component",
-        "verification": None,
-        "provenance": None,
-        "size_status": "unknown",
-        "sealed": False,
-        "pinned_overrides": [],
-        "owners": ["pipeline-team"],
-        "documents": {},
-    }
-
-
-def _build_repo(repo_root):
-    # Fake provenance-tracker dependency (flat module shape).
-    fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True)
-    report_json = json.dumps(_verify_report())
-    source = (
-        "import json\n"
-        "_REPORT = " + repr(report_json) + "\n"
-        "\n"
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    return json.loads(_REPORT)\n"
-        "\n"
-        "def last_requirement_failures(component_id, repo_root):\n"
-        "    return []\n"
-    )
-    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
-
-    # Corpus graph topology.
-    graph = {
-        "nodes": {
-            PASSING_ID: _component_graph_node(),
-            FAILING_ID: _component_graph_node(),
-            MISSING_ID: _component_graph_node(),
-            NOT_ATTEMPTED_ID: _component_graph_node(),
-        },
-        "edges": [],
-        "aggregates": {
-            "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
-            "orphan_var_rate": 0.0,
-        },
-    }
-    ver = repo_root / "verification"
-    ver.mkdir(parents=True)
-    (ver / "corpus-graph.json").write_text(json.dumps(graph, indent=2), encoding="utf-8")
-
-    # Attempt history: only the "missing" component has an attempt.
-    attempts = repo_root / ".hotdocs" / "attempts" / MISSING_ID
-    attempts.mkdir(parents=True)
-    (attempts / "2026-10-25T14:32:01Z-a1b2c3.json").write_text(
-        json.dumps(_attempt_record(MISSING_ID), indent=2), encoding="utf-8"
+    (attempt_dir / (attempt_id + ".json")).write_text(
+        json.dumps(record, indent=2) + "\n", encoding="utf-8"
     )
 
 
@@ -221,8 +214,8 @@ class _PageParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attr_map = {}
-        for name, value in attrs:
-            attr_map[name] = value
+        for k, v in attrs:
+            attr_map[k] = v
         if tag == "button" and "data-filter" in attr_map:
             self.filter_buttons.append(attr_map)
         classes = (attr_map.get("class") or "").split()
@@ -233,24 +226,33 @@ class _PageParser(HTMLParser):
         self.handle_starttag(tag, attrs)
 
 
-def test_rendered_page_has_five_filter_buttons_and_nothing_hidden(tmp_path):
+def test_rendered_page_has_five_filter_buttons_in_order_and_no_hidden_nodes(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_repo(repo_root)
     out_dir = tmp_path / "out"
+    out_dir.mkdir()
 
-    provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
+    snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
+
+    nodes = field(snapshot, "nodes")
+    statuses = sorted(field(n, "status") for n in nodes)
+    assert statuses == sorted(["passing", "failing", "missing", "not-attempted"])
 
     html_text = (out_dir / "index.html").read_text(encoding="utf-8")
     parser = _PageParser()
     parser.feed(html_text)
     parser.close()
 
-    filters = [b["data-filter"] for b in parser.filter_buttons]
-    assert filters == ["all", "passing", "failing", "missing", "not-attempted"]
+    assert len(parser.filter_buttons) == 5
+    assert [b["data-filter"] for b in parser.filter_buttons] == [
+        "all",
+        "passing",
+        "failing",
+        "missing",
+        "not-attempted",
+    ]
 
-    # One node element per status, none hidden on load.
-    statuses = sorted(n.get("data-status") for n in parser.node_elements)
-    assert statuses == sorted(["passing", "failing", "missing", "not-attempted"])
-    for node in parser.node_elements:
-        assert "hidden" not in node, node
+    assert len(parser.node_elements) == 4
+    for el in parser.node_elements:
+        assert "hidden" not in el

@@ -1,4 +1,6 @@
-# hotdocs-criterion: sha256:66feae667c3fcd6c51c6c461f479c960cd8eb5a46d3b3097a1b118893d58d544
+# hotdocs-criterion: sha256:af6455d0d45fc9003debcc507f71d58abe7a3834867520e2550a72df55f29f98
+"""AC-UI-003: the page has no form, no off-page href, and exactly two scripts."""
+
 import json
 from html.parser import HTMLParser
 from pathlib import Path
@@ -10,172 +12,197 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class _Collector(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.form_count = 0
-        self.hrefs = []
-        self.scripts = []
+VERIFICATION_REPORT = {
+    "component_id": "comp-bar",
+    "criteria": [
+        {
+            "id": "AC-BAR-002",
+            "covers": "R-BAR-002",
+            "kind": "compiled",
+            "result": "fail",
+            "failure_detail": {"message": "x equals 1 failed", "expected": 1, "actual": 2},
+            "failure_origin": "implementation",
+        }
+    ],
+    "requirement_results": {"R-BAR-002": "fail"},
+    "interface_drift": False,
+    "mutation_score": None,
+    "mutation_error": None,
+    "assets": [],
+    "drivers": [],
+    "overall": "fail",
+}
 
-    def _handle(self, tag, attrs):
-        tag = tag.lower()
-        if tag == "form":
-            self.form_count += 1
-        for name, value in attrs:
-            if name.lower() == "href":
-                self.hrefs.append(value)
-        if tag == "script":
-            self.scripts.append({k.lower(): v for k, v in attrs})
+SECRET_SCAN = {
+    "scope": "full",
+    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "flagged": False,
+    "matches": [],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
 
-    def handle_starttag(self, tag, attrs):
-        self._handle(tag, attrs)
+VERIFY_REPORT = {
+    "scope": "whole-corpus",
+    "ready": False,
+    "components": {
+        "comp-bar": {
+            "hit": True,
+            "reason": None,
+            "verification_report": VERIFICATION_REPORT,
+            "license_scan": {"blocked": False, "matches": []},
+            "secret_scan": SECRET_SCAN,
+        }
+    },
+    "capabilities": {},
+    "secret_scan": SECRET_SCAN,
+    "not_ready_reasons": [
+        "comp-bar: verification failed \u2014 run hotdocs generate comp-bar"
+    ],
+}
 
-    def handle_startendtag(self, tag, attrs):
-        self._handle(tag, attrs)
+CORPUS_GRAPH = {
+    "nodes": {
+        "comp-bar": {
+            "type": "component",
+            "verification": VERIFICATION_REPORT,
+            "provenance": {},
+            "size_status": "ok",
+            "sealed": False,
+            "pinned_overrides": [],
+            "owners": ["pipeline-team"],
+            "documents": {},
+        }
+    },
+    "edges": [],
+    "aggregates": {
+        "orphan_capability_rate": 0.0,
+        "orphan_component_rate": 0.0,
+        "orphan_var_rate": 0.0,
+    },
+}
 
 
 def _write_fake_tracker(repo_root, log_path):
-    verification_report = {
-        "component_id": "comp-foo",
-        "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-            {
-                "id": "AC-FOO-002",
-                "covers": "R-FOO-002",
-                "kind": "compiled",
-                "result": "fail",
-                "failure_detail": {"message": "x failed", "expected": 5, "actual": 3},
-                "failure_origin": "implementation",
-            },
-        ],
-        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "mutation_error": None,
-        "assets": [],
-        "drivers": [],
-        "overall": "fail",
-    }
-    secret_scan = {
-        "scope": "full",
-        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-        "flagged": False,
-        "matches": [],
-        "allowed": [],
-        "unused_allowlist_entries": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-    license_scan = {"blocked": False, "findings": []}
-    report = {
-        "scope": "whole-corpus",
-        "ready": False,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "reason": None,
-                "verification_report": verification_report,
-                "license_scan": license_scan,
-                "secret_scan": secret_scan,
-            }
-        },
-        "capabilities": {},
-        "secret_scan": None,
-        "not_ready_reasons": [
-            "comp-foo: verification failed \u2014 run hotdocs generate comp-foo"
-        ],
-    }
-    src = (
-        "import copy\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "REPORT = " + repr(report) + "\n"
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "import json\n"
+        "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "_REPORT = " + repr(json.dumps(VERIFY_REPORT)) + "\n"
         "\n"
         "def _log(line):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
         "        fh.write(line + '\\n')\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
         "    _log('check_readiness')\n"
-        "    return copy.deepcopy(REPORT)\n"
+        "    return json.loads(_REPORT)\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    _log('last_requirement_failures ' + str(component_id))\n"
-        "    if component_id == 'comp-foo':\n"
-        "        return ['R-FOO-002']\n"
+        "    if component_id == 'comp-bar':\n"
+        "        return ['R-BAR-002']\n"
         "    return []\n"
+        "\n"
+        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
+        "    raise NotImplementedError('not used by this test')\n"
     )
-    fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True, exist_ok=True)
-    (fake_dir / "provenance_tracker.py").write_text(src, encoding="utf-8")
+    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
 
 
-def _write_corpus_graph(repo_root):
-    graph = {
-        "nodes": {
-            "comp-foo": {
-                "type": "component",
-                "verification": None,
-                "provenance": None,
-                "size_status": "ok",
-                "sealed": False,
-                "pinned_overrides": [],
-                "owners": ["pipeline-team"],
-                "documents": {},
-            }
-        },
-        "edges": [],
-        "aggregates": {
-            "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
-            "orphan_var_rate": 0.0,
-        },
-    }
-    vdir = repo_root / "verification"
-    vdir.mkdir(parents=True, exist_ok=True)
-    (vdir / "corpus-graph.json").write_text(
-        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-    )
+class _PageScanner(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.forms = 0
+        self.hrefs = []
+        self.scripts = []  # list of [attrs_dict, text]
+        self._in_script = None
+
+    def handle_starttag(self, tag, attrs):
+        self._tag(tag, attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        self._tag(tag, attrs)
+        if tag == "script":
+            self._in_script = None
+
+    def _tag(self, tag, attrs):
+        tag = tag.lower()
+        for name, value in attrs:
+            if name.lower() == "href":
+                self.hrefs.append(value if value is not None else "")
+        if tag == "form":
+            self.forms += 1
+        if tag == "script":
+            entry = [{k.lower(): (v if v is not None else "") for k, v in attrs}, ""]
+            self.scripts.append(entry)
+            self._in_script = entry
+
+    def handle_data(self, data):
+        if self._in_script is not None:
+            self._in_script[1] += data
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "script":
+            self._in_script = None
 
 
-def test_ac_ui_003_page_has_no_form_no_external_href_and_two_scripts(tmp_path):
+def test_ac_ui_003_no_form_no_offpage_href_exactly_two_scripts(tmp_path):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    (repo_root / "verification").mkdir(parents=True)
+    (repo_root / "verification" / "corpus-graph.json").write_text(
+        json.dumps(CORPUS_GRAPH, sort_keys=True, indent=2), encoding="utf-8"
+    )
     log_path = tmp_path / "fake_calls.log"
     _write_fake_tracker(repo_root, log_path)
-    _write_corpus_graph(repo_root)
-    out_dir = tmp_path / "out"
 
+    out_dir = tmp_path / "out"
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    # Precondition: the snapshot has a failing component with non-empty retry_feedback.
-    nodes = field(snapshot, "nodes")
-    foo = [n for n in nodes if field(n, "id") == "comp-foo"]
-    assert len(foo) == 1
-    assert field(foo[0], "status") == "failing"
-    assert list(field(foo[0], "retry_feedback")) != []
+    # The fake ran.
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    assert "check_readiness" in calls
+    assert "last_requirement_failures comp-bar" in calls
 
-    log_text = log_path.read_text(encoding="utf-8")
-    assert "check_readiness" in log_text
+    # Precondition: a failing component with non-empty retry_feedback.
+    nodes = field(snapshot, "nodes")
+    bar = [n for n in nodes if field(n, "id") == "comp-bar"]
+    assert len(bar) == 1
+    assert field(bar[0], "status") == "failing"
+    assert list(field(bar[0], "retry_feedback")) == ["R-BAR-002"]
 
     html = (out_dir / "index.html").read_text(encoding="utf-8")
-    collector = _Collector()
-    collector.feed(html)
-    collector.close()
+    scanner = _PageScanner()
+    scanner.feed(html)
+    scanner.close()
 
     # No <form element.
-    assert collector.form_count == 0
+    assert scanner.forms == 0
 
-    # Every href begins with "#".
-    for href in collector.hrefs:
-        assert href is not None and href.startswith("#"), href
+    # No href other than ones beginning with "#".
+    offpage = [h for h in scanner.hrefs if not h.startswith("#")]
+    assert offpage == []
 
-    # Exactly two script elements: the tracker-snapshot data block and one module script.
-    assert len(collector.scripts) == 2, collector.scripts
-    data_blocks = [s for s in collector.scripts if s.get("id") == "tracker-snapshot"]
+    # Exactly two script elements.
+    assert len(scanner.scripts) == 2, [s[0] for s in scanner.scripts]
+
+    data_blocks = [s for s in scanner.scripts if s[0].get("id") == "tracker-snapshot"]
     module_scripts = [
-        s for s in collector.scripts
-        if (s.get("type") or "").strip().lower() == "module" and s.get("id") != "tracker-snapshot"
+        s
+        for s in scanner.scripts
+        if s[0].get("type", "").strip().lower() == "module"
+        and s[0].get("id") != "tracker-snapshot"
     ]
     assert len(data_blocks) == 1
     assert len(module_scripts) == 1
+
+    # The data block is JSON data and carries the failing node's feedback.
+    data = json.loads(data_blocks[0][1])
+    data_nodes = {n["id"]: n for n in data["nodes"]}
+    assert data_nodes["comp-bar"]["status"] == "failing"
+    assert data_nodes["comp-bar"]["retry_feedback"] == ["R-BAR-002"]
