@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:5ae8b7b76f2418325cb6ff036fdbddf4537e43f55ae1e8dbd9617e144dbe41e3",
+  "spec_bundle_hash": "sha256:b2ae444922efbd64860a7b8bf9fe58ea74505fcb9c0e89052ef2db82188a19c1",
   "spec_bundle_parts": {
     "spec": "sha256:6cfd2ba0fc19e172ba1aae3c3fa6fa462b49dbc11137ff6496d58ab27e32f942",
-    "dependency_code": "sha256:1a17be8d6e7cecb011f1374004355c7e56927fae9aadf86bcb551a7d65b81a18"
+    "dependency_code": "sha256:2f11d6d49b3269043658d261588d090ab8a06ce150aed807d588e03aa856e408"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T18:09:27Z",
+  "generated_at": "2026-11-27T23:06:30Z",
   "verification_run_id": "provenance-writer-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-writer",
@@ -375,7 +375,7 @@
     "matches": [],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": false
+    "cache_hit": true
   },
   "secret_scan": {
     "scope": "full",
@@ -387,12 +387,6 @@
         "risk_tier": "low",
         "file": "verification/generator/generated-test/test_ac_gen_018.py",
         "line": 7
-      },
-      {
-        "rule_id": "Hex High Entropy String",
-        "risk_tier": "low",
-        "file": "verification/graph-query-engine/generated-test/test_ac_gqe_005.py",
-        "line": 144
       },
       {
         "rule_id": "Hex High Entropy String",
