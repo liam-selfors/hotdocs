@@ -1,30 +1,28 @@
-"""Docs Site Renderer: renders a CorpusGraph into the static docs explorer.
+"""Docs site renderer: renders a CorpusGraph into a static explorer site."""
 
-A pure presentation layer over ``verification/corpus-graph.json``: the DAG
-view (laid out and filtered in the browser by the asset ``static/app.js``),
-one detail page per node, and the corpus-health dashboard.
-"""
 from __future__ import annotations
 
 import html
+import json
 from pathlib import Path
 from urllib.parse import quote
 
 __all__ = ["render_docs_site", "main"]
 
-_SIZE_COLORS = {"ok": "#2e7d32", "over": "#c62828"}
-_UNKNOWN_SIZE_COLOR = "#757575"
-
 _STYLE = (
-    "body{font-family:sans-serif;margin:1.5em;}"
-    ".hidden{display:none;}"
-    ".absent{color:#757575;font-style:italic;}"
-    "pre{background:#f5f5f5;padding:0.75em;white-space:pre-wrap;}"
+    "<style>\n"
+    ".hidden { display: none; }\n"
+    ".absent { color: #757575; font-style: italic; }\n"
+    ".size-ok { color: #2e7d32; font-weight: bold; }\n"
+    ".size-over { color: #c62828; font-weight: bold; }\n"
+    ".size-unknown { color: #757575; font-weight: bold; }\n"
+    "</style>\n"
 )
+
+_ABSENT = '<span class="absent">absent</span>'
 
 
 def _get(obj, key):
-    """Read ``key`` from a dict or as an attribute of an object."""
     if isinstance(obj, dict):
         return obj.get(key)
     return getattr(obj, key, None)
@@ -34,208 +32,164 @@ def _esc(value) -> str:
     return html.escape(str(value), quote=True)
 
 
-def _absent(value) -> bool:
+def _is_absent(value) -> bool:
     return value is None or (isinstance(value, (str, list, dict)) and len(value) == 0)
 
 
-_ABSENT_HTML = '<span class="absent">absent</span>'
-
-
-def _render_value(value) -> str:
-    if _absent(value):
-        return _ABSENT_HTML
+def _value(value) -> str:
+    if _is_absent(value):
+        return _ABSENT
     if isinstance(value, dict):
-        items = "".join(
-            f"<dt>{_esc(k)}</dt><dd>{_render_value(v)}</dd>" for k, v in value.items()
+        rows = "".join(
+            f"<dt>{_esc(key)}</dt><dd>{_value(value[key])}</dd>"
+            for key in sorted(value, key=str)
         )
-        return f"<dl>{items}</dl>"
+        return f"<dl>{rows}</dl>"
     if isinstance(value, list):
-        items = "".join(f"<li>{_render_value(v)}</li>" for v in value)
-        return f"<ul>{items}</ul>"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return _esc(value)
+        return "<ul>" + "".join(f"<li>{_value(item)}</li>" for item in value) + "</ul>"
+    if isinstance(value, str):
+        return _esc(value)
+    return _esc(json.dumps(value))
 
 
-def _page(title: str, body: str) -> str:
+def _page(title: str, body: str, script: str = "") -> str:
     return (
         "<!DOCTYPE html>\n"
-        '<html lang="en">\n'
-        "<head>\n"
-        '<meta charset="utf-8">\n'
+        '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         f"<title>{_esc(title)}</title>\n"
-        f"<style>{_STYLE}</style>\n"
-        "</head>\n"
-        "<body>\n"
-        f"{body}"
-        "</body>\n"
-        "</html>\n"
+        f"{_STYLE}</head>\n<body>\n{body}{script}</body>\n</html>\n"
     )
 
 
-def _detail_href(node_id) -> str:
+def _node_href(node_id: str) -> str:
     return "nodes/" + quote(str(node_id), safe="") + ".html"
 
 
-def _index_html(nodes, edges, asset_text: str) -> str:
-    node_items = "".join(
-        f'<li class="node" data-id="{_esc(node_id)}" '
-        f'data-type="{_esc(_get(nodes[node_id], "type"))}">'
-        f'<a href="{_esc(_detail_href(node_id))}">{_esc(node_id)}</a></li>\n'
-        for node_id in sorted(nodes)
-    )
-    edge_items = "".join(
-        f'<li class="edge" data-from="{_esc(_get(edge, "from"))}" '
-        f'data-to="{_esc(_get(edge, "to"))}" data-kind="{_esc(_get(edge, "kind"))}">'
-        f'{_esc(_get(edge, "from"))} {_esc(_get(edge, "kind"))} {_esc(_get(edge, "to"))}'
-        "</li>\n"
-        for edge in edges
-    )
-    body = (
-        "<h1>Corpus graph</h1>\n"
-        '<p><a href="dashboard.html">Corpus health</a></p>\n'
-        '<input id="search" type="search">\n'
-        '<svg id="dag"></svg>\n'
-        f'<ul id="nodes">\n{node_items}</ul>\n'
-        f'<ul id="edges">\n{edge_items}</ul>\n'
-        '<script type="module">'
-        + asset_text
-        + "\ninit(document);\n"
-        + "</script>\n"
-    )
-    return _page("Corpus graph", body)
-
-
-def _documents_html(documents) -> str:
-    if _absent(documents):
-        return _ABSENT_HTML
-    return "".join(
-        f'<section class="document"><h3>{_esc(name)}</h3><pre>{_esc(text)}</pre></section>\n'
-        for name, text in documents.items()
-    )
-
-
-def _criteria_html(criteria) -> str:
-    if _absent(criteria):
-        return _ABSENT_HTML
-    if isinstance(criteria, dict):
-        entries = list(criteria.items())
-    else:
-        entries = [(None, c) for c in criteria]
-    groups: dict[str, list] = {}
-    for criterion_id, criterion in entries:
-        groups.setdefault(str(_get(criterion, "kind")), []).append((criterion_id, criterion))
+def _documents_section(documents) -> str:
+    if _is_absent(documents):
+        return _ABSENT
     parts = []
-    for kind in sorted(groups):
-        items = "".join(
-            "<li>"
-            + (f"<strong>{_esc(cid)}</strong> " if cid is not None else "")
-            + _render_value(c)
-            + "</li>"
-            for cid, c in groups[kind]
-        )
+    for key in sorted(documents, key=str):
         parts.append(
-            f'<section class="criteria-kind" data-kind="{_esc(kind)}">'
-            f"<h3>{_esc(kind)}</h3><ul>{items}</ul></section>\n"
+            f'<section class="document"><h3>{_esc(key)}</h3>'
+            f"<pre>{_esc(documents[key])}</pre></section>\n"
         )
     return "".join(parts)
 
 
-def _size_html(status) -> str:
-    if _absent(status):
-        return _ABSENT_HTML
-    color = _SIZE_COLORS.get(status, _UNKNOWN_SIZE_COLOR)
-    return (
-        f'<span class="size size-{_esc(status)}" style="color:{color}">'
-        f"{_esc(status)}</span>"
-    )
+def _criteria_section(criteria) -> str:
+    if _is_absent(criteria):
+        return _ABSENT
+    if isinstance(criteria, dict):
+        pairs = [(key, criteria[key]) for key in criteria]
+    else:
+        pairs = [(_get(item, "id"), item) for item in criteria]
+    groups: dict[str, list] = {}
+    for crit_id, item in pairs:
+        groups.setdefault(str(_get(item, "kind")), []).append((crit_id, item))
+    parts = []
+    for kind in sorted(groups):
+        parts.append(f'<section class="criteria-kind"><h3>{_esc(kind)}</h3>\n')
+        for crit_id, item in groups[kind]:
+            parts.append(f"<h4>{_value(crit_id)}</h4>{_value(item)}\n")
+        parts.append("</section>\n")
+    return "".join(parts)
+
+
+def _size_section(status) -> str:
+    if _is_absent(status):
+        return _ABSENT
+    return f'<span class="size size-{_esc(status)}">{_esc(status)}</span>'
 
 
 def _component_body(node) -> str:
     verification = _get(node, "verification")
+    requirement_results = _get(verification, "requirement_results") if verification is not None else None
+    criteria = _get(verification, "criteria") if verification is not None else None
     return (
-        "<h2>Documents</h2>\n"
-        f'<div id="documents">{_documents_html(_get(node, "documents"))}</div>\n'
-        "<h2>Requirements</h2>\n"
-        f'<div id="requirements">{_render_value(_get(verification, "requirement_results"))}</div>\n'
-        "<h2>Acceptance criteria</h2>\n"
-        f'<div id="criteria">{_criteria_html(_get(verification, "criteria"))}</div>\n'
-        "<h2>Provenance</h2>\n"
-        f'<div id="provenance">{_render_value(_get(node, "provenance"))}</div>\n'
-        "<h2>Size</h2>\n"
-        f'<div id="size">{_size_html(_get(node, "size_status"))}</div>\n'
-        "<h2>Exemptions</h2>\n"
-        f'<div id="exemptions"><p>sealed: {_render_value(_get(node, "sealed"))}</p>'
-        f'<p>pinned overrides: {_render_value(_get(node, "pinned_overrides"))}</p></div>\n'
-        "<h2>Owners</h2>\n"
-        f'<div id="owners">{_render_value(_get(node, "owners"))}</div>\n'
+        f'<h2>Documents</h2>\n<div id="documents">{_documents_section(_get(node, "documents"))}</div>\n'
+        f'<h2>Requirements</h2>\n<div id="requirements">{_value(requirement_results)}</div>\n'
+        f'<h2>Acceptance criteria</h2>\n<div id="criteria">{_criteria_section(criteria)}</div>\n'
+        f'<h2>Provenance</h2>\n<div id="provenance">{_value(_get(node, "provenance"))}</div>\n'
+        f'<h2>Size</h2>\n<div id="size">{_size_section(_get(node, "size_status"))}</div>\n'
+        f'<h2>Exemptions</h2>\n<div id="exemptions"><dl>'
+        f'<dt>sealed</dt><dd id="sealed">{_value(_get(node, "sealed"))}</dd>'
+        f'<dt>pinned_overrides</dt><dd id="pinned-overrides">{_value(_get(node, "pinned_overrides"))}</dd>'
+        f"</dl></div>\n"
+        f'<h2>Owners</h2>\n<div id="owners">{_value(_get(node, "owners"))}</div>\n'
     )
 
 
-def _detail_html(node_id, node) -> str:
+def _detail_page(node_id, node) -> str:
     node_type = _get(node, "type")
     body = (
-        '<p><a href="../index.html">Corpus graph</a></p>\n'
+        '<p><a href="../index.html">Graph</a> | <a href="../dashboard.html">Dashboard</a></p>\n'
         f"<h1>{_esc(node_id)}</h1>\n"
-        f'<p class="type">{_esc(node_type)}</p>\n'
+        f'<p>type: <span id="type">{_value(node_type)}</span></p>\n'
     )
     if node_type == "component":
         body += _component_body(node)
     return _page(str(node_id), body)
 
 
-def _dashboard_html(nodes, aggregates) -> str:
-    type_counts: dict[str, int] = {}
-    size_counts: dict[str, int] = {}
-    for node_id in sorted(nodes):
+def _dashboard_page(nodes, aggregates) -> str:
+    sizes: dict[str, int] = {}
+    for node_id in sorted(nodes, key=str):
         node = nodes[node_id]
-        node_type = str(_get(node, "type"))
-        type_counts[node_type] = type_counts.get(node_type, 0) + 1
-        if node_type == "component":
-            status = str(_get(node, "size_status"))
-            size_counts[status] = size_counts.get(status, 0) + 1
-    type_rows = "".join(
-        f'<tr data-type="{_esc(t)}"><td>{_esc(t)}</td><td>{n}</td></tr>'
-        for t, n in sorted(type_counts.items())
-    )
-    size_rows = "".join(
-        f'<tr data-size="{_esc(s)}"><td>{_size_html(s)}</td><td>{n}</td></tr>'
-        for s, n in sorted(size_counts.items())
-    )
+        if _get(node, "type") == "component":
+            key = str(_get(node, "size_status"))
+            sizes[key] = sizes.get(key, 0) + 1
     body = (
-        '<p><a href="index.html">Corpus graph</a></p>\n'
+        '<p><a href="index.html">Graph</a></p>\n'
         "<h1>Corpus health</h1>\n"
-        "<h2>Aggregates</h2>\n"
-        f'<div id="aggregates">{_render_value(aggregates)}</div>\n'
-        "<h2>Nodes by type</h2>\n"
-        f'<table id="node-types">{type_rows}</table>\n'
-        "<h2>Size-cap distribution</h2>\n"
-        f'<table id="size-distribution">{size_rows}</table>\n'
+        f'<h2>Aggregates</h2>\n<div id="aggregates">{_value(aggregates)}</div>\n'
+        f'<h2>Size-cap distribution</h2>\n<div id="size-distribution">{_value(sizes)}</div>\n'
     )
     return _page("Corpus health", body)
 
 
-def render_docs_site(graph, out_dir: Path) -> None:
-    """Render ``graph`` (a CorpusGraph or its dict form) into ``out_dir``."""
-    out_dir = Path(out_dir)
-    nodes = _get(graph, "nodes")
-    edges = _get(graph, "edges")
-    aggregates = _get(graph, "aggregates")
-    asset_text = (Path(__file__).parent.parent / "static" / "app.js").read_text(
-        encoding="utf-8"
+def _index_page(nodes, edges, asset: str) -> str:
+    node_items = []
+    for node_id in sorted(nodes, key=str):
+        node_type = _get(nodes[node_id], "type")
+        node_items.append(
+            f'<li class="node" data-id="{_esc(node_id)}" data-type="{_esc(node_type)}">'
+            f'<a href="{_esc(_node_href(node_id))}">{_esc(node_id)}</a></li>\n'
+        )
+    edge_items = []
+    for edge in edges:
+        edge_items.append(
+            f'<li class="edge" data-from="{_esc(_get(edge, "from"))}" '
+            f'data-to="{_esc(_get(edge, "to"))}" data-kind="{_esc(_get(edge, "kind"))}">'
+            f'{_esc(_get(edge, "from"))} {_esc(_get(edge, "kind"))} {_esc(_get(edge, "to"))}</li>\n'
+        )
+    body = (
+        '<p><a href="dashboard.html">Dashboard</a></p>\n'
+        "<h1>Corpus graph</h1>\n"
+        '<input id="search" type="search">\n'
+        '<svg id="dag"></svg>\n'
+        '<ul id="nodes">\n' + "".join(node_items) + "</ul>\n"
+        '<ul id="edges">\n' + "".join(edge_items) + "</ul>\n"
     )
+    script = '<script type="module">' + asset + "\ninit(document);\n" + "</script>\n"
+    return _page("Corpus graph", body, script)
+
+
+def render_docs_site(graph, out_dir: Path) -> None:
+    out_dir = Path(out_dir)
+    nodes = _get(graph, "nodes") or {}
+    edges = _get(graph, "edges") or []
+    aggregates = _get(graph, "aggregates")
+    asset = (Path(__file__).parent.parent / "static" / "app.js").read_text(encoding="utf-8")
+
     nodes_dir = out_dir / "nodes"
     nodes_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "index.html").write_text(
-        _index_html(nodes, edges, asset_text), encoding="utf-8"
-    )
-    (out_dir / "dashboard.html").write_text(
-        _dashboard_html(nodes, aggregates), encoding="utf-8"
-    )
-    for node_id in sorted(nodes):
-        (nodes_dir / (quote(str(node_id), safe="") + ".html")).write_text(
-            _detail_html(node_id, nodes[node_id]), encoding="utf-8"
+    (out_dir / "index.html").write_text(_index_page(nodes, edges, asset), encoding="utf-8")
+    (out_dir / "dashboard.html").write_text(_dashboard_page(nodes, aggregates), encoding="utf-8")
+    for node_id in sorted(nodes, key=str):
+        (nodes_dir / (str(node_id) + ".html")).write_text(
+            _detail_page(node_id, nodes[node_id]), encoding="utf-8"
         )
 
 
-from .cli import main  # noqa: E402  (re-export, after render_docs_site exists)
+from .cli import main  # noqa: E402

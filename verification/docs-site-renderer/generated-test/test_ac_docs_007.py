@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:efcc3b02ca833a536c95191e1f764400b4d58a71e735ca8f6eaeb99409363c58
+# hotdocs-criterion: sha256:ccdd1bb5c4615aedb1ef02574581cc53d60693f5b7de9f52131d9f90cba9b3a5
 import importlib
 import json
 from pathlib import Path
@@ -7,14 +7,10 @@ import docs_site_renderer
 
 
 def _main():
-    try:
+    cli = getattr(docs_site_renderer, "cli", None)
+    if cli is None or not hasattr(cli, "main"):
         cli = importlib.import_module("docs_site_renderer.cli")
-        fn = getattr(cli, "main", None)
-        if fn is not None:
-            return fn
-    except ImportError:
-        pass
-    return docs_site_renderer.main
+    return cli.main
 
 
 def _valid_graph():
@@ -31,7 +27,7 @@ def _valid_graph():
                 "owners": ["pipeline-team"],
                 "documents": {
                     "component.md": "# Foo\n\nThe foo component.\n",
-                    "requirements/R-FOO-001.md": "**R-FOO-001** - foo MUST work.\n",
+                    "requirements/R-FOO-001.md": "# R-FOO-001\n\nFoo MUST work.\n",
                 },
             },
             "comp-bar": {
@@ -59,69 +55,77 @@ def _valid_graph():
     }
 
 
-def test_valid_graph_renders_and_returns_0(tmp_path):
-    repo_root = tmp_path / "repo"
-    (repo_root / "verification").mkdir(parents=True)
-    graph_text = json.dumps(_valid_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
-    (repo_root / "verification" / "corpus-graph.json").write_text(graph_text, encoding="utf-8")
-    out = tmp_path / "out"
-    out.mkdir()
-
-    rc = _main()(["--repo-root=" + str(repo_root), "--out=" + str(out)])
-
-    assert rc == 0
-    assert (out / "index.html").is_file()
-    assert (out / "index.html").read_text(encoding="utf-8").strip() != ""
+def _write_graph(repo_root):
+    verification = repo_root / "verification"
+    verification.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(_valid_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+    (verification / "corpus-graph.json").write_text(data, encoding="utf-8")
 
 
-def test_missing_graph_returns_1_with_one_error_line(tmp_path, capsys):
+def test_valid_graph_renders_site_and_returns_0(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    _write_graph(repo_root)
     out = tmp_path / "out"
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
 
-    capsys.readouterr()
-    rc = _main()(["--repo-root=" + str(repo_root), "--out=" + str(out)])
-    captured = capsys.readouterr()
+    code = _main()(["--repo-root=" + str(repo_root), "--out=" + str(out)])
 
-    assert rc == 1
-    text = captured.err
-    if text.endswith("\n"):
-        text = text[:-1]
-    lines = text.split("\n")
-    assert len(lines) == 1, repr(captured.err)
-    line = lines[0]
-    assert line.startswith("error: ")
-    assert line.endswith(
-        "verification/corpus-graph.json is missing; run hotdocs corpus-graph build first"
-    )
+    assert code == 0
+    assert out.is_dir()
+    index = out / "index.html"
+    assert index.is_file()
+    assert index.read_text(encoding="utf-8").strip() != ""
 
 
-def test_missing_graph_default_out_returns_1(tmp_path, capsys, monkeypatch):
+def test_missing_graph_returns_1_with_one_error_line(tmp_path, monkeypatch, capsys):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.chdir(tmp_path)
-
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
     capsys.readouterr()
-    rc = _main()(["--repo-root=" + str(repo_root)])
-    captured = capsys.readouterr()
 
-    assert rc == 1
-    text = captured.err
-    if text.endswith("\n"):
-        text = text[:-1]
-    lines = text.split("\n")
-    assert len(lines) == 1, repr(captured.err)
-    assert lines[0].startswith("error: ")
-    assert lines[0].endswith(
+    code = _main()(["--repo-root=" + str(repo_root)])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    err = captured.err
+    if err.endswith("\n"):
+        err = err[:-1]
+    assert err != ""
+    assert "\n" not in err
+    assert "\r" not in err
+    assert err.startswith("error: ")
+    assert err.endswith(
         "verification/corpus-graph.json is missing; run hotdocs corpus-graph build first"
     )
+    assert "  " not in err
 
 
 def test_unknown_flag_returns_2(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
     assert _main()(["--bogus"]) == 2
 
 
 def test_flag_without_value_returns_2(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+    assert _main()(["--out"]) == 2
+
+
+def test_usage_errors_return_2_with_valid_repo_root(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_graph(repo_root)
+    monkeypatch.chdir(repo_root)
+
+    assert _main()(["--bogus"]) == 2
     assert _main()(["--out"]) == 2

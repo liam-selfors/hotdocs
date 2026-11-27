@@ -1,9 +1,9 @@
-# hotdocs-criterion: sha256:9ea97baf76d3618299190320ed45b8fae544ca79b03776b5ec4a42cd6e93bb4d
+# hotdocs-criterion: sha256:278817e7c6cf0f966be99921732484b7113dfc6e8a52c2e0d7a4aa449a793d07
 import copy
 
 import pytest
 
-import docs_site_renderer
+import docs_site_renderer  # noqa: F401  (module under test must be importable)
 
 
 NODES = [
@@ -20,21 +20,21 @@ EDGES = [
 
 
 CASES = [
-    ("ALPHA", False, True, False, [True, False, True]),
-    ("comp-", False, False, True, [False, True, True]),
-    ("", False, False, False, [False, False, True]),
-    ("zzz", True, True, True, [True, True, True]),
-    ("component", True, True, True, [True, True, True]),
-    (" alpha", True, True, True, [True, True, True]),
+    ("ALPHA", (False, True, False), [True, False, True]),
+    ("comp-", (False, False, True), [False, True, True]),
+    ("", (False, False, False), [False, False, True]),
+    ("zzz", (True, True, True), [True, True, True]),
+    ("component", (True, True, True), [True, True, True]),
+    (" alpha", (True, True, True), [True, True, True]),
 ]
 
 
 @pytest.mark.parametrize(
-    "query,h_alpha,h_beta,h_cap,expected_edges",
+    "query, hidden_nodes, hidden_edges",
     CASES,
-    ids=[repr(c[0]) for c in CASES],
+    ids=["ALPHA", "comp-", "empty", "zzz", "component", "space-alpha"],
 )
-def test_filter_graph_table(asset_runner, query, h_alpha, h_beta, h_cap, expected_edges):
+def test_filter_graph_table(asset_runner, query, hidden_nodes, hidden_edges):
     run = asset_runner("static/app.js")
     nodes = copy.deepcopy(NODES)
     edges = copy.deepcopy(EDGES)
@@ -43,18 +43,13 @@ def test_filter_graph_table(asset_runner, query, h_alpha, h_beta, h_cap, expecte
 
     expected = {
         "hiddenNodes": {
-            "comp-Alpha": h_alpha,
-            "comp-beta": h_beta,
-            "P-ALPHA-CAP": h_cap,
+            "comp-Alpha": hidden_nodes[0],
+            "comp-beta": hidden_nodes[1],
+            "P-ALPHA-CAP": hidden_nodes[2],
         },
-        "hiddenEdges": expected_edges,
+        "hiddenEdges": hidden_edges,
     }
     assert result == expected
-    assert set(result["hiddenNodes"].keys()) == {"comp-Alpha", "comp-beta", "P-ALPHA-CAP"}
-    for value in result["hiddenNodes"].values():
-        assert value is True or value is False
-    for value in result["hiddenEdges"]:
-        assert value is True or value is False
 
 
 def test_filter_graph_empty_inputs(asset_runner):

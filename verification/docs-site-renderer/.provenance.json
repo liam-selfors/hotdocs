@@ -1,5 +1,9 @@
 {
-  "spec_bundle_hash": "sha256:9c77d46f332225b9ef4b346f70c1db676d10d82ce6df6ac489f4bbaaf77fd94a",
+  "spec_bundle_hash": "sha256:844a37c611dc4e1c078d426dee5b37dc8367da58a3e00ccae6125904847ff5de",
+  "spec_bundle_parts": {
+    "spec": "sha256:86de8e310d8ee2b07298151e62edaeae37310ee669f783d9276083c11bd5063c",
+    "dependency_code": "sha256:86fede5cdd0a644b653c68b1bfc951c406f7ef7de5b47ff917cdb8533374f312"
+  },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -17,13 +21,13 @@
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
-    "verifier": "verifier-orchestrator@3.5.0",
+    "verifier": "verifier-orchestrator@4.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-25T07:59:30Z",
+  "generated_at": "2026-11-27T14:45:52Z",
   "verification_run_id": "docs-site-renderer-attempt-1",
   "verification_report": {
     "component_id": "comp-docs-site-renderer",
@@ -32,67 +36,145 @@
         "id": "AC-DOCS-001",
         "covers": "R-DOCS-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-002",
         "covers": "R-DOCS-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-003",
         "covers": "R-DOCS-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-004",
         "covers": "R-DOCS-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-005",
         "covers": "R-DOCS-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-006",
         "covers": "R-DOCS-006",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-007",
         "covers": "R-DOCS-007",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-008",
         "covers": "R-DOCS-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-009",
         "covers": "R-DOCS-008",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-010",
         "covers": "R-DOCS-009",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-DOCS-011",
         "covers": "R-DOCS-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-DOCS-012",
+        "covers": "R-DOCS-009",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -107,7 +189,7 @@
       "R-DOCS-009": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8695652173913043,
+    "mutation_score": 0.9365079365079365,
     "mutation_error": null,
     "assets": [
       {
@@ -125,9 +207,21 @@
         "kind": "javascript",
         "path": "static/app.js",
         "definition_sha256": "sha256:d2f09824acce8d89c52a8aca03208100bf2394ead1badbcf74f9579121e57e24",
-        "adapter_sha256": "sha256:0dcef0425f8f30ed8a6c3a848b365a03fc45655de4bc3b2c6dd79cda3801bd37",
+        "adapter_sha256": "sha256:a5517072a0f89f92dff24348b759cafc7d83d63f5ed4aeaf1068592983a35cf0",
         "versions": {
           "node": "26.13.1"
+        },
+        "lockfile_sha256": null
+      }
+    ],
+    "drivers": [
+      {
+        "name": "browser",
+        "definition_sha256": "sha256:6cc4ade0a2ce8f5267881c8ab8572e3801e306d747ec77cb1d9c9f725520073b",
+        "adapter_sha256": "sha256:f05ff802f66c942f8003d163a2932a7b172f385dcc6ad9cea9008f7844570498",
+        "versions": {
+          "playwright": "1.64.1",
+          "chromium": "156.0.8078.4"
         },
         "lockfile_sha256": null
       }
@@ -365,9 +459,21 @@
       "kind": "javascript",
       "path": "static/app.js",
       "definition_sha256": "sha256:d2f09824acce8d89c52a8aca03208100bf2394ead1badbcf74f9579121e57e24",
-      "adapter_sha256": "sha256:0dcef0425f8f30ed8a6c3a848b365a03fc45655de4bc3b2c6dd79cda3801bd37",
+      "adapter_sha256": "sha256:a5517072a0f89f92dff24348b759cafc7d83d63f5ed4aeaf1068592983a35cf0",
       "versions": {
         "node": "26.13.1"
+      },
+      "lockfile_sha256": null
+    }
+  ],
+  "drivers": [
+    {
+      "name": "browser",
+      "definition_sha256": "sha256:6cc4ade0a2ce8f5267881c8ab8572e3801e306d747ec77cb1d9c9f725520073b",
+      "adapter_sha256": "sha256:f05ff802f66c942f8003d163a2932a7b172f385dcc6ad9cea9008f7844570498",
+      "versions": {
+        "playwright": "1.64.1",
+        "chromium": "156.0.8078.4"
       },
       "lockfile_sha256": null
     }

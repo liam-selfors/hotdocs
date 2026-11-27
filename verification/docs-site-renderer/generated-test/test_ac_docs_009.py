@@ -1,48 +1,16 @@
-# hotdocs-criterion: sha256:60346a41d7bc0cb67348a2c35fc7a5661612d8a32159b68361c9aaa332ce15e6
-import docs_site_renderer
+# hotdocs-criterion: sha256:7ac3cdd0af1ebb9077a743b99403030844ad577725c0950f508921bd0b355741
+"""AC-DOCS-009 (covers R-DOCS-008): layoutGraph lays out the DAG by type column."""
+
+import copy
+
+import docs_site_renderer  # noqa: F401  (module under test; the asset is its own file)
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def _node(id_, x, y, label_x, label_y):
+    return {"id": id_, "x": x, "y": y, "labelX": label_x, "labelY": label_y}
 
 
-def as_plain(value, keys):
-    return {k: field(value, k) for k in keys}
-
-
-NODE_KEYS = ["id", "x", "y", "labelX", "labelY"]
-EDGE_KEYS = ["index", "from", "to", "x1", "y1", "x2", "y2", "color"]
-TOP_KEYS = ["width", "height", "nodes", "edges"]
-
-
-def normalize(result):
-    if isinstance(result, dict):
-        assert sorted(result.keys()) == sorted(TOP_KEYS)
-    nodes = field(result, "nodes")
-    edges = field(result, "edges")
-    norm_nodes = []
-    for n in nodes:
-        if isinstance(n, dict):
-            assert sorted(n.keys()) == sorted(NODE_KEYS)
-        norm_nodes.append(as_plain(n, NODE_KEYS))
-    norm_edges = []
-    for e in edges:
-        if isinstance(e, dict):
-            assert sorted(e.keys()) == sorted(EDGE_KEYS)
-        norm_edges.append(as_plain(e, EDGE_KEYS))
-    return {
-        "width": field(result, "width"),
-        "height": field(result, "height"),
-        "nodes": norm_nodes,
-        "edges": norm_edges,
-    }
-
-
-def node(id_, x, y, lx, ly):
-    return {"id": id_, "x": x, "y": y, "labelX": lx, "labelY": ly}
-
-
-def edge(index, frm, to, x1, y1, x2, y2, color):
+def _edge(index, frm, to, x1, y1, x2, y2, color):
     return {
         "index": index,
         "from": frm,
@@ -55,7 +23,7 @@ def edge(index, frm, to, x1, y1, x2, y2, color):
     }
 
 
-def test_layout_graph_columns_rows_edges_and_height(asset_runner):
+def test_layout_graph_full_example(asset_runner):
     run = asset_runner("static/app.js")
     nodes = [
         {"id": "P-A", "type": "capability"},
@@ -74,41 +42,43 @@ def test_layout_graph_columns_rows_edges_and_height(asset_runner):
         {"from": "gone", "to": "comp-c", "kind": "realizes"},
         {"from": "zz", "to": "P-B", "kind": "mentions"},
     ]
+    nodes_before = copy.deepcopy(nodes)
+    edges_before = copy.deepcopy(edges)
+
     result = run("layoutGraph", [nodes, edges])
+
     expected = {
         "width": 1100,
         "height": 180,
         "nodes": [
-            node("P-A", 120, 30, 132, 34),
-            node("VAR-X", 640, 30, 652, 34),
-            node("comp-a", 380, 30, 392, 34),
-            node("P-B", 120, 70, 132, 74),
-            node("comp-b", 380, 70, 392, 74),
-            node("comp-c", 380, 110, 392, 114),
-            node("zz", 900, 30, 912, 34),
+            _node("P-A", 120, 30, 132, 34),
+            _node("VAR-X", 640, 30, 652, 34),
+            _node("comp-a", 380, 30, 392, 34),
+            _node("P-B", 120, 70, 132, 74),
+            _node("comp-b", 380, 70, 392, 74),
+            _node("comp-c", 380, 110, 392, 114),
+            _node("zz", 900, 30, 912, 34),
         ],
         "edges": [
-            edge(0, "comp-a", "comp-b", 380, 30, 380, 70, "#1565c0"),
-            edge(1, "comp-a", "P-A", 380, 30, 120, 30, "#2e7d32"),
-            edge(2, "comp-b", "VAR-X", 380, 70, 640, 30, "#ef6c00"),
-            edge(5, "zz", "P-B", 900, 30, 120, 70, "#ef6c00"),
+            _edge(0, "comp-a", "comp-b", 380, 30, 380, 70, "#1565c0"),
+            _edge(1, "comp-a", "P-A", 380, 30, 120, 30, "#2e7d32"),
+            _edge(2, "comp-b", "VAR-X", 380, 70, 640, 30, "#ef6c00"),
+            _edge(5, "zz", "P-B", 900, 30, 120, 70, "#ef6c00"),
         ],
     }
-    assert normalize(result) == expected
-    if isinstance(result, dict):
-        assert result == expected
+    assert result == expected
+    # The test's own inputs are untouched (they are serialized to the runner).
+    assert nodes == nodes_before
+    assert edges == edges_before
 
 
 def test_layout_graph_empty(asset_runner):
     run = asset_runner("static/app.js")
     result = run("layoutGraph", [[], []])
-    expected = {"width": 1100, "height": 100, "nodes": [], "edges": []}
-    assert normalize(result) == expected
-    if isinstance(result, dict):
-        assert result == expected
+    assert result == {"width": 1100, "height": 100, "nodes": [], "edges": []}
 
 
-def test_layout_graph_single_var_self_edge(asset_runner):
+def test_layout_graph_single_var_self_loop(asset_runner):
     run = asset_runner("static/app.js")
     result = run(
         "layoutGraph",
@@ -117,12 +87,9 @@ def test_layout_graph_single_var_self_edge(asset_runner):
             [{"from": "v", "to": "v", "kind": "realizes"}],
         ],
     )
-    expected = {
+    assert result == {
         "width": 1100,
         "height": 100,
-        "nodes": [node("v", 640, 30, 652, 34)],
-        "edges": [edge(0, "v", "v", 640, 30, 640, 30, "#2e7d32")],
+        "nodes": [_node("v", 640, 30, 652, 34)],
+        "edges": [_edge(0, "v", "v", 640, 30, 640, 30, "#2e7d32")],
     }
-    assert normalize(result) == expected
-    if isinstance(result, dict):
-        assert result == expected

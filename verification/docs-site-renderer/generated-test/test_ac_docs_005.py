@@ -1,5 +1,10 @@
-# hotdocs-criterion: sha256:4a4a3e0a39ce8e9c2d1a3fe8625c1e9f8d36f0e3876e2db649ea411bf7875c21
+# hotdocs-criterion: sha256:b758637e8dbf9e0ba625b52b18e0faa9e7ebed8e68995a23a91090dae54244bf
+"""AC-DOCS-005: after a successful render, the rendered output directory is
+absent from version control (R-DOCS-005: the rendered site is a CI build
+artifact, never committed)."""
+
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -9,134 +14,122 @@ import pytest
 import docs_site_renderer
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+GIT = shutil.which("git")
 
 
-def _git(args, cwd):
-    return subprocess.run(
-        ["git"] + list(args),
-        cwd=str(cwd),
+def _git(repo, *args):
+    env = dict(os.environ)
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["HOME"] = str(repo)
+    result = subprocess.run(
+        [GIT, "-c", "user.name=hotdocs-test", "-c", "user.email=test@example.invalid",
+         "-c", "commit.gpgsign=false", "-C", str(repo)] + list(args),
         capture_output=True,
         text=True,
+        env=env,
         timeout=60,
     )
+    return result
 
 
-def _write_graph(repo_root):
-    graph = {
+def _git_ok(repo, *args):
+    result = _git(repo, *args)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result.stdout
+
+
+def _corpus_graph():
+    return {
         "nodes": {
-            "P-DEMO": {"type": "capability"},
+            "P-ZERO-EDIT": {"type": "capability"},
             "comp-foo": {
                 "type": "component",
                 "verification": None,
                 "provenance": None,
                 "size_status": "ok",
-                "sealed": True,
+                "sealed": False,
                 "pinned_overrides": [],
                 "owners": ["pipeline-team"],
                 "documents": {
-                    "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\nowners: [pipeline-team]\n---\n\n# Foo\n",
+                    "component.md": "# Foo\n\nThe foo component.\n",
+                    "requirements/R-FOO-001.md": "# R-FOO-001\n\nFoo MUST work.\n",
                 },
-            },
-            "comp-bar": {
-                "type": "component",
-                "verification": None,
-                "provenance": None,
-                "size_status": "unknown",
-                "sealed": True,
-                "pinned_overrides": [],
-                "owners": [],
-                "documents": {},
             },
             "VAR-FOO-URL": {"type": "var"},
         },
         "edges": [
+            {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
             {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
-            {"from": "comp-foo", "to": "comp-bar", "kind": "depends_on"},
         ],
         "aggregates": {
-            "orphan_capability_rate": 1.0,
-            "orphan_component_rate": 0.5,
-            "orphan_var_rate": 0.0,
+            "orphan_capability_rate": 0.0,
+            "orphan_component_rate": 0.0,
+            "orphan_var_rate": 1.0,
         },
     }
-    verification = repo_root / "verification"
-    verification.mkdir(parents=True, exist_ok=True)
-    (verification / "corpus-graph.json").write_text(
-        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+
+
+def _main():
+    main = getattr(docs_site_renderer, "main", None)
+    if main is None:
+        from docs_site_renderer import cli
+        main = cli.main
+    return main
+
+
+@pytest.mark.skipif(GIT is None, reason="git is not installed")
+def test_rendered_output_is_not_committed(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    graph_path = repo / "verification" / "corpus-graph.json"
+    graph_path.parent.mkdir(parents=True)
+    graph_path.write_text(
+        json.dumps(_corpus_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n",
+        encoding="utf-8",
     )
 
+    _git_ok(repo, "init", "-q")
+    _git_ok(repo, "add", "-A")
+    _git_ok(repo, "commit", "-q", "-m", "fixture")
+    head_before = _git_ok(repo, "rev-parse", "HEAD").strip()
+    tracked_before = sorted(_git_ok(repo, "ls-files").splitlines())
 
-def _tool_root():
-    pkg = Path(docs_site_renderer.__file__).resolve()
-    gen = next((p for p in pkg.parents if p.name == "gen"), None)
-    if gen is None:
-        return None
-    return gen.parent
+    # Given a successful render (default --out, relative paths resolved
+    # against both the working directory and --repo-root, which coincide).
+    monkeypatch.chdir(repo)
+    code = _main()(["--repo-root=" + str(repo)])
+    assert code == 0
+
+    out_dir = repo / "dist" / "docs-site"
+    assert out_dir.is_dir()
+    assert (out_dir / "index.html").is_file()
+
+    # When the repository's committed files are checked
+    head_after = _git_ok(repo, "rev-parse", "HEAD").strip()
+    tracked_after = sorted(_git_ok(repo, "ls-files").splitlines())
+
+    # Then the rendered output directory is absent from version control.
+    assert head_after == head_before
+    assert tracked_after == tracked_before
+    assert not any(p == "dist" or p.startswith("dist/") for p in tracked_after)
+    assert _git_ok(repo, "ls-files", "--", "dist/docs-site").strip() == ""
+    committed = _git_ok(repo, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+    assert not any(p.startswith("dist/") for p in committed)
+    # The default output location is a build-artifact location, never gen/.
+    assert not (repo / "gen" / "docs-site-renderer" / "index.html").exists()
 
 
-def test_ac_docs_005_rendered_output_absent_from_version_control(tmp_path, monkeypatch):
-    if shutil.which("git") is None:
-        pytest.skip("git is not available")
-
-    repo_root = (tmp_path / "repo").resolve()
-    repo_root.mkdir()
-    _write_graph(repo_root)
-
-    # A temporary repository holding the committed inputs.
-    assert _git(["init", "-q"], repo_root).returncode == 0
-    _git(["config", "user.email", "test@example.invalid"], repo_root)
-    _git(["config", "user.name", "test"], repo_root)
-    assert _git(["add", "-A"], repo_root).returncode == 0
-    commit = _git(["commit", "-q", "-m", "fixture"], repo_root)
-    assert commit.returncode == 0, commit.stderr
-
-    # A successful render to the default output location.
-    monkeypatch.chdir(repo_root)
-    rc = docs_site_renderer.main(["--repo-root=" + str(repo_root)])
-    assert rc == 0
-
-    out_dir = repo_root / "dist" / "docs-site"
-    assert out_dir.is_dir(), "default output dir dist/docs-site/ was not produced"
-    rendered = [p for p in out_dir.rglob("*") if p.is_file()]
-    assert rendered, "render produced no files"
-    index_html = out_dir / "index.html"
-    assert index_html.is_file()
-
-    # The render writes nothing under gen/ (a committed location).
-    assert not (repo_root / "gen").exists() or not any(
-        p.is_file() for p in (repo_root / "gen").rglob("*")
-    )
-
-    # The rendered output is not part of the committed files.
-    tracked = _git(["ls-files", "-z"], repo_root)
-    assert tracked.returncode == 0
-    tracked_paths = [p for p in tracked.stdout.split("\0") if p]
-    assert not any(p.startswith("dist/") for p in tracked_paths)
-
-    # The tool's own repository commits no rendered site either.
-    tool_root = _tool_root()
-    if tool_root is None:
-        pytest.skip("docs_site_renderer is not under a gen/ directory")
-    top = _git(["rev-parse", "--show-toplevel"], tool_root)
-    if top.returncode != 0:
-        pytest.skip("the tool root is not a git working tree")
-
-    in_dist = _git(["ls-files", "-z", "--", "dist/docs-site"], tool_root)
-    assert in_dist.returncode == 0
-    assert [p for p in in_dist.stdout.split("\0") if p] == [], (
-        "rendered output under dist/docs-site/ is committed"
-    )
-
-    all_tracked = _git(["ls-files", "-z"], tool_root)
-    assert all_tracked.returncode == 0
-    rendered_index = index_html.read_bytes()
-    for rel in [p for p in all_tracked.stdout.split("\0") if p]:
-        if not rel.endswith(".html"):
-            continue
-        candidate = tool_root / rel
-        if candidate.is_file():
-            assert candidate.read_bytes() != rendered_index, (
-                "a rendered page is committed at " + repr(rel)
-            )
+@pytest.mark.skipif(GIT is None, reason="git is not installed")
+def test_real_repository_does_not_commit_rendered_site():
+    parents = list(Path(docs_site_renderer.__file__).resolve().parents)
+    gens = [p for p in parents if p.name == "gen"]
+    if not gens:
+        pytest.skip("component is not laid out under a gen/ directory")
+    repo = gens[0].parent
+    probe = _git(repo, "rev-parse", "--is-inside-work-tree")
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        pytest.skip("component's repository is not a git work tree")
+    toplevel = Path(_git_ok(repo, "rev-parse", "--show-toplevel").strip())
+    rel = os.path.relpath(repo / "dist" / "docs-site", toplevel).replace(os.sep, "/")
+    assert _git_ok(toplevel, "ls-files", "--", rel).strip() == ""
