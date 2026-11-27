@@ -85,8 +85,6 @@ open_session(repo_root: Path, work_dir: Path) -> object
 - `provision` never raises; it reports `ok` false with a `reason` of
   `<name> needs <program> >= <version>` or `<name> environment: <reason>`.
   `versions` and `lockfile_sha256` are as for an asset kind.
-- `FIXTURE` equals `NAME` for every driver a project uses, so a test
-  author's probe knows a driver's fixture from its name alone (`D385`).
 - `open_session` returns the object the fixture yields, with a
   `close()` method the plugin calls at teardown even when the test
   fails. `work_dir` is a directory the session may write (pytest's
