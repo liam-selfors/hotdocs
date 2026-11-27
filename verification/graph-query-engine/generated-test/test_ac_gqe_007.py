@@ -1,10 +1,10 @@
-# hotdocs-criterion: sha256:535bedc36ef440b2d97e5f4cd07549090f6a779f4d1d4ade612112a8218e47fa
+# hotdocs-criterion: sha256:00d7c6db752e861d95b9dbb932bbd8bebfc00323c6173ff1933a1c03ac1be302
 """AC-GQE-007: load_views is idempotent on the same DuckDB connection.
 
-Given a DuckDB connection with load_views already called once
-When load_views is called again on the same connection
-Then it succeeds without error and every view still returns the same
-  results as the first call
+Given a DuckDB connection with load_views already called once,
+when load_views is called again on the same connection,
+then it succeeds without error and every view still returns the same
+results as the first call.
 """
 
 from pathlib import Path
@@ -26,166 +26,229 @@ VIEWS = [
 ]
 
 
-def _write(root, rel, text):
-    path = root / rel
+def _write(repo_root, rel, lines):
+    path = Path(repo_root) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(text.encode("utf-8"))
+    content = "\n".join(lines) + "\n"
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(content)
 
 
-def _frontmatter(lines):
-    return "---\n" + "".join(line + "\n" for line in lines) + "---\n"
-
-
-def _build_fixture(root):
+def _build_fixture(repo_root):
     _write(
-        root,
+        repo_root,
         "specs/components/foo/component.md",
-        _frontmatter(
-            [
-                "id: comp-foo",
-                "title: Foo",
-                "status: draft",
-                "owners: [team]",
-                "depends_on: [comp-bar]",
-                "realizes: [P-X]",
-                "uses_var: [VAR-X]",
-                "depends_on_guarantees: [G-BAR-001]",
-            ]
-        )
-        + "\n"
-        + "# Foo\n"
-        + "\n"
-        + "one two three\n",
+        [
+            "---",
+            "id: comp-foo",
+            "title: Foo",
+            "status: draft",
+            "owners: [team]",
+            "depends_on: [comp-bar]",
+            "realizes: [P-X]",
+            "uses_var: [VAR-X]",
+            "depends_on_guarantees: [G-BAR-001]",
+            "---",
+            "",
+            "# Foo",
+            "",
+            "one two three",
+        ],
     )
     _write(
-        root,
+        repo_root,
         "specs/components/bar/component.md",
-        _frontmatter(
-            [
-                "id: comp-bar",
-                "title: Bar",
-                "status: draft",
-                "owners: [team]",
-                "realizes: [P-X]",
-            ]
-        )
-        + "\n"
-        + "# Bar\n",
+        [
+            "---",
+            "id: comp-bar",
+            "title: Bar",
+            "status: draft",
+            "owners: [team]",
+            "realizes: [P-X]",
+            "---",
+            "",
+            "# Bar",
+        ],
     )
     _write(
-        root,
+        repo_root,
         "specs/components/foo/requirements/R-FOO-001.md",
-        "# R-FOO-001\n\nfoo MUST work.\n",
+        ["# R-FOO-001", "", "foo MUST work."],
     )
     _write(
-        root,
+        repo_root,
         "specs/components/foo/requirements/R-FOO-002.md",
-        "# R-FOO-002\n\nfoo MUST stop.\n",
+        ["# R-FOO-002", "", "foo MUST stop."],
     )
     _write(
-        root,
+        repo_root,
         "specs/components/foo/acceptance/AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
+        ["# AC-FOO-001", "", "Covers: R-FOO-001", "Kind: generated-test"],
     )
     _write(
-        root,
-        "specs/components/foo/acceptance/AC-FOO-002.md",
-        "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: generated-test\n",
-    )
-    _write(
-        root,
+        repo_root,
         "specs/components/foo/interface/guarantees/G-FOO-001.md",
-        "# G-FOO-001\n\nfoo never fails.\n",
+        ["# G-FOO-001", "", "foo never fails."],
     )
     _write(
-        root,
+        repo_root,
         "specs/product/x.md",
-        _frontmatter(["id: P-X", "title: X", "status: draft", "owners: [team]"])
-        + "# X\n"
-        + "\n"
-        + "### CS-X-001\n"
-        + "Covers: P-X\n"
-        + "\n"
-        + "### CS-X-002\n"
-        + "Covers: P-X\n",
+        [
+            "---",
+            "id: P-X",
+            "title: X",
+            "status: draft",
+            "owners: [team]",
+            "---",
+            "",
+            "# X",
+            "",
+            "### CS-X-001",
+            "Covers: P-X",
+            "",
+            "### CS-X-002",
+            "Covers: P-X",
+        ],
     )
     _write(
-        root,
+        repo_root,
         "specs/vars/x.md",
-        _frontmatter(["id: VAR-X", "title: V", "status: draft", "owners: [team]"])
-        + "# V\n",
+        [
+            "---",
+            "id: VAR-X",
+            "title: V",
+            "status: draft",
+            "owners: [team]",
+            "---",
+            "",
+            "# V",
+        ],
     )
     _write(
-        root,
+        repo_root,
         "specs/decisions/D1.md",
-        _frontmatter(
-            [
-                "id: D1",
-                "title: One",
-                "status: ratified",
-                "owners: [team]",
-                "last_ratified_commit: 0000000",
-            ]
-        )
-        + "# D1\n",
+        [
+            "---",
+            "id: D1",
+            "title: One",
+            "status: ratified",
+            "owners: [team]",
+            "last_ratified_commit: 0000000",
+            "---",
+            "",
+            "# D1",
+        ],
     )
     _write(
-        root,
+        repo_root,
         "specs/decisions/D2.md",
-        _frontmatter(
-            [
-                "id: D2",
-                "title: Two",
-                "status: draft",
-                "owners: [team]",
-                "supersedes: D1",
-                "builds_on: [D1]",
-            ]
-        )
-        + "# D2\n",
+        [
+            "---",
+            "id: D2",
+            "title: Two",
+            "status: draft",
+            "owners: [team]",
+            "supersedes: D1",
+            "builds_on: [D1]",
+            "---",
+            "",
+            "# D2",
+        ],
     )
     for d in ("specs/product", "specs/vars", "specs/decisions"):
-        _write(root, d + "/README.md", "# Readme\n\nNotes.\n")
+        _write(repo_root, d + "/README.md", ["# Readme", "", "Notes."])
 
 
 def _snapshot(con):
-    result = {}
+    """Capture each view's columns and rows (order-insensitive), or the
+    error class if querying it raises."""
+    snap = {}
     for view in VIEWS:
-        cur = con.execute("SELECT * FROM " + view)
-        columns = [d[0] for d in cur.description]
-        rows = cur.fetchall()
-        rows_sorted = sorted(rows, key=repr)
-        result[view] = (columns, rows_sorted)
-    return result
+        try:
+            cur = con.execute("SELECT * FROM " + view)
+            columns = [d[0] for d in cur.description]
+            rows = cur.fetchall()
+            snap[view] = ("ok", columns, sorted(repr(r) for r in rows))
+        except Exception as exc:  # recorded and compared, not swallowed
+            snap[view] = ("error", type(exc).__name__, None)
+    return snap
 
 
-def test_ac_gqe_007_load_views_twice_is_idempotent(tmp_path):
-    repo_root = Path(tmp_path).resolve()
+def _kind_counts(con):
+    rows = con.execute(
+        "SELECT kind, count(*) FROM nodes GROUP BY kind"
+    ).fetchall()
+    return {k: c for k, c in rows}
+
+
+def _edge_counts(con):
+    rows = con.execute(
+        "SELECT edge_type, count(*) FROM edges GROUP BY edge_type"
+    ).fetchall()
+    return {k: c for k, c in rows}
+
+
+def test_ac_gqe_007_load_views_idempotent(tmp_path):
+    repo_root = tmp_path.resolve()
     _build_fixture(repo_root)
 
     con = duckdb.connect()
-    try:
-        con.execute("INSTALL yaml FROM community")
-        con.execute("LOAD yaml")
+    con.execute("INSTALL yaml FROM community")
+    con.execute("LOAD yaml")
 
-        graph_query_engine.load_views(con, repo_root)
-        first = _snapshot(con)
+    # Given: load_views already called once
+    graph_query_engine.load_views(con, repo_root)
+    first = _snapshot(con)
+    first_kinds = _kind_counts(con)
+    first_edges = _edge_counts(con)
 
-        # Second call on the same connection must not raise.
-        graph_query_engine.load_views(con, repo_root)
-        second = _snapshot(con)
+    # The views every consumer relies on must actually be queryable.
+    for view in ("nodes", "edges", "component_docs", "component_size",
+                 "bundle_size", "decision_lineage", "component_context"):
+        assert first[view][0] == "ok", (
+            "view " + repr(view) + " not queryable after first load_views: "
+            + repr(first[view])
+        )
 
-        for view in VIEWS:
-            assert view in first
-            assert view in second
-            first_cols, first_rows = first[view]
-            second_cols, second_rows = second[view]
-            assert first_cols == second_cols, view + ": columns changed"
-            assert first_rows == second_rows, view + ": rows changed"
+    # When: load_views is called again on the same connection
+    # Then: it succeeds without error
+    graph_query_engine.load_views(con, repo_root)
 
-        # Sanity: the corpus is actually seen, so the comparison is meaningful.
-        assert len(first["nodes"][1]) > 0
-        assert len(first["edges"][1]) > 0
-        assert len(first["component_docs"][1]) == 2
-    finally:
-        con.close()
+    # And every view still returns the same results as the first call
+    second = _snapshot(con)
+    for view in VIEWS:
+        assert view in second
+        assert second[view] == first[view], (
+            "view " + repr(view) + " changed after second load_views: "
+            + repr(first[view]) + " vs " + repr(second[view])
+        )
+
+    assert _kind_counts(con) == first_kinds
+    assert _edge_counts(con) == first_edges
+
+    # Sanity: results still match the fixture's documented shape.
+    assert first_kinds == {
+        "component": 2,
+        "capability": 1,
+        "var": 1,
+        "decision": 2,
+        "guarantee": 1,
+        "requirement": 2,
+        "acceptance": 1,
+        "capability_scenario": 2,
+    }
+    assert first_edges == {
+        "depends_on": 1,
+        "realizes": 2,
+        "uses_var": 1,
+        "depends_on_guarantees": 1,
+        "covers": 3,
+        "supersedes": 1,
+        "builds_on": 1,
+    }
+
+    # A third call is equally fine.
+    graph_query_engine.load_views(con, repo_root)
+    assert _snapshot(con) == first
+
+    con.close()

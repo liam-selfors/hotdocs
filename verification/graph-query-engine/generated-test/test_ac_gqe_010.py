@@ -1,4 +1,8 @@
-# hotdocs-criterion: sha256:7fa0247cce126cad4601fa5252ee68f1078db4a1a39aa58cb949ba3a25c0ed5f
+# hotdocs-criterion: sha256:6499ca427121f4d881312d2c5f9763c42fe2258f22b053c18ab9ffc5ab573482
+"""AC-GQE-010 (covers R-GQE-002): the decision arms of the `edges` view read
+only a decision's frontmatter block, never its prose, and `builds_on`
+yields one row per flow-style list entry."""
+
 from pathlib import Path
 
 import duckdb
@@ -13,153 +17,151 @@ def _write(root, rel, text):
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def _build_corpus(root):
+def _frontmatter(lines):
+    return "---\n" + "\n".join(lines) + "\n---\n"
+
+
+def _build_base_fixture(repo_root):
     _write(
-        root,
+        repo_root,
         "specs/components/foo/component.md",
-        "---\n"
-        + "id: comp-foo\n"
-        + "title: Foo\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "sealed: true\n"
-        + "source_path: legacy/foo/\n"
-        + "depends_on: [comp-bar]\n"
-        + "realizes: [P-X]\n"
-        + "uses_var: [VAR-X]\n"
-        + "depends_on_guarantees: [G-BAR-001]\n"
-        + "---\n"
-        + "\n"
-        + "# Foo\n"
-        + "\n"
-        + "one two three\n",
+        _frontmatter(
+            [
+                "id: comp-foo",
+                "title: Foo",
+                "status: draft",
+                "owners: [team]",
+                "depends_on: [comp-bar]",
+                "realizes: [P-X]",
+                "uses_var: [VAR-X]",
+                "depends_on_guarantees: [G-BAR-001]",
+            ]
+        )
+        + "\n# Foo\n\none two three\n",
     )
     _write(
-        root,
+        repo_root,
         "specs/components/bar/component.md",
-        "---\n"
-        + "id: comp-bar\n"
-        + "title: Bar\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "sealed: true\n"
-        + "source_path: legacy/bar/\n"
-        + "realizes: [P-X]\n"
-        + "---\n"
-        + "\n"
-        + "# Bar\n",
+        _frontmatter(
+            [
+                "id: comp-bar",
+                "title: Bar",
+                "status: draft",
+                "owners: [team]",
+                "realizes: [P-X]",
+            ]
+        )
+        + "\n# Bar\n",
     )
-    _write(root, "specs/components/foo/requirements/R-FOO-001.md",
-           "# R-FOO-001\n\nfoo MUST work.\n")
-    _write(root, "specs/components/foo/requirements/R-FOO-002.md",
-           "# R-FOO-002\n\nfoo MUST stop.\n")
-    _write(root, "specs/components/foo/acceptance/AC-FOO-001.md",
-           "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n")
-    _write(root, "specs/components/foo/acceptance/AC-FOO-002.md",
-           "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: generated-test\n")
-    _write(root, "specs/components/foo/interface/guarantees/G-FOO-001.md",
-           "# G-FOO-001\n\nfoo never fails.\n")
     _write(
-        root,
+        repo_root,
+        "specs/components/foo/requirements/R-FOO-001.md",
+        "# R-FOO-001\n\nfoo MUST work.\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/requirements/R-FOO-002.md",
+        "# R-FOO-002\n\nfoo MUST stop.\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/acceptance/AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/interface/guarantees/G-FOO-001.md",
+        "# G-FOO-001\n\nfoo never fails.\n",
+    )
+    _write(
+        repo_root,
         "specs/product/x.md",
-        "---\n"
-        + "id: P-X\n"
-        + "title: X\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
-        + "# X\n"
-        + "\n"
-        + "### CS-X-001\n"
-        + "Covers: P-X\n"
-        + "\n"
-        + "### CS-X-002\n"
-        + "Covers: P-X\n",
+        _frontmatter(["id: P-X", "title: X", "status: draft", "owners: [team]"])
+        + "# X\n\n### CS-X-001\nCovers: P-X\n\n### CS-X-002\nCovers: P-X\n",
     )
     _write(
-        root,
+        repo_root,
         "specs/vars/x.md",
-        "---\n"
-        + "id: VAR-X\n"
-        + "title: V\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
+        _frontmatter(["id: VAR-X", "title: V", "status: draft", "owners: [team]"])
         + "# V\n",
     )
     _write(
-        root,
+        repo_root,
         "specs/decisions/D1.md",
-        "---\n"
-        + "id: D1\n"
-        + "title: One\n"
-        + "status: ratified\n"
-        + "owners: [team]\n"
-        + "last_ratified_commit: 0000000\n"
-        + "---\n"
+        _frontmatter(
+            [
+                "id: D1",
+                "title: One",
+                "status: ratified",
+                "owners: [team]",
+                "last_ratified_commit: 0000000",
+            ]
+        )
         + "# D1\n",
     )
     _write(
-        root,
+        repo_root,
         "specs/decisions/D2.md",
-        "---\n"
-        + "id: D2\n"
-        + "title: Two\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "supersedes: D1\n"
-        + "builds_on: [D1]\n"
-        + "---\n"
+        _frontmatter(
+            [
+                "id: D2",
+                "title: Two",
+                "status: draft",
+                "owners: [team]",
+                "supersedes: D1",
+                "builds_on: [D1]",
+            ]
+        )
         + "# D2\n",
     )
-    # A decision whose prose quotes supersedes/builds_on but whose
+    for d in ("specs/product", "specs/vars", "specs/decisions"):
+        _write(repo_root, d + "/README.md", "# Readme\n\nNotes.\n")
+
+
+def _build_fixture(repo_root):
+    _build_base_fixture(repo_root)
+    # A decision whose prose quotes the fields at line starts, but whose
     # frontmatter declares neither.
     _write(
-        root,
+        repo_root,
         "specs/decisions/D3.md",
-        "---\n"
-        + "id: D3\n"
-        + "title: Three\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
-        + "# D3\n"
-        + "\n"
-        + "This decision quotes another record's frontmatter:\n"
-        + "\n"
+        _frontmatter(["id: D3", "title: Three", "status: draft", "owners: [team]"])
+        + "# D3\n\n"
+        + "A prior draft of this record carried these lines:\n\n"
         + "supersedes: D1\n"
-        + "builds_on: [D2]\n"
-        + "\n"
-        + "Inline too: `supersedes: D1` and `builds_on: [D2]`.\n",
+        + "builds_on: [D2]\n\n"
+        + "Neither is declared here; they are only quoted.\n",
     )
     # A decision whose frontmatter declares builds_on: [D1, D2].
     _write(
-        root,
+        repo_root,
         "specs/decisions/D4.md",
-        "---\n"
-        + "id: D4\n"
-        + "title: Four\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "builds_on: [D1, D2]\n"
-        + "---\n"
+        _frontmatter(
+            [
+                "id: D4",
+                "title: Four",
+                "status: draft",
+                "owners: [team]",
+                "builds_on: [D1, D2]",
+            ]
+        )
         + "# D4\n",
     )
-    for d in ("specs/product", "specs/vars", "specs/decisions"):
-        _write(root, d + "/README.md", "# Readme\n\nNotes.\n")
 
 
 @pytest.fixture
 def con(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
+    _build_fixture(repo_root)
     connection = duckdb.connect()
     connection.execute("INSTALL yaml FROM community")
     connection.execute("LOAD yaml")
     graph_query_engine.load_views(connection, repo_root)
-    yield connection
-    connection.close()
+    try:
+        yield connection
+    finally:
+        connection.close()
 
 
 def test_prose_quoted_fields_produce_no_decision_edges(con):
@@ -169,19 +171,13 @@ def test_prose_quoted_fields_produce_no_decision_edges(con):
     ).fetchall()
     assert rows == []
 
-    # Sanity: no decision edge anywhere targets as if sourced from D3's prose.
-    all_d3 = con.execute(
-        "SELECT source_id, target_id, edge_type FROM edges WHERE source_id = 'D3'"
-    ).fetchall()
-    assert all_d3 == []
 
-
-def test_frontmatter_builds_on_list_yields_exactly_its_rows(con):
+def test_builds_on_list_yields_exactly_one_row_per_entry(con):
     rows = con.execute(
-        "SELECT source_id, target_id, edge_type FROM edges WHERE source_id = 'D4'"
+        "SELECT source_id, target_id, edge_type FROM edges "
+        "WHERE source_id = 'D4' ORDER BY target_id, edge_type"
     ).fetchall()
-    assert len(rows) == 2
-    assert sorted(tuple(r) for r in rows) == [
+    assert [tuple(r) for r in rows] == [
         ("D4", "D1", "builds_on"),
         ("D4", "D2", "builds_on"),
     ]

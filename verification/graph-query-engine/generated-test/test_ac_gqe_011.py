@@ -1,4 +1,6 @@
-# hotdocs-criterion: sha256:994f2ab99a50679d5f4569a4c7a60f419237573545ca3e60636f1380a98e2c8b
+# hotdocs-criterion: sha256:5254322c01d5328c649c757d15d1477f03c47cd64e5be462739956f43c2827a1
+"""AC-GQE-011: bundle_size view over the graph-query-engine fixture corpus (R-GQE-009)."""
+
 from pathlib import Path
 
 import duckdb
@@ -46,60 +48,101 @@ def _bar_component_lines():
 
 
 def _write_fixture(repo_root, foo_extra=None, bar_extra=None):
-    _write(repo_root, "specs/components/foo/component.md",
-           _foo_component_lines() + list(foo_extra or []))
-    _write(repo_root, "specs/components/bar/component.md",
-           _bar_component_lines() + list(bar_extra or []))
-    _write(repo_root, "specs/components/foo/requirements/R-FOO-001.md",
-           ["# R-FOO-001", "", "foo MUST work."])
-    _write(repo_root, "specs/components/foo/requirements/R-FOO-002.md",
-           ["# R-FOO-002", "", "foo MUST stop."])
-    _write(repo_root, "specs/components/foo/acceptance/AC-FOO-001.md",
-           ["# AC-FOO-001", "", "Covers: R-FOO-001", "Kind: generated-test"])
-    _write(repo_root, "specs/components/foo/interface/guarantees/G-FOO-001.md",
-           ["# G-FOO-001", "", "foo never fails."])
-    _write(repo_root, "specs/product/x.md", [
-        "---",
-        "id: P-X",
-        "title: X",
-        "status: draft",
-        "owners: [team]",
-        "---",
-        "# X",
-        "### CS-X-001",
-        "Covers: P-X",
-        "### CS-X-002",
-        "Covers: P-X",
-    ])
-    _write(repo_root, "specs/vars/x.md", [
-        "---",
-        "id: VAR-X",
-        "title: V",
-        "status: draft",
-        "owners: [team]",
-        "---",
-        "# V",
-    ])
-    _write(repo_root, "specs/decisions/D1.md", [
-        "---",
-        "id: D1",
-        "title: One",
-        "status: ratified",
-        "owners: [team]",
-        "---",
-        "# D1",
-    ])
-    _write(repo_root, "specs/decisions/D2.md", [
-        "---",
-        "id: D2",
-        "title: Two",
-        "status: draft",
-        "owners: [team]",
-        "supersedes: D1",
-        "builds_on: [D1]",
-        "---",
-        "# D2",
-    ])
+    _write(
+        repo_root,
+        "specs/components/foo/component.md",
+        _foo_component_lines() + list(foo_extra or []),
+    )
+    _write(
+        repo_root,
+        "specs/components/bar/component.md",
+        _bar_component_lines() + list(bar_extra or []),
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/requirements/R-FOO-001.md",
+        ["# R-FOO-001", "", "foo MUST work."],
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/requirements/R-FOO-002.md",
+        ["# R-FOO-002", "", "foo MUST stop."],
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/acceptance/AC-FOO-001.md",
+        ["# AC-FOO-001", "", "Covers: R-FOO-001", "Kind: generated-test"],
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/interface/guarantees/G-FOO-001.md",
+        ["# G-FOO-001", "", "foo never fails."],
+    )
+    _write(
+        repo_root,
+        "specs/product/x.md",
+        [
+            "---",
+            "id: P-X",
+            "title: X",
+            "status: draft",
+            "owners: [team]",
+            "---",
+            "",
+            "# X",
+            "",
+            "### CS-X-001",
+            "Covers: P-X",
+            "",
+            "### CS-X-002",
+            "Covers: P-X",
+        ],
+    )
+    _write(
+        repo_root,
+        "specs/vars/x.md",
+        [
+            "---",
+            "id: VAR-X",
+            "title: V",
+            "status: draft",
+            "owners: [team]",
+            "---",
+            "",
+            "# V",
+        ],
+    )
+    _write(
+        repo_root,
+        "specs/decisions/D1.md",
+        [
+            "---",
+            "id: D1",
+            "title: One",
+            "status: ratified",
+            "owners: [team]",
+            "last_ratified_commit: 0000000",
+            "---",
+            "",
+            "# D1",
+        ],
+    )
+    _write(
+        repo_root,
+        "specs/decisions/D2.md",
+        [
+            "---",
+            "id: D2",
+            "title: Two",
+            "status: draft",
+            "owners: [team]",
+            "supersedes: D1",
+            "builds_on: [D1]",
+            "---",
+            "",
+            "# D2",
+        ],
+    )
     for d in ("specs/product", "specs/vars", "specs/decisions"):
         _write(repo_root, d + "/README.md", ["# Readme", "", "Notes."])
 
@@ -122,7 +165,7 @@ def _bundle_sizes(repo_root):
     return result
 
 
-def test_bundle_size_on_fixture_corpus(tmp_path):
+def test_bundle_size_on_base_fixture(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _write_fixture(repo_root)
@@ -136,13 +179,22 @@ def test_bundle_size_on_fixture_corpus(tmp_path):
     assert sizes["bar"][1] == 0
 
 
-def test_bundle_size_drops_rationale_and_change_log_counts_dependency_purpose(tmp_path):
+def test_bundle_size_drops_excluded_sections_and_counts_dependency_purpose(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _write_fixture(
         repo_root,
         foo_extra=["", "## Rationale", "", "Old reasons here."],
-        bar_extra=["", "## Purpose", "", "Bar holds data.", "", "## Change log", "", "- D1 added it."],
+        bar_extra=[
+            "",
+            "## Purpose",
+            "",
+            "Bar holds data.",
+            "",
+            "## Change log",
+            "",
+            "- D1 added it.",
+        ],
     )
 
     sizes = _bundle_sizes(repo_root)

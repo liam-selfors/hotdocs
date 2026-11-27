@@ -1,5 +1,5 @@
-# hotdocs-criterion: sha256:91c37f9a948839a8290d97729be6f8232e04623324eeb971f343c8f951681894
-"""AC-GQE-002: edges view row counts per edge_type over the fixture corpus."""
+# hotdocs-criterion: sha256:a8be757c0820b53d1cfbb835db28f29658a25416ff523dd2097a012935013420
+"""AC-GQE-002: edges row count per edge_type over the fixture corpus."""
 
 from pathlib import Path
 
@@ -11,8 +11,7 @@ import graph_query_engine
 def _write(repo_root, rel, text):
     path = Path(repo_root) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(text)
+    path.write_bytes(text.encode("utf-8"))
 
 
 def _build_fixture(repo_root):
@@ -20,32 +19,32 @@ def _build_fixture(repo_root):
         repo_root,
         "specs/components/foo/component.md",
         "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "depends_on: [comp-bar]\n"
-        "realizes: [P-X]\n"
-        "uses_var: [VAR-X]\n"
-        "depends_on_guarantees: [G-BAR-001]\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "one two three\n",
+        + "id: comp-foo\n"
+        + "title: Foo\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "depends_on: [comp-bar]\n"
+        + "realizes: [P-X]\n"
+        + "uses_var: [VAR-X]\n"
+        + "depends_on_guarantees: [G-BAR-001]\n"
+        + "---\n"
+        + "\n"
+        + "# Foo\n"
+        + "\n"
+        + "one two three\n",
     )
     _write(
         repo_root,
         "specs/components/bar/component.md",
         "---\n"
-        "id: comp-bar\n"
-        "title: Bar\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "realizes: [P-X]\n"
-        "---\n"
-        "\n"
-        "# Bar\n",
+        + "id: comp-bar\n"
+        + "title: Bar\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "realizes: [P-X]\n"
+        + "---\n"
+        + "\n"
+        + "# Bar\n",
     )
     _write(
         repo_root,
@@ -71,60 +70,60 @@ def _build_fixture(repo_root):
         repo_root,
         "specs/product/x.md",
         "---\n"
-        "id: P-X\n"
-        "title: X\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "---\n"
-        "# X\n"
-        "\n"
-        "### CS-X-001\n"
-        "Covers: P-X\n"
-        "\n"
-        "### CS-X-002\n"
-        "Covers: P-X\n",
+        + "id: P-X\n"
+        + "title: X\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "---\n"
+        + "# X\n"
+        + "\n"
+        + "### CS-X-001\n"
+        + "Covers: P-X\n"
+        + "\n"
+        + "### CS-X-002\n"
+        + "Covers: P-X\n",
     )
     _write(
         repo_root,
         "specs/vars/x.md",
         "---\n"
-        "id: VAR-X\n"
-        "title: V\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "---\n"
-        "# V\n",
+        + "id: VAR-X\n"
+        + "title: V\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "---\n"
+        + "# V\n",
     )
     _write(
         repo_root,
         "specs/decisions/D1.md",
         "---\n"
-        "id: D1\n"
-        "title: One\n"
-        "status: ratified\n"
-        "owners: [team]\n"
-        "last_ratified_commit: 0000000\n"
-        "---\n"
-        "# D1\n",
+        + "id: D1\n"
+        + "title: One\n"
+        + "status: ratified\n"
+        + "owners: [team]\n"
+        + "last_ratified_commit: 0000000\n"
+        + "---\n"
+        + "# D1\n",
     )
     _write(
         repo_root,
         "specs/decisions/D2.md",
         "---\n"
-        "id: D2\n"
-        "title: Two\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "supersedes: D1\n"
-        "builds_on: [D1]\n"
-        "---\n"
-        "# D2\n",
+        + "id: D2\n"
+        + "title: Two\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "supersedes: D1\n"
+        + "builds_on: [D1]\n"
+        + "---\n"
+        + "# D2\n",
     )
     for d in ("specs/product", "specs/vars", "specs/decisions"):
         _write(repo_root, d + "/README.md", "# Readme\n\nNotes.\n")
 
 
-def test_ac_gqe_002_edges_counts_per_edge_type(tmp_path):
+def test_ac_gqe_002_edges_row_count_per_edge_type(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
@@ -136,13 +135,13 @@ def test_ac_gqe_002_edges_counts_per_edge_type(tmp_path):
         graph_query_engine.load_views(con, repo_root)
 
         rows = con.execute(
-            "SELECT edge_type, COUNT(*) FROM edges GROUP BY edge_type"
+            "SELECT edge_type, count(*) FROM edges GROUP BY edge_type"
         ).fetchall()
     finally:
         con.close()
 
-    counts = {r[0]: r[1] for r in rows}
-    expected = {
+    counts = {edge_type: int(n) for edge_type, n in rows}
+    assert counts == {
         "depends_on": 1,
         "realizes": 2,
         "uses_var": 1,
@@ -151,4 +150,3 @@ def test_ac_gqe_002_edges_counts_per_edge_type(tmp_path):
         "supersedes": 1,
         "builds_on": 1,
     }
-    assert counts == expected
