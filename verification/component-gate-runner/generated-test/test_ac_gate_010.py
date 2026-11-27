@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:8a8617a9fa5c4ecd58525b19f589db034318af3d1623afefec4f8664b4330f7e
+# hotdocs-criterion: sha256:11453dd535e3585cee4f811cd3c15318c54344f22929a888de358b543e209f0b
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -8,286 +7,367 @@ import pytest
 import component_gate_runner
 
 
-LOG_ENV = "GATE010_LOG"
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-LOG_HELPER = (
-    "import json\n"
-    "import os\n"
-    "import types\n"
-    "\n"
-    "def _log(rec):\n"
-    "    with open(os.environ[" + repr(LOG_ENV) + "], 'a', encoding='utf-8') as f:\n"
-    "        f.write(json.dumps(rec) + '\\n')\n"
-    "\n"
-)
+def _header(log_path):
+    return (
+        "import json\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "\n"
+        "def _log(fn, **kw):\n"
+        "    kw['fn'] = fn\n"
+        "    with open(LOG, 'a') as f:\n"
+        "        f.write(json.dumps(kw, default=repr) + chr(10))\n"
+        "\n"
+    )
 
-VERIFICATION_REPORT_SRC = (
-    "def _report(component_id):\n"
-    "    return {\n"
-    "        'component_id': component_id,\n"
-    "        'criteria': [{'id': 'AC-FOO-001', 'covers': 'R-FOO-001', 'kind': 'compiled', 'result': 'pass'}],\n"
-    "        'requirement_results': {'R-FOO-001': 'pass'},\n"
-    "        'interface_drift': False,\n"
-    "        'mutation_score': 0.9,\n"
-    "        'mutation_error': None,\n"
-    "        'assets': [],\n"
-    "        'overall': 'pass',\n"
-    "    }\n"
-    "\n"
-)
 
-PROVENANCE_CHECKER_SRC = (
-    LOG_HELPER
-    + "def current_sealed_key(component_id, repo_root):\n"
-    "    _log({'call': 'current_sealed_key'})\n"
-    "    return None\n"
-    "\n"
-    "def current_provenance_key(component_id, repo_root):\n"
-    "    _log({'call': 'current_provenance_key'})\n"
-    "    return types.SimpleNamespace(\n"
-    "        spec_bundle_hash='sha256:abc',\n"
-    "        gate_versions={'compiler': 'c@1', 'generated_test': 'g@1', 'verifier': 'v@1',\n"
-    "                       'license_scanner': 'l@1', 'secret_scanner': 's@1', 'generator': 'gen@1+v1'},\n"
-    "        assets=[],\n"
-    "    )\n"
-    "\n"
-    "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
-    "    _log({'call': 'check_provenance'})\n"
-    "    return {'hit': False, 'reason': 'no manifest', 'verification_report': None,\n"
-    "            'license_scan': None, 'secret_scan': None}\n"
-    "\n"
-    "def check_sealed_provenance(component_id, repo_root):\n"
-    "    _log({'call': 'check_sealed_provenance'})\n"
-    "    return {'hit': False, 'sealed': False, 'reason': 'not_sealed', 'verification_report': None,\n"
-    "            'license_scan': None, 'secret_scan': None, 'owners': None, 'source_hash': None,\n"
-    "            'written_at': None}\n"
-)
+VR_SRC = '''
+def _vr(component_id):
+    return {
+        "component_id": component_id,
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 0.9,
+        "mutation_error": None,
+        "assets": [],
+        "drivers": [],
+        "overall": "pass",
+    }
+'''
 
-ASSEMBLER_SRC = (
-    LOG_HELPER
-    + "def assemble(component_id, repo_root, mode='cold'):\n"
-    "    _log({'call': 'assemble'})\n"
-    "    return {\n"
-    "        'component_id': component_id,\n"
-    "        'spec_bundle_hash': 'sha256:abc',\n"
-    "        'spec': 'spec', 'interface': 'iface', 'constraints': '',\n"
-    "        'dependency_interfaces': {}, 'dependency_context': {}, 'dependency_usage': {},\n"
-    "        'vars': {}, 'glossary': '', 'hint_code': None,\n"
-    "    }\n"
-    "\n"
-    "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-    "    _log({'call': 'assemble_criterion'})\n"
-    "    return {'component_id': component_id, 'criterion_id': criterion_id, 'covers': '',\n"
-    "            'criterion_text': '', 'requirement_text': '', 'interface': '', 'glossary': '',\n"
-    "            'dependency_interfaces': {}, 'testing': ''}\n"
-)
+PROVENANCE_CHECKER_SRC = '''
+class _Key:
+    def __init__(self):
+        self.spec_bundle_hash = "sha256:abc"
+        self.spec_bundle_parts = {"spec": "sha256:01", "dependency_code": "sha256:02"}
+        self.gate_versions = {
+            "compiler": "criterion-compiler@1.0.0",
+            "generated_test": "generated_test@1.0.0",
+            "verifier": "verifier-orchestrator@2.0.0",
+            "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
+            "secret_scanner": "secret_scanner@0.0.0",
+            "generator": "generator@3.0.0+v11",
+        }
+        self.assets = [{"kind": "python", "path": ".", "definition_sha256": None,
+                        "adapter_sha256": "sha256:03", "versions": {"python": "3.12.4"},
+                        "lockfile_sha256": None}]
+        self.drivers = []
 
-GENERATION_LOOP_SRC = (
-    LOG_HELPER
-    + VERIFICATION_REPORT_SRC
-    + "RETRIED_CATEGORIES = ('truncated_response', 'missing_module', 'empty_response',\n"
-    "                      'agent_budget_exhausted', 'agent_unfinished', 'undecodable_file',\n"
-    "                      'missing_asset', 'malformed_layout')\n"
-    "\n"
-    "def run_attempts(component_id, bundle, repo_root, model, *, mode='single', max_attempts=3,\n"
-    "                 retry_feedback=None, seed=0, llm_backend=None, allow_unisolated_exec=False,\n"
-    "                 on_attempt=None):\n"
-    "    _log({'call': 'run_attempts', 'max_attempts': max_attempts, 'mode': mode})\n"
-    "    generation_result = {\n"
-    "        'component_id': component_id, 'spec_bundle_hash': 'sha256:abc', 'model': model,\n"
-    "        'prompt_version': 'v1', 'cache_hit': False, 'files': {'foo.py': 'X = 1\\n'},\n"
-    "        'model_call_error': None, 'refused': None, 'retry_feedback': retry_feedback,\n"
-    "        'mode': mode, 'transcript_sha256': None, 'turns': 1, 'tool_calls': 0, 'isolation': None,\n"
-    "    }\n"
-    "    report = _report(component_id)\n"
-    "    attempt = {'number': 1, 'outcome': 'passed', 'retry_feedback': [], 'error_category': None,\n"
-    "               'surface_ok': True, 'overall': 'pass', 'failed_requirements': [],\n"
-    "               'transcript_sha256': None, 'reauthored_tests': []}\n"
-    "    if on_attempt is not None:\n"
-    "        on_attempt(attempt, generation_result, report)\n"
-    "    return {\n"
-    "        'passed': True, 'stop_reason': 'passed', 'attempts': [attempt],\n"
-    "        'generation_result': generation_result, 'verification_report': report,\n"
-    "        'surface_report': {'ok': True, 'findings': []},\n"
-    "    }\n"
-    "\n"
-    "def make_closures(model, seed, repo_root, llm_backend=None):\n"
-    "    _log({'call': 'make_closures'})\n"
-    "    def test_author(bundle):\n"
-    "        return {'model_call_error': None, 'file': None}\n"
-    "    def judge(bundle):\n"
-    "        return {'result': 'pass', 'rationale': None}\n"
-    "    return (test_author, judge)\n"
-)
 
-TRACKER_SRC = (
-    LOG_HELPER
-    + "def write_attempt_record(component_id, generation_result, verification_report,\n"
-    "                         spec_bundle_hash, repo_root):\n"
-    "    _log({'call': 'write_attempt_record'})\n"
-    "    return {'attempt_id': '2026-01-01T00:00:00Z-aaaaaa', 'component_id': component_id,\n"
-    "            'timestamp': '2026-01-01T00:00:00Z', 'spec_bundle_hash': spec_bundle_hash,\n"
-    "            'generation': {}, 'verification': None}\n"
-    "\n"
-    "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-    "    return {'scope': 'whole-corpus', 'ready': True, 'components': {}, 'capabilities': {},\n"
-    "            'secret_scan': None, 'not_ready_reasons': []}\n"
-    "\n"
-    "def last_requirement_failures(component_id, repo_root):\n"
-    "    return []\n"
-)
+def current_sealed_key(component_id, repo_root):
+    _log("current_sealed_key", component_id=component_id)
+    return None
 
-LICENSE_SRC = (
-    LOG_HELPER
-    + "def scan(component_id, repo_root):\n"
-    "    _log({'call': 'license_scan'})\n"
-    "    return {'component_id': component_id, 'gate_version': 'license_scanner@4.0.0-no-reference-corpus',\n"
-    "            'evaluated': False, 'reason': 'no-reference-corpus', 'similarity_score': None,\n"
-    "            'block_threshold': None, 'blocked': False, 'matches': [], 'notified': False,\n"
-    "            'notification_delivery_error': None, 'cache_hit': False}\n"
-    "\n"
-    "def gate_version(repo_root):\n"
-    "    return 'license_scanner@4.0.0-no-reference-corpus'\n"
-)
 
-SECRET_SRC = (
-    LOG_HELPER
-    + "def scan(repo_root):\n"
-    "    _log({'call': 'secret_scan'})\n"
-    "    return {'scope': 'full', 'gate_version': 'secret_scanner@3.1.0', 'flagged': False,\n"
-    "            'matches': [], 'allowed': [], 'unused_allowlist_entries': [], 'notified': False,\n"
-    "            'notification_delivery_error': None, 'cache_hit': False}\n"
-    "\n"
-    "def scan_files(paths, repo_root=None):\n"
-    "    return scan(repo_root)\n"
-    "\n"
-    "def gate_version(repo_root):\n"
-    "    return 'secret_scanner@3.1.0'\n"
-)
+def current_provenance_key(component_id, repo_root):
+    _log("current_provenance_key", component_id=component_id)
+    return _Key()
 
-WRITER_SRC = (
-    LOG_HELPER
-    + "def write_provenance(component_id, inputs, repo_root):\n"
-    "    _log({'call': 'write_provenance'})\n"
-    "    return None\n"
-    "\n"
-    "def write_sealed_provenance(component_id, inputs, repo_root):\n"
-    "    _log({'call': 'write_sealed_provenance'})\n"
-    "    return None\n"
-)
 
-VERIFIER_SRC = (
-    LOG_HELPER
-    + VERIFICATION_REPORT_SRC
-    + "GATE_VERSION = 'verifier-orchestrator@3.5.0'\n"
-    "DEFAULT_TEST_TIMEOUT = 300.0\n"
-    "\n"
-    "def verify(component_id, repo_root, judge=None, test_author=None):\n"
-    "    _log({'call': 'verify'})\n"
-    "    return _report(component_id)\n"
-)
+def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root, spec_bundle_parts=None):
+    _log("check_provenance", component_id=component_id)
+    return {"hit": False, "reason": "no manifest", "verification_report": None,
+            "license_scan": None, "secret_scan": None}
+
+
+def check_sealed_provenance(component_id, repo_root):
+    _log("check_sealed_provenance", component_id=component_id)
+    return {"hit": False, "sealed": False, "reason": "not_sealed", "verification_report": None,
+            "license_scan": None, "secret_scan": None, "owners": None,
+            "source_hash": None, "written_at": None}
+'''
+
+SPEC_BUNDLE_ASSEMBLER_SRC = '''
+def assemble(component_id, repo_root, mode="cold"):
+    _log("assemble", component_id=component_id, mode=mode)
+    return {
+        "component_id": component_id,
+        "spec_bundle_hash": "sha256:abc",
+        "spec": "spec",
+        "interface": "interface",
+        "constraints": "",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+        "spec_bundle_parts": {"spec": "sha256:01", "dependency_code": "sha256:02"},
+    }
+
+
+def assemble_criterion(component_id, criterion_id, repo_root):
+    _log("assemble_criterion", component_id=component_id, criterion_id=criterion_id)
+    return {
+        "component_id": component_id,
+        "criterion_id": criterion_id,
+        "covers": "R-FOO-001",
+        "criterion_text": "",
+        "requirement_text": "",
+        "interface": "",
+        "glossary": "",
+        "dependency_interfaces": {},
+        "testing": "",
+    }
+'''
+
+GENERATION_LOOP_SRC = VR_SRC + '''
+
+RETRIED_CATEGORIES = ("truncated_response", "missing_module", "empty_response",
+                      "agent_budget_exhausted", "agent_unfinished", "undecodable_file",
+                      "missing_asset", "malformed_layout")
+
+
+def run_attempts(component_id, bundle, repo_root, model, *, mode="single", max_attempts=3,
+                 retry_feedback=None, seed=0, llm_backend=None, allow_unisolated_exec=False,
+                 on_attempt=None):
+    _log("run_attempts", component_id=component_id, model=model, mode=mode,
+         max_attempts=max_attempts)
+    generation_result = {
+        "component_id": component_id,
+        "spec_bundle_hash": "sha256:abc",
+        "model": model,
+        "prompt_version": "v12",
+        "cache_hit": False,
+        "files": {"foo.py": "X = 1"},
+        "model_call_error": None,
+        "refused": None,
+        "retry_feedback": retry_feedback,
+        "mode": "single",
+        "transcript_sha256": None,
+        "turns": 1,
+        "tool_calls": 0,
+        "isolation": None,
+    }
+    return {
+        "passed": True,
+        "stop_reason": "passed",
+        "attempts": [
+            {"number": 1, "outcome": "passed", "retry_feedback": [],
+             "error_category": None, "surface_ok": True, "overall": "pass",
+             "failed_requirements": [], "transcript_sha256": None,
+             "reauthored_tests": []},
+        ],
+        "generation_result": generation_result,
+        "verification_report": _vr(component_id),
+        "surface_report": {"ok": True, "findings": []},
+    }
+
+
+def make_closures(model, seed, repo_root, llm_backend=None):
+    _log("make_closures", model=model, seed=seed)
+
+    def test_author(bundle):
+        return {"model_call_error": None, "file": None}
+
+    def judge(bundle):
+        return {"result": "pass", "rationale": None}
+
+    return (test_author, judge)
+'''
+
+PROVENANCE_TRACKER_SRC = '''
+def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
+    _log("write_attempt_record", component_id=component_id)
+    return {
+        "attempt_id": "2026-10-25T14:32:01Z-a1b2c3",
+        "component_id": component_id,
+        "timestamp": "2026-10-25T14:32:01Z",
+        "spec_bundle_hash": spec_bundle_hash,
+        "generation": {},
+        "verification": None,
+    }
+
+
+def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
+    _log("check_readiness")
+    return {"scope": "whole-corpus", "ready": True, "components": {}, "capabilities": {},
+            "secret_scan": None, "not_ready_reasons": []}
+
+
+def last_requirement_failures(component_id, repo_root):
+    _log("last_requirement_failures", component_id=component_id)
+    return []
+'''
+
+VERIFIER_ORCHESTRATOR_SRC = VR_SRC + '''
+
+GATE_VERSION = "verifier-orchestrator@4.0.0"
+DEFAULT_TEST_TIMEOUT = 300.0
+
+
+def verify(component_id, repo_root, judge=None, test_author=None):
+    _log("verify", component_id=component_id)
+    return _vr(component_id)
+'''
+
+LICENSE_SCANNER_SRC = '''
+def scan(component_id, repo_root):
+    _log("license_scan", component_id=component_id)
+    return {
+        "component_id": component_id,
+        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+        "evaluated": False,
+        "reason": "no-reference-corpus",
+        "similarity_score": None,
+        "block_threshold": None,
+        "blocked": False,
+        "matches": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
+
+
+def gate_version(repo_root):
+    return "license_scanner@4.0.0-no-reference-corpus"
+'''
+
+SECRET_SCANNER_SRC = '''
+def _result(scope):
+    return {
+        "scope": scope,
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
+
+
+def scan(repo_root):
+    _log("secret_scan")
+    return _result("full")
+
+
+def scan_files(paths, repo_root=None):
+    _log("secret_scan_files")
+    return _result("precommit")
+
+
+def gate_version(repo_root):
+    return "secret_scanner@3.1.0+detect-secrets.1.5.0"
+
+
+class AllowlistInvalidError(Exception):
+    pass
+
+
+def propose(repo_root):
+    _log("propose")
+    return {"allowlist": {"version": 1, "entries": []}, "ineligible": []}
+'''
+
+PROVENANCE_WRITER_SRC = '''
+class MissingInputError(Exception):
+    pass
+
+
+class InvalidSealedInputError(Exception):
+    pass
+
+
+def write_provenance(component_id, inputs, repo_root):
+    _log("write_provenance", component_id=component_id)
+    return None
+
+
+def write_sealed_provenance(component_id, inputs, repo_root):
+    _log("write_sealed_provenance", component_id=component_id)
+    return None
+'''
 
 FAKES = {
     ("provenance-checker", "provenance_checker"): PROVENANCE_CHECKER_SRC,
-    ("spec-bundle-assembler", "spec_bundle_assembler"): ASSEMBLER_SRC,
+    ("spec-bundle-assembler", "spec_bundle_assembler"): SPEC_BUNDLE_ASSEMBLER_SRC,
     ("generation-loop", "generation_loop"): GENERATION_LOOP_SRC,
-    ("provenance-tracker", "provenance_tracker"): TRACKER_SRC,
-    ("license-scanner", "license_scanner"): LICENSE_SRC,
-    ("secret-scanner", "secret_scanner"): SECRET_SRC,
-    ("provenance-writer", "provenance_writer"): WRITER_SRC,
-    ("verifier-orchestrator", "verifier_orchestrator"): VERIFIER_SRC,
+    ("provenance-tracker", "provenance_tracker"): PROVENANCE_TRACKER_SRC,
+    ("verifier-orchestrator", "verifier_orchestrator"): VERIFIER_ORCHESTRATOR_SRC,
+    ("license-scanner", "license_scanner"): LICENSE_SCANNER_SRC,
+    ("secret-scanner", "secret_scanner"): SECRET_SCANNER_SRC,
+    ("provenance-writer", "provenance_writer"): PROVENANCE_WRITER_SRC,
 }
 
-
-def build_repo(repo_root, toml_text):
-    repo_root.mkdir(parents=True, exist_ok=True)
-    for (slug, module), src in FAKES.items():
-        d = repo_root / "gen" / slug
-        d.mkdir(parents=True, exist_ok=True)
-        (d / (module + ".py")).write_text(src, encoding="utf-8")
-    comp = repo_root / "specs" / "components" / "foo"
-    (comp / "requirements").mkdir(parents=True, exist_ok=True)
-    (comp / "acceptance").mkdir(parents=True, exist_ok=True)
-    (comp / "interface").mkdir(parents=True, exist_ok=True)
-    (comp / "component.md").write_text(
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "A fixture component.\n",
-        encoding="utf-8",
-    )
-    (comp / "requirements" / "R-FOO-001.md").write_text(
-        "**R-FOO-001** — Foo MUST exist.\n", encoding="utf-8"
-    )
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n", encoding="utf-8"
-    )
-    (comp / "interface" / "library.md").write_text("# Library\n\nfoo()\n", encoding="utf-8")
-    if toml_text is not None:
-        (repo_root / "hotdocs.toml").write_text(toml_text, encoding="utf-8")
-
-
-def read_log(log_path):
-    if not log_path.exists():
-        return []
-    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def run_attempts_calls(log_path):
-    return [r for r in read_log(log_path) if r.get("call") == "run_attempts"]
-
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "A fixture component.\n"
+)
 
 VALID_TOML = "[generate]\nmax_attempts = 5\nmode = \"agentic\"\n"
 
 
-@pytest.fixture
-def log_path(tmp_path, monkeypatch):
-    p = tmp_path / "calls.log"
-    monkeypatch.setenv(LOG_ENV, str(p))
-    return p
-
-
-def test_toml_values_reach_run_attempts(tmp_path, log_path, capsys):
+def _build_repo(tmp_path, toml_text):
     repo_root = tmp_path / "repo"
-    build_repo(repo_root, VALID_TOML)
-    component_gate_runner.main(
-        ["generate", "comp-foo", "--model=m", "--repo-root=" + str(repo_root)]
-    )
-    capsys.readouterr()
-    calls = run_attempts_calls(log_path)
-    assert len(calls) == 1, read_log(log_path)
+    repo_root.mkdir()
+    log_path = tmp_path / "calls.log"
+    header = _header(log_path)
+    for (slug, module), body in FAKES.items():
+        d = repo_root / "gen" / slug
+        d.mkdir(parents=True)
+        (d / (module + ".py")).write_text(header + body)
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD)
+    if toml_text is not None:
+        (repo_root / "hotdocs.toml").write_text(toml_text)
+    return repo_root, log_path
+
+
+def _calls(log_path, fn):
+    if not log_path.exists():
+        return []
+    out = []
+    for line in log_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        entry = json.loads(line)
+        if entry.get("fn") == fn:
+            out.append(entry)
+    return out
+
+
+def _argv(repo_root, extra=()):
+    return ["generate", "comp-foo", "--model=m", "--repo-root=" + str(repo_root)] + list(extra)
+
+
+def test_file_values_reach_run_attempts(tmp_path, monkeypatch):
+    repo_root, log_path = _build_repo(tmp_path, VALID_TOML)
+    monkeypatch.chdir(repo_root)
+    component_gate_runner.main(_argv(repo_root))
+    calls = _calls(log_path, "run_attempts")
+    assert len(calls) == 1
     assert calls[0]["max_attempts"] == 5
     assert calls[0]["mode"] == "agentic"
 
 
-def test_flags_override_toml_values(tmp_path, log_path, capsys):
-    repo_root = tmp_path / "repo"
-    build_repo(repo_root, VALID_TOML)
-    component_gate_runner.main(
-        [
-            "generate", "comp-foo", "--model=m", "--repo-root=" + str(repo_root),
-            "--max-attempts=1", "--mode=single",
-        ]
-    )
-    capsys.readouterr()
-    calls = run_attempts_calls(log_path)
-    assert len(calls) == 1, read_log(log_path)
+def test_flags_override_file_values(tmp_path, monkeypatch):
+    repo_root, log_path = _build_repo(tmp_path, VALID_TOML)
+    monkeypatch.chdir(repo_root)
+    component_gate_runner.main(_argv(repo_root, ["--max-attempts=1", "--mode=single"]))
+    calls = _calls(log_path, "run_attempts")
+    assert len(calls) == 1
     assert calls[0]["max_attempts"] == 1
     assert calls[0]["mode"] == "single"
 
@@ -299,18 +379,16 @@ def test_flags_override_toml_values(tmp_path, log_path, capsys):
         (None, ["--max-attempts=0"]),
         (None, ["--mode=turbo"]),
     ],
-    ids=["toml-mode-turbo", "flag-max-attempts-0", "flag-mode-turbo"],
+    ids=["file-mode-turbo", "flag-max-attempts-0", "flag-mode-turbo"],
 )
-def test_invalid_values_are_usage_errors(tmp_path, log_path, capsys, toml_text, extra):
-    repo_root = tmp_path / "repo"
-    build_repo(repo_root, toml_text)
+def test_invalid_values_are_usage_errors(tmp_path, monkeypatch, capsys, toml_text, extra):
+    repo_root, log_path = _build_repo(tmp_path, toml_text)
+    monkeypatch.chdir(repo_root)
     capsys.readouterr()
-    rc = component_gate_runner.main(
-        ["generate", "comp-foo", "--model=m", "--repo-root=" + str(repo_root)] + extra
-    )
-    captured = capsys.readouterr()
+    rc = component_gate_runner.main(_argv(repo_root, extra))
+    err = capsys.readouterr().err
     assert rc == 2
-    lines = captured.err.splitlines()
-    assert lines, "expected a usage error on stderr"
-    assert lines[0].startswith("usage error: "), captured.err
-    assert run_attempts_calls(log_path) == []
+    lines = err.splitlines()
+    assert lines, "expected output on stderr"
+    assert lines[0].startswith("usage error: ")
+    assert _calls(log_path, "run_attempts") == []

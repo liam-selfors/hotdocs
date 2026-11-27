@@ -1,5 +1,9 @@
 {
-  "spec_bundle_hash": "sha256:3aee5f6a7c871ef3f4c72c021ea37aae776280cd9245c85e8176956be8a40f26",
+  "spec_bundle_hash": "sha256:35ac507c89ba917b96228796992269208819d6ba998d9afa37f1d21136bebdad",
+  "spec_bundle_parts": {
+    "spec": "sha256:eba67460af8f2fad9c00dd8792c79f04457cef7d704abdd5bc2ffee1532a6723",
+    "dependency_code": "sha256:a234ceb707fc0595cd38899b4b182d57ff7ea8278462951e91820735c42658a4"
+  },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -17,13 +21,13 @@
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
-    "verifier": "verifier-orchestrator@3.5.0",
+    "verifier": "verifier-orchestrator@4.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-25T07:54:22Z",
+  "generated_at": "2026-11-27T07:03:04Z",
   "verification_run_id": "component-gate-runner-attempt-1",
   "verification_report": {
     "component_id": "comp-component-gate-runner",
@@ -32,91 +36,181 @@
         "id": "AC-GATE-001",
         "covers": "R-GATE-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-002a",
         "covers": "R-GATE-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-002b",
         "covers": "R-GATE-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-003a",
         "covers": "R-GATE-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-003b",
         "covers": "R-GATE-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-003c",
         "covers": "R-GATE-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-004",
         "covers": "R-GATE-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-005",
         "covers": "R-GATE-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-006",
         "covers": "R-GATE-006",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-007",
         "covers": "R-GATE-007",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-008",
         "covers": "R-GATE-008",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-009",
         "covers": "R-GATE-009",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-010",
         "covers": "R-GATE-010",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-011",
         "covers": "R-GATE-011",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-012",
         "covers": "R-GATE-012",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -134,7 +228,7 @@
       "R-GATE-012": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8434782608695652,
+    "mutation_score": 0.8319327731092437,
     "mutation_error": null,
     "assets": [
       {
@@ -149,6 +243,7 @@
         "lockfile_sha256": null
       }
     ],
+    "drivers": [],
     "overall": "pass"
   },
   "license_scan": {
@@ -378,5 +473,6 @@
       },
       "lockfile_sha256": null
     }
-  ]
+  ],
+  "drivers": []
 }
