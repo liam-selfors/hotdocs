@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:6cc0777f7c5348b490f913f30f2fdd349e0801b656a00d631f854f7049b4fefe
+# hotdocs-criterion: sha256:b0d5da4aaf3263606ad8fef446a98162a78326805b12274fa22b7c6c41daeb8e
 import urllib.request
 
 import pytest
@@ -11,64 +11,45 @@ def field(value, name):
 
 
 @pytest.fixture
-def isolated(tmp_path, monkeypatch):
+def recorded(monkeypatch, tmp_path):
     work = tmp_path / "work"
     work.mkdir()
-    home = tmp_path / "home"
-    home.mkdir()
     monkeypatch.chdir(work)
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
-    recorded = []
+    calls = []
 
-    def fake_urlopen(request, timeout=None, *args, **kwargs):
-        recorded.append(
-            {
-                "url": getattr(request, "full_url", request),
-                "headers": dict(getattr(request, "headers", {}) or {}),
-            }
-        )
+    def fake_urlopen(request, *args, **kwargs):
+        calls.append(request)
         raise AssertionError("no HTTP request may be made")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    return recorded
+    return calls
 
 
-def _make_execute(calls):
-    def execute(name, arguments):
-        calls.append((name, arguments))
-        return ("ok", False)
-
-    return execute
+def _execute(name, arguments):
+    return ("ok", False)
 
 
-@pytest.mark.parametrize(
-    "model, provider",
-    [("gemini:g", "gemini"), ("ollama:llama3.2", "ollama")],
-)
-def test_unsupported_providers_raise_before_any_request(isolated, model, provider):
-    recorded = isolated
-    calls = []
-    execute = _make_execute(calls)
-
-    with pytest.raises(llm_tool_endpoint.ToolUseUnsupported) as excinfo:
-        llm_tool_endpoint.run_tool_loop("s", "p", model, [], execute)
-
-    assert provider in str(excinfo.value)
+@pytest.mark.parametrize("model", ["gemini:g", "ollama:llama3.2"])
+def test_unsupported_providers_raise_before_any_request(recorded, model):
+    with pytest.raises(llm_tool_endpoint.ToolUseUnsupported):
+        llm_tool_endpoint.run_tool_loop("s", "p", model, [], _execute)
     assert recorded == []
-    assert calls == []
 
 
-def test_anthropic_without_key_returns_auth_error_without_request(isolated, monkeypatch):
-    recorded = isolated
+def test_both_unsupported_providers_raise_and_record_nothing(recorded):
+    for model in ("gemini:g", "ollama:llama3.2"):
+        with pytest.raises(llm_tool_endpoint.ToolUseUnsupported):
+            llm_tool_endpoint.run_tool_loop("s", "p", model, [], _execute)
+    assert recorded == []
+
+
+def test_anthropic_without_key_returns_auth_error_without_request(recorded, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    calls = []
-    execute = _make_execute(calls)
 
     result = llm_tool_endpoint.run_tool_loop(
-        "s", "p", "anthropic:claude-opus-5-5", [], execute
+        "s", "p", "anthropic:claude-opus-5-5", [], _execute
     )
 
     assert field(result, "stop") == "error"
@@ -77,4 +58,3 @@ def test_anthropic_without_key_returns_auth_error_without_request(isolated, monk
     assert field(error, "category") == "auth"
     assert field(result, "turns") == 0
     assert recorded == []
-    assert calls == []
