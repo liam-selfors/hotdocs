@@ -45,7 +45,7 @@ given, and every value crossing it is plain Python (`str`, `int`,
   `tmp_path`) opened as a `file://` URL, or an `http://` URL whose host
   is `127.0.0.1`, `localhost` or `[::1]`. Anything else raises
   `only file paths and loopback URLs can be opened: <target>`; a missing
-  file raises `no such file: <path>`. It returns once the page's `load`
+  file raises `no such file: <path>`, `<path>` its absolute path. It returns once the page's `load`
   event has fired and two animation frames have passed.
 
 **Page**
