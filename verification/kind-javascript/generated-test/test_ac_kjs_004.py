@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:22dd471adb53453be503a3ab327556fce60aff6ecc776dfddce97f8735a0a4b9
+# hotdocs-criterion: sha256:4aeff9e508739fd43f4e074f39dbe767fe89a317d8ed66a3aee1bcbde8ab4647
 import kind_javascript
 
 
@@ -6,24 +6,22 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def test_ac_kjs_004_surface_lists_sorted_export_names(tmp_path):
-    js = tmp_path / "m.js"
-    js.write_text(
+def test_surface_lists_sorted_export_names(tmp_path):
+    path = tmp_path / "m.js"
+    path.write_text(
         "export function beta(x) { return x; }\n"
         "export const alpha = 1;\n"
         "function hidden() { return 2; }\n"
         "export default 3;\n",
         encoding="utf-8",
     )
-    result = kind_javascript.surface(js)
+    result = kind_javascript.surface(path)
     assert result == {"names": ["alpha", "beta", "default"]}
     assert field(result, "names") == ["alpha", "beta", "default"]
 
 
-def test_ac_kjs_004_surface_of_unparseable_file_is_empty(tmp_path):
-    bad_dir = tmp_path / "bad"
-    bad_dir.mkdir()
-    js = bad_dir / "m.js"
-    js.write_text("export function f( {\n", encoding="utf-8")
-    result = kind_javascript.surface(js)
+def test_surface_of_unparseable_file_is_empty(tmp_path):
+    path = tmp_path / "bad.js"
+    path.write_text("export function f( {\n", encoding="utf-8")
+    result = kind_javascript.surface(path)
     assert result == {"names": []}

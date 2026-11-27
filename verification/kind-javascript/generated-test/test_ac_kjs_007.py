@@ -1,12 +1,10 @@
-# hotdocs-criterion: sha256:35e9bf3511c4e92b54564684fca279cc003db679d6dc6f8dcf57199c31c3cad7
-import kind_javascript
-
+# hotdocs-criterion: sha256:97f1c19ab3b880fe9e518cf4516aec188f115c874fe4b517651f327f5f1e96a3
 import pytest
 
-from kind_javascript import AssetError
+import kind_javascript
 
 
-def test_ac_kjs_007_runner_restricts_env_and_fs_and_copies_at_call_time(tmp_path, monkeypatch):
+def test_ac_kjs_007_runner_sandbox_and_fresh_copy(tmp_path, monkeypatch):
     secret = tmp_path / "secret.txt"
     secret.write_text("s3cret", encoding="utf-8")
 
@@ -23,13 +21,16 @@ def test_ac_kjs_007_runner_restricts_env_and_fs_and_copies_at_call_time(tmp_path
     run = kind_javascript.asset_runner(asset)
     assert callable(run)
 
-    # Only PATH reaches the process, so HOME is absent.
+    # Only PATH reaches the node process, so HOME is not visible.
     assert run("home", []) is None
 
-    # Reading any file other than the copy and the driver is refused.
-    with pytest.raises(AssetError, match="restricted"):
+    # The asset may read no file but its copy and the driver.
+    with pytest.raises(kind_javascript.AssetError, match="restricted"):
         run("peek", [str(secret)])
 
     # The file is copied at call time: a rewrite is seen by the same run.
-    asset.write_text("export function home() { return 'new'; }\n", encoding="utf-8")
+    asset.write_text(
+        "export function home() { return 'new'; }\n",
+        encoding="utf-8",
+    )
     assert run("home", []) == "new"
