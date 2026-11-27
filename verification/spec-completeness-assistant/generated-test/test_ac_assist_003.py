@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:316edb1c6b957a8bfe69429f71acdecc83778a20b3313a9f7f28dbd5eee30031
+# hotdocs-criterion: sha256:3dc8777c6c7ba09dac745d4d68051d94a777718b57487ee9dbdc9aaea64ac72f
 import json
 from pathlib import Path
 
@@ -18,7 +18,6 @@ def _log_helper(log_path):
     return (
         "import json\n"
         "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
         "def _log(entry):\n"
         "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
         "        fh.write(json.dumps(entry) + '\\n')\n"
@@ -26,110 +25,113 @@ def _log_helper(log_path):
     )
 
 
-def _setup(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
+def _setup(repo_root, log_path):
+    repo_root.mkdir(parents=True, exist_ok=True)
     log_path.write_text("", encoding="utf-8")
+    gen = repo_root / "gen"
 
     linter_src = (
         _log_helper(log_path)
         + "def lint(paths, repo_root, strict=False, judge=None):\n"
-        + "    _log({'fn': 'lint', 'paths': None if paths is None else [str(p) for p in paths],\n"
-        + "          'strict': strict, 'judge_given': judge is not None})\n"
-        + "    return {'findings': [], 'summary': {'hard_failures': 0, 'warnings': 0, 'skipped': 0}}\n"
+        "    _log({'call': 'lint', 'paths': None if paths is None else [str(p) for p in paths],"
+        " 'judge_given': judge is not None})\n"
+        "    return {'findings': [], 'summary': {'hard_failures': 0, 'warnings': 0, 'skipped': 0}}\n"
     )
-    _write(repo_root / "gen" / "spec-linter" / "spec_linter.py", linter_src)
+    _write(gen / "spec-linter" / "spec_linter.py", linter_src)
 
     impact_src = (
         _log_helper(log_path)
         + "def compute_blast_radius(changed_ids, repo_root):\n"
-        + "    _log({'fn': 'compute_blast_radius', 'changed_ids': list(changed_ids)})\n"
-        + "    return {\n"
-        + "        'impacted': [\n"
-        + "            {'component_id': " + repr("comp-foo") + ", 'reason': 'direct', 'via': None},\n"
-        + "            {'component_id': " + repr("comp-bar") + ", 'reason': 'transitive-interface', 'via': "
-        + repr("comp-foo") + "},\n"
-        + "        ],\n"
-        + "        'precondition_error': None,\n"
-        + "    }\n"
+        "    _log({'call': 'compute_blast_radius', 'changed_ids': list(changed_ids)})\n"
+        "    return {\n"
+        "        'impacted': [\n"
+        "            {'component_id': 'comp-foo', 'reason': 'direct', 'via': None},\n"
+        "            {'component_id': 'comp-bar', 'reason': 'transitive-interface', 'via': 'comp-foo'},\n"
+        "        ],\n"
+        "        'precondition_error': None,\n"
+        "    }\n"
     )
-    _write(repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py", impact_src)
+    _write(gen / "impact-analyzer" / "impact_analyzer.py", impact_src)
 
     reviewer_src = (
         _log_helper(log_path)
         + "class _Report:\n"
-        + "    def __init__(self, target):\n"
-        + "        self._target = target\n"
-        + "\n"
-        + "    def to_dict(self):\n"
-        + "        return {'findings': [], 'target': self._target}\n"
-        + "\n"
-        + "def check(targets, repo_root, model=None, *, llm_backend=None, write_proposals=False):\n"
-        + "    _log({'fn': 'check', 'targets': list(targets), 'model': model,\n"
-        + "          'llm_backend_given': llm_backend is not None,\n"
-        + "          'write_proposals': write_proposals})\n"
-        + "    if list(targets) == [" + repr("comp-bar") + "]:\n"
-        + "        raise RuntimeError(" + repr("boom") + ")\n"
-        + "    return _Report(targets[0])\n"
-        + "\n"
-        + "def _judge(term, local_text, glossary_text):\n"
-        + "    return None\n"
-        + "\n"
-        + "def glossary_judge(model, llm_backend=None):\n"
-        + "    _log({'fn': 'glossary_judge', 'model': model})\n"
-        + "    return _judge\n"
+        "    def __init__(self, target):\n"
+        "        self._target = target\n"
+        "    def to_dict(self):\n"
+        "        return {'findings': [], 'target': self._target}\n"
+        "\n"
+        "def check(targets, repo_root, model=None, *, llm_backend=None, write_proposals=False):\n"
+        "    _log({'call': 'check', 'targets': list(targets), 'model': model,"
+        " 'write_proposals': write_proposals, 'llm_backend_given': llm_backend is not None})\n"
+        "    if list(targets) == ['comp-bar']:\n"
+        "        raise RuntimeError('boom')\n"
+        "    return _Report(targets[0])\n"
+        "\n"
+        "def _judge(term, local_text, glossary_text):\n"
+        "    return None\n"
+        "\n"
+        "def glossary_judge(model, llm_backend=None):\n"
+        "    _log({'call': 'glossary_judge', 'model': model})\n"
+        "    return _judge\n"
     )
-    _write(repo_root / "gen" / "spec-reviewer" / "spec_reviewer.py", reviewer_src)
+    _write(gen / "spec-reviewer" / "spec_reviewer.py", reviewer_src)
 
     endpoint_src = (
         _log_helper(log_path)
         + "def complete(prompt, model, backend=None, **params):\n"
-        + "    _log({'fn': 'complete', 'model': model})\n"
-        + "    if 'redundan' in str(prompt).lower() and 'completeness_score' not in str(prompt):\n"
-        + "        text = json.dumps({'redundancy_flags': []})\n"
-        + "    else:\n"
-        + "        text = json.dumps({'completeness_score': 0.5, 'completeness_rationale': 'ok'})\n"
-        + "    return {'text': text, 'model': model, 'backend': 'mock', 'model_call_error': None}\n"
+        "    _log({'call': 'complete', 'model': model})\n"
+        "    if 'redundancy' in prompt.lower() and 'completeness_score' not in prompt:\n"
+        "        text = json.dumps({'redundancy_flags': []})\n"
+        "    else:\n"
+        "        text = json.dumps({'completeness_score': 0.5, 'completeness_rationale': 'ok'})\n"
+        "    return {'text': text, 'model': model, 'backend': 'mock', 'model_call_error': None}\n"
     )
-    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", endpoint_src)
-
-    return repo_root, log_path
+    _write(gen / "llm-endpoint" / "llm_endpoint.py", endpoint_src)
 
 
 def _read_log(log_path):
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
+    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    return [json.loads(l) for l in lines]
 
 
-def test_ac_assist_003_with_model(tmp_path):
-    repo_root, log_path = _setup(tmp_path)
+def test_criterion_reviews_with_model(tmp_path):
+    repo_root = tmp_path / "repo"
+    log_path = tmp_path / "calls.log"
+    _setup(repo_root, log_path)
 
     report = spec_completeness_assistant.assist(["R-FOO-001"], repo_root, model="fake-model")
 
     reviews = field(report, "criterion_reviews")
-    assert dict(reviews) == {
+    assert reviews == {
         "comp-foo": {"findings": [], "target": "comp-foo"},
         "comp-bar": {"error": "boom"},
     }
 
-    calls = _read_log(log_path)
-    check_calls = [c for c in calls if c["fn"] == "check"]
-    assert [c["targets"] for c in check_calls] == [["comp-foo"], ["comp-bar"]]
-    for c in check_calls:
+    entries = _read_log(log_path)
+    checks = [e for e in entries if e["call"] == "check"]
+    assert [c["targets"] for c in checks] == [["comp-foo"], ["comp-bar"]]
+    for c in checks:
         assert c["model"] is None
         assert c["write_proposals"] is False
+        assert c["llm_backend_given"] is False
 
 
-def test_ac_assist_003_without_model(tmp_path):
-    repo_root, log_path = _setup(tmp_path)
+def test_criterion_reviews_without_model(tmp_path):
+    repo_root = tmp_path / "repo"
+    log_path = tmp_path / "calls.log"
+    _setup(repo_root, log_path)
 
     report = spec_completeness_assistant.assist(["R-FOO-001"], repo_root)
 
     reviews = field(report, "criterion_reviews")
-    assert set(dict(reviews).keys()) == {"comp-foo", "comp-bar"}
+    assert set(reviews.keys()) == {"comp-foo", "comp-bar"}
+    assert reviews["comp-bar"] == {"error": "boom"}
 
-    calls = _read_log(log_path)
-    assert [c for c in calls if c["fn"] == "complete"] == []
-    check_calls = [c for c in calls if c["fn"] == "check"]
-    assert [c["targets"] for c in check_calls] == [["comp-foo"], ["comp-bar"]]
+    entries = _read_log(log_path)
+    assert not [e for e in entries if e["call"] == "complete"]
+    checks = [e for e in entries if e["call"] == "check"]
+    assert [c["targets"] for c in checks] == [["comp-foo"], ["comp-bar"]]
+    for c in checks:
+        assert c["model"] is None
+        assert c["write_proposals"] is False
