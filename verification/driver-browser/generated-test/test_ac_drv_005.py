@@ -1,4 +1,9 @@
-# hotdocs-criterion: sha256:c90fb1c147c69ea5d4c9db754e9fe6fe0a047b32f122126d29d3075972d9e30d
+# hotdocs-criterion: sha256:30a0a81fcdce8f3dd412365e51dd86c0ebec63166d51bc134b2197dd5321f3c8
+"""AC-DRV-005: guidance() returns the test author guidance text.
+
+Covers: R-DRV-004
+"""
+
 import driver_browser
 
 
@@ -6,7 +11,7 @@ START = "Drive pages only through the `browser` fixture."
 END = "`pytest.raises(Exception, match=...)` on the message."
 
 
-def test_guidance_returns_only_test_author_with_documented_text():
+def test_ac_drv_005_guidance_returns_only_test_author_text():
     result = driver_browser.guidance()
 
     assert isinstance(result, dict)
@@ -14,16 +19,15 @@ def test_guidance_returns_only_test_author_with_documented_text():
 
     text = result["test_author"]
     assert isinstance(text, str)
-    assert text.startswith(START)
-    assert text.endswith(END)
-    # The body is stripped: no surrounding whitespace.
-    assert text == text.strip()
+    assert text.startswith(START), repr(text[:200])
+    assert text.endswith(END), repr(text[-200:])
 
 
-def test_guidance_is_stable_across_calls():
+def test_ac_drv_005_guidance_is_stable_across_calls():
     first = driver_browser.guidance()
     second = driver_browser.guidance()
-    assert first == second
+
     assert list(second.keys()) == ["test_author"]
+    assert second["test_author"] == first["test_author"]
     assert second["test_author"].startswith(START)
     assert second["test_author"].endswith(END)

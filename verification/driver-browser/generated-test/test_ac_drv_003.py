@@ -1,4 +1,5 @@
-# hotdocs-criterion: sha256:cfd4cd9bbbebb018d2922a5cafc2b142b780d97fcff8ee6379de4af6e82ec91b
+# hotdocs-criterion: sha256:16c692277d5d5c4d11ca00cfe360b1ab8900d5425827d350797ac01cb9b9aa7b
+import re
 import time
 from pathlib import Path
 
@@ -27,10 +28,7 @@ def provisioned():
 PAGE_HTML = (
     "<!DOCTYPE html>\n"
     "<html lang=\"en\">\n"
-    "<head>\n"
-    "<meta charset=\"utf-8\">\n"
-    "<title>AC-DRV-003</title>\n"
-    "</head>\n"
+    "<head><meta charset=\"utf-8\"><title>AC-DRV-003</title></head>\n"
     "<body>\n"
     "<button type=\"button\" id=\"warn\">Warn</button>\n"
     "<button type=\"button\" id=\"export\">Export</button>\n"
@@ -41,13 +39,11 @@ PAGE_HTML = (
     "document.getElementById('export').addEventListener('click', function () {\n"
     "  var svg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"></svg>';\n"
     "  var blob = new Blob([svg], {type: 'image/svg+xml'});\n"
-    "  var url = URL.createObjectURL(blob);\n"
     "  var a = document.createElement('a');\n"
-    "  a.href = url;\n"
+    "  a.href = URL.createObjectURL(blob);\n"
     "  a.download = 'out.svg';\n"
     "  document.body.appendChild(a);\n"
     "  a.click();\n"
-    "  a.remove();\n"
     "});\n"
     "</script>\n"
     "<script>\n"
@@ -58,22 +54,22 @@ PAGE_HTML = (
 )
 
 
-def _wait_for_downloads(page, timeout=10.0):
+def _wait_for(read, predicate, timeout=5.0):
     deadline = time.monotonic() + timeout
-    downloads = page.downloads()
-    while not downloads and time.monotonic() < deadline:
+    value = read()
+    while not predicate(value) and time.monotonic() < deadline:
         time.sleep(0.1)
-        downloads = page.downloads()
-    return downloads
+        value = read()
+    return value
 
 
-def test_ac_drv_003(provisioned, tmp_path):
-    index = tmp_path / "index.html"
-    index.write_text(PAGE_HTML, encoding="utf-8")
+def test_ac_drv_003_errors_dialogs_downloads_screenshot_and_open_refusal(provisioned, tmp_path):
+    page_path = tmp_path / "index.html"
+    page_path.write_text(PAGE_HTML, encoding="utf-8")
 
     session = driver_browser.open_session(REPO_ROOT, tmp_path)
     try:
-        page = session.open(index)
+        page = session.open(page_path)
 
         page.find(role="button", name="Warn").click()
         page.find(role="button", name="Export").click()
@@ -81,23 +77,21 @@ def test_ac_drv_003(provisioned, tmp_path):
         assert page.console_errors() == ["Error: boom"]
         assert page.dialogs() == ["hi"]
 
-        downloads = _wait_for_downloads(page)
-        assert isinstance(downloads, list)
+        downloads = _wait_for(page.downloads, lambda d: len(d) >= 1)
         assert len(downloads) == 1
         download = Path(downloads[0])
         assert download.name == "out.svg"
         assert download.resolve().parent == (tmp_path / "downloads").resolve()
+        assert download.is_file()
 
         shot = page.screenshot("home")
         assert Path(shot).resolve() == (tmp_path / "screenshots" / "home.png").resolve()
-        assert Path(shot).is_file()
-        with open(shot, "rb") as handle:
-            assert handle.read(len(PNG_SIGNATURE)) == PNG_SIGNATURE
+        with open(shot, "rb") as fh:
+            assert fh.read(len(PNG_SIGNATURE)) == PNG_SIGNATURE
 
-        with pytest.raises(driver_browser.BrowserError) as excinfo:
+        expected = "only file paths and loopback URLs can be opened: https://example.com/"
+        with pytest.raises(driver_browser.BrowserError, match="^" + re.escape(expected) + "$") as excinfo:
             session.open("https://example.com/")
-        assert str(excinfo.value) == (
-            "only file paths and loopback URLs can be opened: https://example.com/"
-        )
+        assert str(excinfo.value) == expected
     finally:
         session.close()
