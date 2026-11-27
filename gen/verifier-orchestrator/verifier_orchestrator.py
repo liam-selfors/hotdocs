@@ -1,72 +1,41 @@
-"""Verifier orchestrator: runs every verification gate for one component."""
+"""Verifier orchestrator: runs every verification gate against one component."""
 
 from __future__ import annotations
 
 import ast
-import dataclasses
 import hashlib
 import importlib.util
 import inspect
-import itertools
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
 import tempfile
-import time
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
-GATE_VERSION = "verifier-orchestrator@3.5.0"
+GATE_VERSION = "verifier-orchestrator@4.0.0"
 DEFAULT_TEST_TIMEOUT = 300.0
 
-USAGE = "usage: hotdocs verify-component <component-id> [--repo-root=<dir>] [--format=json|text]"
+_USAGE = "usage: hotdocs verify-component <component-id> [--repo-root=<dir>] [--format=json|text]"
 
-_RETRYABLE = ("network", "timeout", "rate_limit")
-_BUNDLE_KEYS = ("criterion_text", "requirement_text", "interface", "glossary", "testing")
-_JS_RE = re.compile(r"\bfunction\s*[\w$]*\s*\(|=>|\b(const|let)\s")
-_ID_RE = re.compile(r"^# (AC-[A-Z0-9]+(?:-[A-Z0-9]+)*[a-z]?)", re.M)
-_COVERS_RE = re.compile(r"Covers:[\s`@*]*([RP]-[A-Z0-9]+(?:-[A-Z0-9]+)*[a-z]?)")
-_KIND_RE = re.compile(r"^Kind:\s*(compiled|generated-test|llm-judge)\s*$", re.M)
-_GHERKIN_RE = re.compile(r"^\s*```gherkin\s*$", re.M)
-_ASSERT_RE = re.compile(r"^E\s+assert (.+)$")
-_COUNTER = itertools.count()
-
-_PLUGIN = '''import importlib.util
-import json
+_CONFTEST = '''import json
 import os
-import sys
-from pathlib import Path
-
-import pytest
 
 
-@pytest.fixture
-def asset_runner():
-    entries = json.loads(os.environ.get("HOTDOCS_ASSETS", "[]"))
-
-    def runner(path):
-        for index, entry in enumerate(entries):
-            if entry["path"] == path:
-                name = "hotdocs_asset_adapter_" + str(index)
-                spec = importlib.util.spec_from_file_location(name, entry["adapter"])
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[name] = module
-                spec.loader.exec_module(module)
-                return module.asset_runner(Path(entry["file"]))
-        declared = ", ".join(e["path"] for e in entries) or "none"
-        raise KeyError(
-            f"asset_runner: {path!r} is not a declared asset (declared: {declared})")
-
-    return runner
+def pytest_assertrepr_compare(config, op, left, right):
+    path = {path!r}
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({{"op": op, "left": repr(left), "right": repr(right)}}, fh)
+    return None
 '''
 
 
-@dataclasses.dataclass
+@dataclass
 class VerificationReport:
     component_id: str
     criteria: list
@@ -75,691 +44,479 @@ class VerificationReport:
     mutation_score: object
     mutation_error: object
     assets: list
+    drivers: list
     overall: str
 
-    def to_dict(self):
-        return dataclasses.asdict(self)
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
-@dataclasses.dataclass
-class _Criterion:
-    id: str
-    covers: str
-    kind: str
-    freeform: bool
+# ---------------------------------------------------------------- helpers
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, Mapping):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def _get(obj, key):
+    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
 
 
-def _tool_root():
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def _slug(component_id: str) -> str:
+    return re.sub(r"^comp-", "", component_id)
+
+
+def _tool_root() -> Path:
     here = Path(os.path.abspath(__file__))
     return next(p.parent for p in here.parents if p.name == "gen")
 
 
-def _load_file(path, hint):
-    name = f"_hotdocs_vo_{next(_COUNTER)}_{hint}"
-    locations = [str(path.parent)] if path.name == "__init__.py" else None
-    spec = importlib.util.spec_from_file_location(name, str(path), submodule_search_locations=locations)
+def _load_from(code_dir: Path, module_name: str):
+    pkg = code_dir / module_name / "__init__.py"
+    if pkg.is_file():
+        file = pkg
+        locations = [str(pkg.parent)]
+    else:
+        file = code_dir / f"{module_name}.py"
+        locations = None
+    name = "_hotdocs_vo_%s_%s" % (
+        module_name,
+        hashlib.sha256(str(file).encode("utf-8")).hexdigest()[:16],
+    )
+    spec = importlib.util.spec_from_file_location(
+        name, str(file), submodule_search_locations=locations
+    )
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
+    old = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = old
     return module
 
 
-def _module_file(directory, module_name):
-    flat = directory / f"{module_name}.py"
-    if flat.is_file():
-        return flat
-    return directory / module_name / "__init__.py"
+def _load(repo_root: Path, rel_dir: str, module_name: str):
+    base = repo_root / rel_dir
+    if not base.is_dir():
+        base = _tool_root() / rel_dir
+    return _load_from(base, module_name)
 
 
-def _load_dependency(repo_root, rel, module_name):
-    directory = repo_root / rel
-    if not directory.is_dir():
-        directory = _tool_root() / rel
-    return _load_file(_module_file(directory, module_name), module_name)
-
-
-def _adapter_path(repo_root, kind):
-    rel = Path("gen") / f"kind-{kind}" / f"kind_{kind.replace('-', '_')}.py"
-    for base in (repo_root, _tool_root()):
-        if (base / rel).is_file():
-            return base / rel
-    return None
-
-
-def _sha(path):
-    if path is None or not Path(path).is_file():
-        return None
-    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def _frontmatter(path):
-    fields = {}
-    for line in path.read_text(encoding="utf-8").splitlines()[1:]:
-        if line.strip() == "---":
-            break
-        key, sep, value = line.partition(":")
-        if sep:
-            fields.setdefault(key.strip(), value.strip())
-    return fields
-
-
-def _declared_assets(value):
-    match = re.search(r"\[(.*)\]", value)
-    if match is None:
-        return []
-    declared = []
-    for item in match.group(1).split(","):
-        item = item.strip()
-        if item:
-            kind, _, path = item.partition(":")
-            declared.append((kind.strip(), path.strip()))
-    return declared
-
-
-def _criteria(acceptance_dir):
-    found = []
-    for path in sorted(acceptance_dir.glob("AC-*.md")):
-        text = path.read_text(encoding="utf-8")
-        covers = _COVERS_RE.search(text)
-        kind = _KIND_RE.search(text, covers.end())
-        found.append(_Criterion(
-            id=_ID_RE.search(text).group(1),
-            covers=covers.group(1),
-            kind=kind.group(1) if kind else "compiled",
-            freeform=_GHERKIN_RE.search(text) is None,
-        ))
-    return found
-
-
-def _test_filename(criterion_id):
-    return f"test_{criterion_id.lower().replace('-', '_')}.py"
-
-
-def _header(bundle):
-    data = {key: _get(bundle, key) for key in _BUNDLE_KEYS}
-    text = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return "# hotdocs-criterion: sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _param_names(text):
-    names, depth, piece = [], 0, ""
-    for ch in text + ",":
-        if ch == "," and depth == 0:
-            match = re.match(r"\s*\*{0,2}([A-Za-z_]\w*)", piece)
-            if match:
-                names.append(match.group(1))
-            piece = ""
-            continue
-        depth += ch in "([{"
-        depth -= ch in ")]}"
-        piece += ch
-    return names
-
-
-def _signatures(text):
-    found = []
-    for block in re.findall(r"^```[^\n]*\n(.*?)^```", text, re.M | re.S):
-        for match in re.finditer(r"^(\w+)\(", block, re.M):
-            depth = 0
-            end = len(block)
-            for j in range(match.end() - 1, len(block)):
-                if block[j] in "([{":
-                    depth += 1
-                elif block[j] in ")]}":
-                    depth -= 1
-                    if depth == 0:
-                        end = j
-                        break
-            found.append((match.group(1), _param_names(block[match.end():end])))
-    return found
-
-
-def _load_code(code_dir, module_name):
-    path = _module_file(code_dir, module_name)
-    if not path.is_file():
-        return None
-    sys.path.insert(0, str(code_dir))
-    try:
-        return _load_file(path, module_name)
-    except Exception:
-        return None
-    finally:
-        sys.path.remove(str(code_dir))
-
-
-def _drift(comp_dir, code_dir, module_name):
-    documented = []
-    library = comp_dir / "interface" / "library.md"
-    if library.is_file():
-        documented += _signatures(library.read_text(encoding="utf-8"))
-    cli = comp_dir / "interface" / "cli.md"
-    if cli.is_file():
-        text = cli.read_text(encoding="utf-8")
-        documented += _signatures(text)
-        match = re.search(r"\bmain\(([^()]*)\)", text)
-        if match:
-            documented.append(("main", _param_names(match.group(1))))
-    module = _load_code(code_dir, module_name)
-    if module is None:
-        return True
-    for name, params in documented:
-        obj = getattr(module, name, None)
-        if not callable(obj):
-            return True
-        try:
-            actual = [p.name for p in inspect.signature(obj).parameters.values()]
-        except (TypeError, ValueError):
-            return True
-        if actual != params:
-            return True
-    return False
-
-
-def _descendants(pid):
-    out = subprocess.run(["ps", "-eo", "pid=,ppid="], capture_output=True, text=True).stdout
-    children = {}
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) == 2:
-            children.setdefault(int(parts[1]), []).append(int(parts[0]))
-    found, stack = [], [pid]
+def _kill_tree(root: int) -> None:
+    listing = subprocess.run(
+        ["ps", "-eo", "pid=,ppid="], capture_output=True, text=True
+    ).stdout
+    children: dict = {}
+    for line in listing.splitlines():
+        pid, ppid = (int(x) for x in line.split())
+        children.setdefault(ppid, []).append(pid)
+    found, stack = [], [root]
     while stack:
         for child in children.get(stack.pop(), []):
             found.append(child)
             stack.append(child)
+    for pid in found + [root]:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _run(cmd: list, env: dict, cwd: Path):
+    with tempfile.TemporaryFile() as out:
+        proc = subprocess.Popen(
+            cmd, cwd=str(cwd), env=env, stdout=out, stderr=subprocess.STDOUT
+        )
+        try:
+            rc = proc.wait(timeout=DEFAULT_TEST_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc.pid)
+            proc.wait()
+            rc = None
+        out.seek(0)
+        return rc, out.read().decode("utf-8", "replace")
+
+
+def _message(rc, output: str) -> str:
+    if rc is None:
+        return f"test timed out after {DEFAULT_TEST_TIMEOUT} seconds"
+    m = re.search(r"^>\s+assert\s+(.+?)\s*$", output, re.M)
+    if m:
+        return m.group(1).replace(" == ", " equals ", 1) + " failed"
+    return f"test run exited with code {rc}"
+
+
+def _literal(text: str):
+    try:
+        return ast.literal_eval(text)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------- parsing
+
+
+def _frontmatter(text: str) -> str:
+    m = re.match(r"---\n(.*?)\n---", text, re.S)
+    return m.group(1) if m else ""
+
+
+def _parse_criteria(spec_dir: Path) -> list:
+    criteria = []
+    for path in sorted((spec_dir / "acceptance").glob("*.md")):
+        text = _read(path)
+        cid = re.search(r"^#\s+(AC-[A-Za-z0-9-]+)", text, re.M).group(1)
+        cov = re.search(r"Covers:\**\s*`?(?:@covers:)?([A-Z]-[A-Za-z0-9-]+)", text)
+        kind = re.search(
+            r"^Kind:\s*`?(compiled|generated-test|llm-judge)", text[cov.end():], re.M
+        ).group(1)
+        criteria.append({
+            "id": cid,
+            "covers": cov.group(1),
+            "kind": kind,
+            "freeform": re.search(r"^\s*```gherkin\s*$", text, re.M) is None,
+        })
+    return criteria
+
+
+def _documented(text: str) -> list:
+    blocks, current, inside = [], [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            if inside:
+                blocks.append("\n".join(current))
+                current = []
+            inside = not inside
+        elif inside:
+            current.append(line)
+    found = []
+    for block in blocks:
+        for m in re.finditer(r"^[ \t]*(?:def[ \t]+)?([A-Za-z_][\w.]*)\(", block, re.M):
+            depth, i = 1, m.end()
+            while depth:
+                ch = block[i]
+                depth += (ch in "([{") - (ch in ")]}")
+                i += 1
+            found.append((m.group(1), _param_names(block[m.end():i - 1])))
     return found
 
 
-def _run(cmd, cwd, env, timeout):
-    start = time.monotonic()
-    proc = subprocess.Popen(cmd, cwd=str(cwd), env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+def _param_names(inner: str) -> list:
+    parts, depth, cur = [], 0, ""
+    for ch in inner:
+        depth += (ch in "([{") - (ch in ")]}")
+        if ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    names = []
+    for part in parts:
+        m = re.match(r"\s*\**([A-Za-z_]\w*)", part)
+        if m:
+            names.append(m.group(1))
+    return names
+
+
+def _drift(code_dir: Path, module_name: str, spec_dir: Path) -> bool:
+    iface = spec_dir / "interface"
+    documented = _documented(_read(iface / "library.md")) + _documented(_read(iface / "cli.md"))
+    if (iface / "cli.md").is_file():
+        documented.append(("main", ["argv"]))
     try:
-        out, _ = proc.communicate(timeout=timeout)
-        code = proc.returncode
-    except subprocess.TimeoutExpired:
-        for pid in _descendants(proc.pid):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
-        proc.kill()
-        out, _ = proc.communicate()
-        code = None
-    return code, out.decode("utf-8", "replace"), time.monotonic() - start
-
-
-def _compared(expr):
-    for op in (" == ", " in "):
-        start = expr.find(op)
-        while start != -1:
-            left, right = expr[:start], expr[start + len(op):]
-            try:
-                left_value, right_value = ast.literal_eval(left), ast.literal_eval(right)
-            except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
-                start = expr.find(op, start + 1)
-                continue
-            if op == " == ":
-                return right_value, left_value
-            return left_value, right_value
-    return None, None
-
-
-def _failure_from_output(code, output, timeout):
-    if code is None:
-        return {"message": f"timed out after {timeout:g} seconds", "expected": None, "actual": None}
-    source = None
-    for line in output.splitlines():
-        if line.startswith(">"):
-            source = line[1:].strip()
-        match = _ASSERT_RE.match(line)
-        if match:
-            expected, actual = _compared(match.group(1))
-            return {"message": f"{source or 'assert ' + match.group(1)} failed",
-                    "expected": expected, "actual": actual}
-    return {"message": f"pytest exited {code}", "expected": None, "actual": None}
-
-
-def _fail(entry, origin, message):
-    entry["result"] = "fail"
-    entry["failure_origin"] = origin
-    entry["failure_detail"] = {"message": message, "expected": None, "actual": None}
-
-
-def _py_files(code_dir):
-    files = [p for p in code_dir.rglob("*.py") if "__pycache__" not in p.relative_to(code_dir).parts]
-    return sorted(((p.relative_to(code_dir).as_posix(), p) for p in files), key=lambda t: t[0])
-
-
-def _javascript_site(code_dir):
-    for rel, path in _py_files(code_dir):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        docs = set()
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-                body = node.body
-                if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
-                    docs.add(id(body[0].value))
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
-                    and id(node) not in docs and len(node.value) >= 200
-                    and _JS_RE.search(node.value)
-                    and (";" in node.value or "{" in node.value)):
-                return f"{rel}:{node.lineno}"
-    return None
-
-
-def _junit(path):
-    outcomes = {}
-    for case in ET.parse(path).getroot().iter("testcase"):
-        bad = next((c for c in case if c.tag in ("failure", "error", "skipped")), None)
-        outcomes.setdefault(case.get("name", "").split("[")[0], []).append(bad)
-    return outcomes
-
-
-def _baseline_error(code):
-    if code is None:
-        return "mutation baseline timed out in the sandbox after 300 seconds"
-    return f"mutation baseline failed in the sandbox: pytest exited {code}"
-
-
-class _Verification:
-    def __init__(self, component_id, repo_root, judge, test_author, work):
-        self.component_id = component_id
-        self.repo_root = repo_root
-        self.judge = judge
-        self.test_author = test_author
-        self.work = work
-        self.slug = component_id.removeprefix("comp-")
-        self.module_name = self.slug.replace("-", "_")
-        self.comp_dir = repo_root / "specs" / "components" / self.slug
-        self.front = _frontmatter(self.comp_dir / "component.md")
-        self.criteria = _criteria(self.comp_dir / "acceptance")
-        self.requirements = sorted(p.stem for p in (self.comp_dir / "requirements").glob("R-*.md"))
-        self.plug = work / "plug"
-        self.plug.mkdir()
-        (self.plug / "hotdocs_asset_runner.py").write_text(_PLUGIN, encoding="utf-8")
-        self.authored_dir = work / "authored"
-        self.authored_dir.mkdir()
-        self.declared = []
-        self.info = {}
-        self.interpreter = sys.executable
-        self.env_error = None
-        self.passing = []
-        self._assembler = None
-        self._probe = None
-        self._compiled = None
-
-    # -- dependencies -------------------------------------------------
-    def bundle(self, crit):
-        if self._assembler is None:
-            self._assembler = _load_dependency(
-                self.repo_root, Path("gen") / "spec-bundle-assembler", "spec_bundle_assembler")
-        return self._assembler.assemble_criterion(self.component_id, crit.id, self.repo_root)
-
-    def probe(self, source, bundle):
-        if self._probe is None:
-            self._probe = _load_dependency(self.repo_root, Path("gen") / "test-probe", "test_probe")
-        func = self._probe.probe
-        kwargs = {"interpreter": str(self.interpreter), "assets": [p for _, p in self.declared]}
-        params = inspect.signature(func).parameters
-        if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-            kwargs = {k: v for k, v in kwargs.items() if k in params}
-        return func(source, bundle, self.module_name, **kwargs)
-
-    # -- running ------------------------------------------------------
-    def pytest(self, files, cwd, code_dir, timeout, extra=()):
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join((str(code_dir), str(self.plug)))
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        env["HOTDOCS_ASSETS"] = json.dumps([
-            {"path": path, "file": str(code_dir / path), "adapter": str(self.info[kind][0])}
-            for kind, path in self.declared
-        ])
-        cmd = [str(self.interpreter), "-m", "pytest", *extra, "-p", "hotdocs_asset_runner",
-               *[str(f) for f in files]]
-        return _run(cmd, cwd, env, timeout)
-
-    def run_criterion(self, entry, path):
-        timeout = DEFAULT_TEST_TIMEOUT
-        code, output, _ = self.pytest([path], self.repo_root, self.repo_root / "gen" / self.slug,
-                                      timeout, extra=("-vv",))
-        if code == 0:
-            entry["result"] = "pass"
+        module = _load_from(code_dir, module_name)
+    except Exception:
+        return True
+    for name, params in documented:
+        obj = module
+        try:
+            for part in name.split("."):
+                obj = getattr(obj, part)
+            sig = inspect.signature(obj)
+        except (AttributeError, TypeError, ValueError):
             return True
-        entry["result"] = "fail"
-        entry["failure_origin"] = "implementation"
-        entry["failure_detail"] = _failure_from_output(code, output, timeout)
-        return False
+        if [p.name for p in sig.parameters.values()] != params:
+            return True
+    return False
 
-    # -- kinds --------------------------------------------------------
-    def judge_entry(self, crit, entry):
-        entry["rationale"] = None
-        if self.judge is None:
-            entry["result"] = "skipped"
-            return
-        outcome = self.judge(self.bundle(crit))
-        value = _get(outcome, "result")
-        if value is None:
-            value = _get(outcome, "verdict")
-        if value is None:
-            value = outcome
-        entry["result"] = "pass" if value is True or value == "pass" else "fail"
-        entry["rationale"] = _get(outcome, "rationale")
 
-    def compiled(self, crit, entry):
-        if self._compiled is None:
-            compiler = _load_dependency(
-                self.repo_root, Path("pipeline") / "criterion-compiler", "criterion_compiler")
-            report = compiler.compile(self.component_id, self.repo_root)
-            self._compiled = {_get(o, "criterion_id"): o for o in _get(report, "outputs", [])}
-        output = self._compiled.get(crit.id)
-        if _get(output, "status") != "compiled":
-            _fail(entry, "implementation", _get(output, "message") or "criterion was not compiled")
-            return
-        self.run_criterion(entry, self.repo_root / _get(output, "file"))
+# ---------------------------------------------------------------- entries
 
-    def author(self, bundle, entry, filename):
-        result = self.test_author(bundle)
-        error = _get(result, "model_call_error")
-        if error is not None and _get(error, "category") in _RETRYABLE:
-            result = self.test_author(bundle)
-            error = _get(result, "model_call_error")
-        entry["test_authoring"] = {
-            "model": _get(result, "model"),
-            "seed": _get(result, "seed"),
-            "prompt_version": _get(result, "prompt_version"),
-            "cache_hit": _get(result, "cache_hit"),
-        }
-        if error is not None:
-            return None, f"test authoring failed: {_get(error, 'category')}: {_get(error, 'message')}"
-        content = _get(_get(result, "file"), "content")
-        (self.authored_dir / filename).write_text(content, encoding="utf-8")
-        return content, None
 
-    def generated(self, crit, entry):
-        bundle = self.bundle(crit)
-        filename = _test_filename(crit.id)
-        cache = self.repo_root / "verification" / self.slug / "generated-test" / filename
-        source, path, authored = None, cache, False
-        if cache.is_file():
-            text = cache.read_text(encoding="utf-8")
-            if (text.splitlines() or [""])[0] == _header(bundle):
-                source = text
-        if source is None:
-            if self.test_author is None:
-                _fail(entry, "test", "no cached test and no test_author configured")
-                return
-            source, problem = self.author(bundle, entry, filename)
-            if problem is not None:
-                _fail(entry, "test", problem)
-                return
-            authored, path = True, self.authored_dir / filename
-        report = self.probe(source, bundle)
-        if not _get(report, "ok") and not authored and self.test_author is not None:
-            source, problem = self.author(bundle, entry, filename)
-            if problem is not None:
-                _fail(entry, "test", problem)
-                return
-            path = self.authored_dir / filename
-            report = self.probe(source, bundle)
-        if not _get(report, "ok"):
-            kinds = []
-            for finding in _get(report, "findings", []):
-                kind = _get(finding, "kind")
-                if _get(finding, "severity") == "error" and kind not in kinds:
-                    kinds.append(kind)
-            _fail(entry, "test", "test failed its probe: " + ", ".join(kinds))
-            return
-        if self.run_criterion(entry, path):
-            self.passing.append((entry, path, cache))
+def _entry(c: dict, result: str, **extra) -> dict:
+    entry = {"id": c["id"], "covers": c["covers"], "kind": c["kind"], "result": result}
+    entry.update(extra)
+    return entry
 
-    # -- assets -------------------------------------------------------
-    def provision(self):
-        self.declared = _declared_assets(self.front.get("assets", ""))
-        for kind in ["python"] + [k for k, _ in self.declared]:
-            if kind in self.info:
-                continue
-            path = _adapter_path(self.repo_root, kind)
-            module = _load_file(path, f"kind_{kind.replace('-', '_')}") if path else None
-            report = module.provision(self.repo_root) if module else None
-            self.info[kind] = (path, module, report)
-        for kind, (_, module, report) in self.info.items():
-            if module is None:
-                self.env_error = f"unknown asset kind: {kind}"
-                break
-            if not _get(report, "ok"):
-                self.env_error = str(_get(report, "reason"))
-                break
-        self.interpreter = _get(self.info["python"][2], "interpreter")
 
-    def asset_entries(self):
-        entries = []
-        for kind, path in [("python", ".")] + self.declared:
-            adapter_path, _, report = self.info[kind]
-            entries.append({
-                "kind": kind,
-                "path": path,
-                "definition_sha256": _sha(self.repo_root / "specs" / "architecture" / f"asset-kind-{kind}.md"),
-                "adapter_sha256": _sha(adapter_path),
-                "versions": _get(report, "versions", {}),
-                "lockfile_sha256": _get(report, "lockfile_sha256"),
-            })
-        return entries
+def _fail(entry: dict, origin: str, message, expected=None, actual=None) -> dict:
+    entry["result"] = "fail"
+    entry["failure_detail"] = {"message": message, "expected": expected, "actual": actual}
+    entry["failure_origin"] = origin
+    return entry
 
-    # -- mutation -----------------------------------------------------
-    def mutation(self):
-        runs = list(self.passing)
-        if not runs:
-            return None, None
-        sandbox_gen = self.work / "sandbox" / "gen"
-        copy = sandbox_gen / self.slug
-        shutil.copytree(self.repo_root / "gen" / self.slug, copy,
-                        ignore=shutil.ignore_patterns("__pycache__"))
-        for directory in sorted((self.repo_root / "gen").iterdir()):
-            if directory.is_dir() and directory.name != self.slug:
-                (sandbox_gen / directory.name).symlink_to(directory)
-        site = _javascript_site(copy)
-        if site is not None:
-            return None, (f"javascript in a string at {site}; declare it as an asset "
-                          "(specs/architecture/asset-kinds.md)")
 
-        def sandbox_run(files, timeout):
-            code, _, elapsed = self.pytest(files, copy, copy, timeout, extra=("--noconftest",))
-            return code, elapsed
+def _judge(c: dict, component_id: str, repo_root: Path, judge) -> dict:
+    if judge is None:
+        return _entry(c, "skipped", rationale=None)
+    assembler = _load(repo_root, "gen/spec-bundle-assembler", "spec_bundle_assembler")
+    bundle = assembler.assemble_criterion(component_id, c["id"], repo_root)
+    outcome = judge(bundle)
+    if isinstance(outcome, dict):
+        value = outcome.get("result", outcome.get("verdict"))
+        rationale = outcome.get("rationale")
+    else:
+        value, rationale = outcome, None
+    result = "pass" if value is True or value == "pass" else "fail"
+    return _entry(c, result, rationale=rationale)
 
-        code, elapsed = sandbox_run([f for _, f, _ in runs], DEFAULT_TEST_TIMEOUT)
-        if code != 0:
-            faulty = [run for run in runs if sandbox_run([run[1]], DEFAULT_TEST_TIMEOUT)[0] != 0]
-            if not faulty:
-                return None, _baseline_error(code)
-            for entry, _, cache in faulty:
-                _fail(entry, "test", "test fails in the mutation sandbox")
-                cache.unlink(missing_ok=True)
-            runs = [run for run in runs if run not in faulty]
-            if not runs:
-                return None, None
-            code, elapsed = sandbox_run([f for _, f, _ in runs], DEFAULT_TEST_TIMEOUT)
-            if code != 0:
-                return None, _baseline_error(code)
-        mutant_timeout = max(2.0, 10 * elapsed)
-        files = [f for _, f, _ in runs]
-        snapshot = {p: p.read_bytes() for p in copy.rglob("*") if p.is_file()}
-        targets = [("python", copy)] + [(kind, copy / path) for kind, path in self.declared]
-        killed = total = 0
-        for kind, target in targets:
-            adapter = self.info[kind][1]
-            try:
-                sites = list(adapter.strength_sites(target))
-            except Exception as exc:
-                return None, f"{kind} adapter failed: {type(exc).__name__}: {exc}"
-            for site_info in sites:
-                try:
-                    adapter.apply_site(target, site_info)
-                except Exception as exc:
-                    return None, f"{kind} adapter failed: {type(exc).__name__}: {exc}"
-                code, _ = sandbox_run(files, mutant_timeout)
-                total += 1
-                killed += code != 0
-                for path, data in snapshot.items():
-                    path.write_bytes(data)
-        return (killed / total if total else 1.0), None
 
-    # -- top level ----------------------------------------------------
-    def entry_for(self, crit):
-        return {"id": crit.id, "covers": crit.covers, "kind": crit.kind, "result": None}
+def _requirement_results(spec_dir: Path, entries: list) -> dict:
+    results = {}
+    for rid in sorted(p.stem for p in (spec_dir / "requirements").glob("R-*.md")):
+        covering = [e["result"] for e in entries if e["covers"] == rid]
+        results[rid] = "pass" if all(r == "pass" for r in covering) else "fail"
+    return results
 
-    def requirement_results(self, entries):
-        return {
-            rid: "pass" if all(e["result"] == "pass" for e in entries if e["covers"] == rid) else "fail"
-            for rid in self.requirements
-        }
 
-    def unsealed(self):
-        self.provision()
-        drift = _drift(self.comp_dir, self.repo_root / "gen" / self.slug, self.module_name)
-        entries = []
-        for crit in self.criteria:
-            entry = self.entry_for(crit)
-            entries.append(entry)
-            if crit.kind == "llm-judge":
-                self.judge_entry(crit, entry)
-            elif self.env_error is not None:
-                _fail(entry, "environment", self.env_error)
-            elif crit.kind == "compiled":
-                self.compiled(crit, entry)
-            else:
-                self.generated(crit, entry)
-        score = error = None
-        if self.env_error is None:
-            score, error = self.mutation()
-        freeform = any(c.freeform for c in self.criteria if c.kind == "generated-test")
-        threshold = 0.9 if freeform else 0.8
-        failed = any(e["result"] == "fail" for e in entries)
-        below = score is not None and score < threshold
-        overall = "fail" if failed or drift or error is not None or below else "pass"
-        return VerificationReport(
-            component_id=self.component_id,
-            criteria=entries,
-            requirement_results=self.requirement_results(entries),
-            interface_drift=drift,
-            mutation_score=score,
-            mutation_error=error,
-            assets=self.asset_entries(),
-            overall=overall,
-        )
-
-    def sealed(self):
-        code_dir = self.repo_root / self.front.get("source_path", "")
-        drift = _drift(self.comp_dir, code_dir, self.module_name)
-        files = sorted((self.repo_root / "verification" / self.slug).glob("test_*.py"))
-        names = set()
-        for path in files:
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
-                    names.add(node.name)
-        outcomes, code = {}, 0
-        timeout = DEFAULT_TEST_TIMEOUT
-        if files:
-            xml = self.work / "sealed.xml"
-            code, _, _ = self.pytest(files, self.repo_root, code_dir, timeout,
-                                     extra=(f"--junitxml={xml}",))
-            if xml.is_file():
-                outcomes = _junit(xml)
-        entries = []
-        for crit in self.criteria:
-            entry = self.entry_for(crit)
-            entries.append(entry)
-            if crit.kind == "llm-judge":
-                self.judge_entry(crit, entry)
-                continue
-            prefix = "test_" + crit.id.lower().replace("-", "_")
-            matched = sorted(n for n in names if n == prefix or n.startswith(prefix + "_"))
-            if not matched:
-                _fail(entry, "implementation", "no characterization test")
-                continue
-            problems = [b for n in matched for b in outcomes.get(n, ["missing"]) if b is not None]
-            if not problems:
-                entry["result"] = "pass"
-                continue
-            first = problems[0]
-            entry["result"] = "fail"
-            entry["failure_origin"] = "implementation"
-            if code is None:
-                entry["failure_detail"] = _failure_from_output(None, "", timeout)
-            elif isinstance(first, str):
-                entry["failure_detail"] = {"message": "characterization test did not run",
-                                           "expected": None, "actual": None}
-            else:
-                text = (first.get("message") or "") + "\n" + (first.text or "")
-                entry["failure_detail"] = _failure_from_output(1, text, timeout)
-        failed = any(e["result"] == "fail" for e in entries)
-        return VerificationReport(
-            component_id=self.component_id,
-            criteria=entries,
-            requirement_results=self.requirement_results(entries),
-            interface_drift=drift,
-            mutation_score=None,
-            mutation_error=None,
-            assets=[],
-            overall="fail" if failed or drift else "pass",
-        )
+# ---------------------------------------------------------------- verify
 
 
 def verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport:
-    repo_root = Path(os.path.abspath(repo_root))
+    repo_root = Path(repo_root).absolute()
+    slug = _slug(component_id)
+    module_name = slug.replace("-", "_")
+    spec_dir = repo_root / "specs" / "components" / slug
+    criteria = _parse_criteria(spec_dir)
+    fm = _frontmatter(_read(spec_dir / "component.md"))
+    sealed = re.search(r"^sealed:\s*true\s*$", fm, re.M)
+    source = re.search(r"^source_path:\s*(\S.*?)\s*$", fm, re.M)
+    if sealed and source:
+        return _verify_sealed(
+            component_id, repo_root, slug, module_name, spec_dir, criteria,
+            repo_root / source.group(1).strip("'\""), judge,
+        )
+    return _verify_unsealed(
+        component_id, repo_root, slug, module_name, spec_dir, criteria, judge, test_author
+    )
+
+
+def _verify_sealed(component_id, repo_root, slug, module_name, spec_dir, criteria, code_dir, judge):
+    drift = _drift(code_dir, module_name, spec_dir)
+    files = sorted((repo_root / "verification" / slug).glob("test_*.py"))
+    names = {}
+    outcomes = {}
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(code_dir)
     with tempfile.TemporaryDirectory() as work:
-        run = _Verification(component_id, repo_root, judge, test_author, Path(work))
-        if run.front.get("sealed") == "true":
-            return run.sealed()
-        return run.unsealed()
+        for index, file in enumerate(files):
+            names[file] = re.findall(
+                r"^\s*(?:async\s+)?def\s+(test_\w+)\s*\(", _read(file), re.M
+            )
+            xml_path = Path(work) / f"junit_{index}.xml"
+            _run(
+                [sys.executable, "-m", "pytest", str(file), "-p", "no:cacheprovider",
+                 f"--junitxml={xml_path}"],
+                env, repo_root,
+            )
+            if xml_path.is_file():
+                for case in ET.parse(str(xml_path)).getroot().iter("testcase"):
+                    key = (file, case.get("name", "").split("[")[0])
+                    ok = not any(ch.tag in ("failure", "error", "skipped") for ch in case)
+                    outcomes[key] = outcomes.get(key, True) and ok
+    entries = []
+    for c in criteria:
+        if c["kind"] == "llm-judge":
+            entries.append(_judge(c, component_id, repo_root, judge))
+            continue
+        prefix = "test_" + c["id"].lower().replace("-", "_")
+        matches = [
+            (f, n) for f in files for n in names[f]
+            if n == prefix or n.startswith(prefix + "_")
+        ]
+        entry = _entry(c, "pass")
+        failing = [n for f, n in matches if outcomes.get((f, n)) is not True]
+        if not matches:
+            _fail(entry, "implementation", "no characterization test")
+        elif failing:
+            _fail(entry, "implementation", "characterization test failed: " + ", ".join(failing))
+        entries.append(entry)
+    failed = drift or any(e["result"] == "fail" for e in entries)
+    return VerificationReport(
+        component_id=component_id,
+        criteria=entries,
+        requirement_results=_requirement_results(spec_dir, entries),
+        interface_drift=drift,
+        mutation_score=None,
+        mutation_error=None,
+        assets=[],
+        drivers=[],
+        overall="fail" if failed else "pass",
+    )
 
 
-def _usage(cause):
+def _verify_unsealed(component_id, repo_root, slug, module_name, spec_dir, criteria, judge, test_author):
+    run_env_mod = _load(repo_root, "gen/run-environment", "run_environment")
+    env = run_env_mod.prepare(component_id, repo_root)
+    code_dir = repo_root / "gen" / slug
+    try:
+        drift = _drift(code_dir, module_name, spec_dir)
+        ok = _get(env, "ok")
+        entries = []
+        passed = []
+        mutation_score = None
+        mutation_error = None
+        mutation_fail = False
+        with tempfile.TemporaryDirectory() as work:
+            work = Path(work)
+            compiled = {}
+            run_env = {}
+            base_cmd = []
+            if ok:
+                run_env = dict(os.environ)
+                run_env.update(_get(env, "env_for")(code_dir))
+                run_env["PYTHONPATH"] = os.pathsep.join(
+                    [str(code_dir), str(_get(env, "plugin_dir"))]
+                )
+                base_cmd = [_get(env, "interpreter"), "-m", "pytest"]
+                extra_args = list(_get(env, "pytest_args")()) + ["-p", "no:cacheprovider"]
+            record = work / "compare.json"
+            if ok and any(c["kind"] == "compiled" for c in criteria):
+                compiler = _load(repo_root, "pipeline/criterion-compiler", "criterion_compiler")
+                out_dir = work / "compiled"
+                report = compiler.compile(component_id, repo_root, out_dir=out_dir)
+                compiled = {_get(o, "criterion_id"): o for o in _get(report, "outputs")}
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / "conftest.py").write_text(
+                    _CONFTEST.format(path=str(record)), encoding="utf-8"
+                )
+            supply_mod = None
+            for c in criteria:
+                if c["kind"] == "llm-judge":
+                    entries.append(_judge(c, component_id, repo_root, judge))
+                    continue
+                entry = _entry(c, "pass")
+                if not ok:
+                    entries.append(_fail(entry, "environment", _get(env, "failure_message")))
+                    continue
+                if c["kind"] == "compiled":
+                    out = compiled.get(
+                        c["id"], {"status": "error", "message": "criterion was not compiled"}
+                    )
+                    if _get(out, "status") != "compiled":
+                        _fail(entry, "test", _get(out, "message"))
+                    else:
+                        record.unlink(missing_ok=True)
+                        file = repo_root / _get(out, "file")
+                        rc, output = _run(base_cmd + [str(file)] + extra_args, run_env, repo_root)
+                        if rc != 0:
+                            expected = actual = None
+                            if record.is_file():
+                                rec = json.loads(record.read_text(encoding="utf-8"))
+                                left, right = _literal(rec["left"]), _literal(rec["right"])
+                                expected, actual = (right, left) if rec["op"] == "==" else (left, right)
+                            _fail(entry, "implementation", _message(rc, output), expected, actual)
+                    entries.append(entry)
+                    continue
+                if supply_mod is None:
+                    supply_mod = _load(repo_root, "gen/test-supply", "test_supply")
+                supplied = supply_mod.supply(
+                    component_id, c["id"], repo_root,
+                    test_author=test_author,
+                    interpreter=_get(env, "interpreter"),
+                    assets=[_get(a, "path") for a in list(_get(env, "assets"))[1:]],
+                    drivers=list(_get(env, "driver_fixtures")()),
+                )
+                authoring = _get(supplied, "test_authoring")
+                if authoring is not None:
+                    entry["test_authoring"] = dict(authoring)
+                if _get(supplied, "failure_origin") == "test":
+                    _fail(entry, "test", _get(supplied, "failure_message"))
+                else:
+                    path = os.path.abspath(_get(supplied, "path"))
+                    rc, output = _run(base_cmd + [path] + extra_args, run_env, repo_root)
+                    if rc == 0:
+                        passed.append((path, len(entries)))
+                    else:
+                        _fail(entry, "implementation", _message(rc, output))
+                entries.append(entry)
+        if ok:
+            scorer = _load(repo_root, "gen/mutation-scorer", "mutation_scorer")
+            result = scorer.score(component_id, repo_root, [p for p, _ in passed], env)
+            faulty = set(_get(result, "faulty_tests"))
+            for path, index in passed:
+                if path in faulty:
+                    _fail(entries[index], "test", "test fails in the mutation sandbox")
+                    if supply_mod is None:
+                        supply_mod = _load(repo_root, "gen/test-supply", "test_supply")
+                    supply_mod.discard(component_id, entries[index]["id"], repo_root)
+            mutation_score = _get(result, "mutation_score")
+            mutation_error = _get(result, "mutation_error")
+            freeform = any(c["kind"] == "generated-test" and c["freeform"] for c in criteria)
+            threshold = 0.9 if freeform else 0.8
+            mutation_fail = mutation_error is not None or (
+                mutation_score is not None and mutation_score < threshold
+            )
+        failed = drift or mutation_fail or any(e["result"] == "fail" for e in entries)
+        return VerificationReport(
+            component_id=component_id,
+            criteria=entries,
+            requirement_results=_requirement_results(spec_dir, entries),
+            interface_drift=drift,
+            mutation_score=mutation_score,
+            mutation_error=mutation_error,
+            assets=list(_get(env, "assets")),
+            drivers=list(_get(env, "drivers")),
+            overall="fail" if failed else "pass",
+        )
+    finally:
+        _get(env, "close")()
+
+
+# ---------------------------------------------------------------- CLI
+
+
+def _usage(cause: str) -> int:
     print(f"usage error: {cause}", file=sys.stderr)
-    print(USAGE, file=sys.stderr)
+    print(_USAGE, file=sys.stderr)
     return 2
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    options = {"--repo-root": ".", "--format": "text"}
+    opts = {"--repo-root": ".", "--format": "text"}
     component_id = None
     i = 0
     while i < len(args):
         token = args[i]
-        name, sep, value = token.partition("=")
-        if name in options:
-            if not sep:
-                if i + 1 >= len(args):
-                    return _usage(f"{name} needs a value")
+        flag, eq, value = token.partition("=")
+        if flag in opts:
+            if not eq:
                 i += 1
+                if i == len(args):
+                    return _usage(f"{flag} needs a value")
                 value = args[i]
-            options[name] = value
-        elif token.startswith("-") or component_id is not None:
-            return _usage(f"unknown argument: {token}")
-        else:
+            opts[flag] = value
+        elif component_id is None and not token.startswith("-"):
             component_id = token
+        else:
+            return _usage(f"unknown argument: {token}")
         i += 1
     if component_id is None:
         return _usage("missing <component-id>")
-    if options["--format"] not in ("json", "text"):
-        return _usage(f"invalid --format: {options['--format']}")
-    repo_root = Path(options["--repo-root"])
-    slug = component_id.removeprefix("comp-")
-    if not (repo_root / "specs" / "components" / slug / "component.md").is_file():
-        return _usage(f"no specs/components/{slug}/component.md")
+    if opts["--format"] not in ("json", "text"):
+        return _usage(f"invalid --format: {opts['--format']}")
+    repo_root = Path(opts["--repo-root"])
+    if not (repo_root / "specs" / "components" / _slug(component_id) / "component.md").is_file():
+        return _usage(f"unknown component: {component_id}")
     report = verify(component_id, repo_root)
-    if options["--format"] == "json":
-        print(json.dumps(report.to_dict(), indent=2, default=str))
+    if opts["--format"] == "json":
+        print(json.dumps(report.to_dict(), indent=2))
     else:
-        print(f"{report.component_id}: {report.overall}")
-        for entry in report.criteria:
-            print(f"  {entry['id']}: {entry['result']}")
+        print(f"{component_id}: {report.overall}")
+        for c in report.criteria:
+            print(f"  {c['id']}: {c['result']}")
     return 0 if report.overall == "pass" else 1

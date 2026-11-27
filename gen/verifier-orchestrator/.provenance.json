@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:ce7feb8acc27f6c1ea18fe4eb4116449185fd6786cd7adeb4ec1151eaeb041a1",
+  "spec_bundle_hash": "sha256:e1331d97258e78020b302812a4f69cea4943abc57b6a2832e682dcec0bd8a9be",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -17,13 +17,13 @@
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
-    "verifier": "verifier-orchestrator@3.5.0",
+    "verifier": "verifier-orchestrator@4.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-24T08:40:11Z",
+  "generated_at": "2026-11-27T04:50:08Z",
   "verification_run_id": "verifier-orchestrator-attempt-1",
   "verification_report": {
     "component_id": "comp-verifier-orchestrator",
@@ -77,12 +77,6 @@
         "result": "pass"
       },
       {
-        "id": "AC-VERIFY-009",
-        "covers": "R-VERIFY-009",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
         "id": "AC-VERIFY-010",
         "covers": "R-VERIFY-010",
         "kind": "generated-test",
@@ -113,18 +107,6 @@
         "result": "pass"
       },
       {
-        "id": "AC-VERIFY-015",
-        "covers": "R-VERIFY-006",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-016",
-        "covers": "R-VERIFY-014",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
         "id": "AC-VERIFY-017",
         "covers": "R-VERIFY-015",
         "kind": "generated-test",
@@ -143,44 +125,8 @@
         "result": "pass"
       },
       {
-        "id": "AC-VERIFY-020",
-        "covers": "R-VERIFY-006",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
         "id": "AC-VERIFY-021",
         "covers": "R-VERIFY-018",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-022",
-        "covers": "R-VERIFY-014",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-023",
-        "covers": "R-VERIFY-019",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-024",
-        "covers": "R-VERIFY-019",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-025",
-        "covers": "R-VERIFY-014",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-026",
-        "covers": "R-VERIFY-006",
         "kind": "generated-test",
         "result": "pass"
       },
@@ -215,12 +161,6 @@
         "result": "pass"
       },
       {
-        "id": "AC-VERIFY-032",
-        "covers": "R-VERIFY-006",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
         "id": "AC-VERIFY-033",
         "covers": "R-VERIFY-020",
         "kind": "generated-test",
@@ -236,7 +176,6 @@
       "R-VERIFY-006": "pass",
       "R-VERIFY-007": "pass",
       "R-VERIFY-008": "pass",
-      "R-VERIFY-009": "pass",
       "R-VERIFY-010": "pass",
       "R-VERIFY-011": "pass",
       "R-VERIFY-012": "pass",
@@ -250,7 +189,7 @@
       "R-VERIFY-020": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8520408163265306,
+    "mutation_score": 0.8717948717948718,
     "mutation_error": null,
     "assets": [
       {
@@ -278,7 +217,7 @@
     "matches": [],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": false
+    "cache_hit": true
   },
   "secret_scan": {
     "scope": "full",
