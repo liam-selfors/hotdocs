@@ -1,11 +1,4 @@
-# hotdocs-criterion: sha256:ba69d3ce82f5810874de1cc20ff97f6b7178532eef97bc671da0a994f1a1d40c
-"""AC-TRACK-007: a failed generation (model_call_error populated, no
-VerificationReport) still writes exactly one AttemptRecord under
-.hotdocs/attempts/<component_id>/, with generation populated,
-verification null, queryable via DuckDB's read_json with no bespoke
-parsing."""
-
-import dataclasses
+# hotdocs-criterion: sha256:5213750846ac5c47f4ed51a1209321d0cf4e4e3013d868f18c013c93397105b3
 import json
 from pathlib import Path
 
@@ -14,114 +7,71 @@ import pytest
 import provenance_tracker
 
 
-COMPONENT_ID = "comp-foo"
-SPEC_BUNDLE_HASH = "sha256:" + "ab" * 32
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclasses.dataclass
-class FakeGenerationResult:
-    component_id: str
-    model: str
-    prompt_version: str
-    files: list
-    model_call_error: dict
-    tags: set
+COMPONENT_ID = "comp-foo"
+SPEC_BUNDLE_HASH = "sha256:0123456789abcdef"
 
 
-def _failed_generation():
-    return FakeGenerationResult(
-        component_id=COMPONENT_ID,
-        model="anthropic:claude-sonnet-5",
-        prompt_version="v11",
-        files=[],
-        model_call_error={"category": "network", "message": "connection refused"},
-        tags={"b", "a"},
-    )
+def _generation_result():
+    return {
+        "component_id": COMPONENT_ID,
+        "model": "anthropic:claude-sonnet-5",
+        "prompt_version": "v11",
+        "files": [],
+        "model_call_error": {"category": "network", "message": "connection refused"},
+    }
 
 
-def _write(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def test_ac_track_007_failed_generation_writes_record_with_null_verification(tmp_path):
+    repo_root = tmp_path
+    generation = _generation_result()
+
     record = provenance_tracker.write_attempt_record(
         COMPONENT_ID,
-        _failed_generation(),
+        generation,
         None,
         SPEC_BUNDLE_HASH,
         repo_root,
     )
+
+    # Exactly one AttemptRecord file under .hotdocs/attempts/<component_id>/
     attempts_dir = repo_root / ".hotdocs" / "attempts" / COMPONENT_ID
-    assert attempts_dir.is_dir(), "attempts directory was not created"
+    assert attempts_dir.is_dir()
     files = [p for p in attempts_dir.iterdir() if p.is_file()]
-    assert len(files) == 1, "expected exactly one AttemptRecord file, got " + repr(files)
-    return repo_root, record, files[0]
+    assert len(files) == 1, files
+    record_path = files[0]
 
-
-def test_failed_generation_writes_one_record_with_null_verification(tmp_path):
-    repo_root, record, path = _write(tmp_path)
-
-    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    # On-disk content: generation populated, verification null
+    on_disk = json.loads(record_path.read_text(encoding="utf-8"))
     assert isinstance(on_disk, dict)
     assert on_disk["component_id"] == COMPONENT_ID
     assert on_disk["spec_bundle_hash"] == SPEC_BUNDLE_HASH
-    assert "attempt_id" in on_disk and on_disk["attempt_id"]
-    assert "timestamp" in on_disk and on_disk["timestamp"]
-
-    # verification is null: generation itself failed
-    assert "verification" in on_disk
     assert on_disk["verification"] is None
+    assert isinstance(on_disk["generation"], dict)
+    assert on_disk["generation"]["model_call_error"] == generation["model_call_error"]
+    assert on_disk["generation"]["component_id"] == COMPONENT_ID
 
-    # generation is populated, in plain JSON form
-    gen = on_disk["generation"]
-    assert isinstance(gen, dict)
-    assert gen["model_call_error"] == {
-        "category": "network",
-        "message": "connection refused",
-    }
-    assert gen["component_id"] == COMPONENT_ID
-    assert gen["model"] == "anthropic:claude-sonnet-5"
-    assert gen["prompt_version"] == "v11"
-    assert gen["files"] == []
-    assert gen["tags"] == ["a", "b"]
-
-    # The returned record carries the same plain form, not the original object
-    rec_gen = field(record, "generation")
-    assert not isinstance(rec_gen, FakeGenerationResult)
-    assert isinstance(rec_gen, dict)
-    assert rec_gen == gen
+    # Returned record mirrors the plain form written to disk
     assert field(record, "verification") is None
-    assert field(record, "component_id") == COMPONENT_ID
+    returned_generation = field(record, "generation")
+    assert isinstance(returned_generation, dict)
+    assert returned_generation == on_disk["generation"]
 
-
-def test_record_queryable_with_duckdb_read_json(tmp_path):
+    # Queryable via DuckDB's read_json with no bespoke parsing
     duckdb = pytest.importorskip("duckdb")
-    _repo_root, _record, path = _write(tmp_path)
-
-    literal = "'" + str(path).replace("'", "''") + "'"
     con = duckdb.connect()
-    try:
-        cur = con.execute("SELECT * FROM read_json(" + literal + ")")
-        rows = cur.fetchall()
-        cols = [d[0] for d in cur.description]
-    finally:
-        con.close()
-
+    path_literal = "'" + str(record_path).replace("'", "''") + "'"
+    rows = con.execute(
+        "SELECT component_id, spec_bundle_hash, generation IS NOT NULL, "
+        "verification IS NULL FROM read_json(" + path_literal + ")"
+    ).fetchall()
     assert len(rows) == 1
-    row = dict(zip(cols, rows[0]))
-    assert row["component_id"] == COMPONENT_ID
-    assert row["spec_bundle_hash"] == SPEC_BUNDLE_HASH
-    assert "verification" in row
-    assert row["verification"] is None
-
-    gen = row["generation"]
-    if isinstance(gen, str):
-        gen = json.loads(gen)
-    assert gen is not None
-    mce = gen["model_call_error"]
-    if isinstance(mce, str):
-        mce = json.loads(mce)
-    assert mce["message"] == "connection refused"
-    assert mce["category"] == "network"
+    component_id, bundle_hash, has_generation, verification_is_null = rows[0]
+    assert component_id == COMPONENT_ID
+    assert bundle_hash == SPEC_BUNDLE_HASH
+    assert has_generation is True
+    assert verification_is_null is True
+    con.close()

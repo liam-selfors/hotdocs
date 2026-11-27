@@ -1,7 +1,10 @@
-# hotdocs-criterion: sha256:d2667979964f64a81533ca645f2cec9a5f4322b9d2c5c470bd0d9a7c9e92e226
-"""AC-TRACK-008: last_requirement_failures reads the most recent AttemptRecord's
-requirement_results and drops R-ids whose non-pass covering criteria all have
-failure_origin "test" or "environment"."""
+# hotdocs-criterion: sha256:3cc516d0b996c9e8e9ae74dff779b0286e18772811170f5627dfc3dc6a0caf23
+"""AC-TRACK-008: last_requirement_failures returns the failing R-ids of the
+most recent AttemptRecord with a non-null verification. It leaves out an R-id
+whose non-pass covering criteria all have failure_origin "test" or
+"environment"."""
+
+from pathlib import Path
 
 import provenance_tracker
 
@@ -10,45 +13,36 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class AttrDict(dict):
-    """A plain dict that also exposes its keys as attributes, so a writer
-    reading either dict items or attributes sees the same values."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
 def _generation_result():
-    return AttrDict(
-        component_id="comp-foo",
-        model="claude-sonnet-5",
-        prompt_version="v1",
-        files=[],
-        model_call_error=None,
-    )
+    return {
+        "component_id": "comp-foo",
+        "model": "anthropic:claude-sonnet-5",
+        "prompt_version": "v1",
+        "files": [],
+        "model_call_error": None,
+    }
 
 
-def _verification_report(criteria, requirement_results):
-    return AttrDict(
-        component_id="comp-foo",
-        criteria=[AttrDict(c) for c in criteria],
-        requirement_results=dict(requirement_results),
-        interface_drift=False,
-        mutation_score=None,
-        mutation_error=None,
-        assets=[],
-        overall="fail",
-    )
+def _verification(requirement_results, criteria):
+    overall = "pass" if all(v == "pass" for v in requirement_results.values()) else "fail"
+    return {
+        "component_id": "comp-foo",
+        "criteria": criteria,
+        "requirement_results": requirement_results,
+        "interface_drift": False,
+        "mutation_score": None,
+        "mutation_error": None,
+        "assets": [],
+        "drivers": [],
+        "overall": overall,
+    }
 
 
-def _write(repo_root, criteria, requirement_results):
+def _write(repo_root, verification):
     record = provenance_tracker.write_attempt_record(
         "comp-foo",
         _generation_result(),
-        _verification_report(criteria, requirement_results),
+        verification,
         "sha256:" + "0" * 64,
         repo_root,
     )
@@ -56,48 +50,65 @@ def _write(repo_root, criteria, requirement_results):
     return record
 
 
-def test_plain_requirement_results_failures(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    criteria = [
-        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-        {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "compiled", "result": "fail",
-         "failure_origin": "implementation"},
-    ]
-    _write(repo_root, criteria, {"R-FOO-001": "pass", "R-FOO-002": "fail"})
+def test_flat_requirement_results_failing_ids(tmp_path):
+    repo_root = Path(tmp_path)
+    verification = _verification(
+        {"R-FOO-001": "pass", "R-FOO-002": "fail"},
+        [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "generated-test",
+             "result": "pass"},
+            {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "generated-test",
+             "result": "fail", "failure_origin": "implementation",
+             "failure_detail": {"message": "m", "expected": 1, "actual": 2}},
+        ],
+    )
+    _write(repo_root, verification)
 
     result = provenance_tracker.last_requirement_failures("comp-foo", repo_root)
+
     assert list(result) == ["R-FOO-002"]
 
 
-def test_test_origin_failure_is_dropped(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    criteria = [
-        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "generated-test", "result": "fail",
-         "failure_origin": "test"},
-        {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "generated-test", "result": "fail",
-         "failure_origin": "implementation"},
-    ]
-    _write(repo_root, criteria, {"R-FOO-001": "fail", "R-FOO-002": "fail"})
+def test_test_origin_failure_left_out(tmp_path):
+    repo_root = Path(tmp_path)
+    verification = _verification(
+        {"R-FOO-001": "fail", "R-FOO-002": "fail"},
+        [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "generated-test",
+             "result": "fail", "failure_origin": "test",
+             "failure_detail": {"message": "m", "expected": None, "actual": None}},
+            {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "generated-test",
+             "result": "fail", "failure_origin": "implementation",
+             "failure_detail": {"message": "m", "expected": 1, "actual": 2}},
+        ],
+    )
+    _write(repo_root, verification)
 
     result = provenance_tracker.last_requirement_failures("comp-foo", repo_root)
+
     assert list(result) == ["R-FOO-002"]
 
 
-def test_pass_plus_environment_dropped_absent_origin_kept(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    criteria = [
-        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-        {"id": "AC-FOO-003", "covers": "R-FOO-001", "kind": "compiled", "result": "fail",
-         "failure_origin": "environment"},
-        {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "generated-test", "result": "fail",
-         "failure_origin": "test"},
-        {"id": "AC-FOO-004", "covers": "R-FOO-002", "kind": "llm-judge", "result": "fail",
-         "rationale": "does not hold"},
-    ]
-    _write(repo_root, criteria, {"R-FOO-001": "fail", "R-FOO-002": "fail"})
+def test_pass_plus_environment_left_out_test_plus_absent_origin_kept(tmp_path):
+    repo_root = Path(tmp_path)
+    verification = _verification(
+        {"R-FOO-001": "fail", "R-FOO-002": "fail"},
+        [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "generated-test",
+             "result": "pass"},
+            {"id": "AC-FOO-003", "covers": "R-FOO-001", "kind": "generated-test",
+             "result": "fail", "failure_origin": "environment",
+             "failure_detail": {"message": "m", "expected": None, "actual": None}},
+            {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "generated-test",
+             "result": "fail", "failure_origin": "test",
+             "failure_detail": {"message": "m", "expected": None, "actual": None}},
+            {"id": "AC-FOO-004", "covers": "R-FOO-002", "kind": "compiled",
+             "result": "fail",
+             "failure_detail": {"message": "m", "expected": 1, "actual": 2}},
+        ],
+    )
+    _write(repo_root, verification)
 
     result = provenance_tracker.last_requirement_failures("comp-foo", repo_root)
+
     assert list(result) == ["R-FOO-002"]
