@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:dd03da6917268b699be7818fe18f71cb96517723268ede69400b5c16dabf6404
+# hotdocs-criterion: sha256:364c44b04d754d77e212f9f6d1a046abc74477d0f42f206272cda6961a033a26
 import os
 import tempfile
 
@@ -10,10 +10,10 @@ def field(value, name):
 
 
 def _temp_dirs():
-    root = tempfile.gettempdir()
+    base = tempfile.gettempdir()
     names = set()
-    for name in os.listdir(root):
-        if os.path.isdir(os.path.join(root, name)):
+    for name in os.listdir(base):
+        if os.path.isdir(os.path.join(base, name)):
             names.add(name)
     return names
 
@@ -23,7 +23,7 @@ def test_clean_source_reaches_and_leaves_no_temp_dir():
         "import slugify\n"
         "\n"
         "\n"
-        "def test_lower():\n"
+        "def test_lowercases():\n"
         "    assert slugify.slugify(" + repr("A") + ") == " + repr("a") + "\n"
     )
     before = _temp_dirs()
@@ -34,42 +34,34 @@ def test_clean_source_reaches_and_leaves_no_temp_dir():
     assert list(field(report, "findings")) == []
     assert field(report, "tests_run") == 1
     assert field(report, "tests_reached") == 1
-    added = after - before
-    assert added == set(), "probe left temporary directories: " + repr(sorted(added))
+    assert after - before == set()
 
 
 def test_findings_ordered_by_check_and_to_dict_shape():
-    source = (
-        "import zz_no_such_module_q\n"
-        "\n"
-        "def test_x():\n"
-        "    assert undefined_q == 1\n"
-    )
+    source = "import zz_no_such_module_q\n\ndef test_x():\n    assert undefined_q == 1\n"
     report = test_probe.probe(source, {}, "slugify")
-    findings = list(field(report, "findings"))
-    kinds = [field(f, "kind") for f in findings]
 
+    findings = list(field(report, "findings"))
+    kinds = [f["kind"] for f in findings]
     assert "undefined_name" in kinds
     assert "unknown_import" in kinds
     undefined_index = kinds.index("undefined_name")
     unknown_index = kinds.index("unknown_import")
-    assert undefined_index < unknown_index
-    assert field(findings[undefined_index], "line") == 4
-    assert field(findings[unknown_index], "line") == 1
+    assert unknown_index > undefined_index
+    assert findings[undefined_index]["line"] == 4
+    assert findings[unknown_index]["line"] == 1
     assert field(report, "ok") is False
-    assert field(report, "tests_run") == 0
-    assert field(report, "tests_reached") == 0
 
     as_dict = report.to_dict()
     assert isinstance(as_dict, dict)
-    assert isinstance(as_dict["findings"], list)
-    assert len(as_dict["findings"]) == len(findings)
-    for entry in as_dict["findings"]:
-        assert isinstance(entry, dict)
+    entries = as_dict["findings"]
+    assert isinstance(entries, list)
+    assert len(entries) == len(findings)
+    for entry in entries:
         assert set(entry.keys()) == {"kind", "severity", "line", "message"}
 
 
-def test_same_check_same_line_ordered_by_message():
+def test_same_line_findings_ordered_by_message():
     source = (
         "import slugify\n"
         "\n"
@@ -78,13 +70,12 @@ def test_same_check_same_line_ordered_by_message():
         "    assert zeta_q == alpha_q\n"
     )
     report = test_probe.probe(source, {}, "slugify")
-    findings = list(field(report, "findings"))
-    undefined = [f for f in findings if field(f, "kind") == "undefined_name"]
 
-    assert len(undefined) == 2
-    assert [field(f, "line") for f in undefined] == [5, 5]
-    assert [field(f, "message") for f in undefined] == [
+    findings = list(field(report, "findings"))
+    undefined = [f for f in findings if f["kind"] == "undefined_name"]
+    assert [f["message"] for f in undefined] == [
         "undefined name 'alpha_q'",
         "undefined name 'zeta_q'",
     ]
+    assert all(f["line"] == 5 for f in undefined)
     assert field(report, "ok") is False

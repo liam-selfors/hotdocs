@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:8b40efda9c86713fec0cc31260fbb51222ccb3a927229590922ed063f21f86e8
+# hotdocs-criterion: sha256:102501314e1129c671f44c0ee9f4d414e8a0c00dd740b25b31e10cb71d35fe07
 import test_probe
 
 
@@ -6,21 +6,36 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+KIND = "fake_signature_mismatch"
+
 BUNDLE = {
     "dependency_interfaces": {
-        "comp-bar": (
-            "bar_get(key: str, default: dict[str, str]) -> str\n"
-            "bar_put(*, key: str) -> None"
-        )
+        "comp-bar": "bar_get(key: str, default: dict[str, str]) -> str\n"
+        "bar_put(*, key: str) -> None"
     }
 }
 
-TOP_LEVEL = [
+EXPECTED_MESSAGE = "bar_get takes 1 parameters; the interface of comp-bar gives 2"
+
+
+def mismatches(report):
+    findings = field(report, "findings")
+    return [f for f in findings if field(f, "kind") == KIND]
+
+
+def def_line(source, prefix):
+    for index, text in enumerate(source.split("\n"), start=1):
+        if text.startswith(prefix):
+            return index
+    raise AssertionError("no line starting with " + repr(prefix))
+
+
+TOP_LEVEL_DEFS = [
     "import slugify as target",
     "",
     "",
     "def bar_get(key):",
-    "    return 'v'",
+    "    return " + repr("v"),
     "",
     "",
     "def bar_put(key):",
@@ -28,7 +43,7 @@ TOP_LEVEL = [
     "",
     "",
     "def other(a, b, c):",
-    "    return None",
+    "    return a",
     "",
     "",
     "alias = bar_get",
@@ -37,61 +52,41 @@ TOP_LEVEL = [
 ]
 
 
-def mismatches(report):
-    return [
-        f for f in field(report, "findings")
-        if field(f, "kind") == "fake_signature_mismatch"
-    ]
-
-
-def bar_get_line(lines):
-    return lines.index("def bar_get(key):") + 1
-
-
-def test_monkeypatch_installed_alias_mismatch():
-    lines = TOP_LEVEL + [
-        "def test_install(monkeypatch):",
-        "    monkeypatch.setattr(target, 'bar_get', alias)",
-        "    monkeypatch.setattr(target, 'bar_put', bar_put)",
+def test_monkeypatch_setattr_installs_mismatched_fake_via_alias():
+    lines = TOP_LEVEL_DEFS + [
+        "def test_fakes(monkeypatch):",
+        "    monkeypatch.setattr(target, " + repr("bar_get") + ", alias)",
+        "    monkeypatch.setattr(target, " + repr("bar_put") + ", bar_put)",
+        "    assert target.slugify(" + repr("x") + ") == " + repr("x"),
         "",
     ]
     source = "\n".join(lines)
     report = test_probe.probe(source, BUNDLE, "slugify")
     found = mismatches(report)
-    assert len(found) == 1
-    assert field(found[0], "line") == bar_get_line(lines)
-    assert field(found[0], "message") == (
-        "bar_get takes 1 parameters; the interface of comp-bar gives 2"
-    )
+    assert len(found) == 1, found
+    finding = found[0]
+    assert field(finding, "line") == def_line(source, "def bar_get(")
+    assert field(finding, "message") == EXPECTED_MESSAGE
+    assert field(finding, "severity") == "error"
 
 
-def test_setattr_and_attribute_assignment_installs():
-    first_lines = TOP_LEVEL + [
-        "def test_install(monkeypatch):",
-        "    monkeypatch.setattr(target, 'bar_get', alias)",
-        "    monkeypatch.setattr(target, 'bar_put', bar_put)",
-        "",
-    ]
-    first = mismatches(test_probe.probe("\n".join(first_lines), BUNDLE, "slugify"))
-
-    lines = TOP_LEVEL + [
-        "def test_install(monkeypatch):",
-        "    setattr(target, 'bar_get', alias)",
+def test_setattr_and_attribute_assignment_install_fakes():
+    lines = TOP_LEVEL_DEFS + [
+        "def test_fakes(monkeypatch):",
+        "    setattr(target, " + repr("bar_get") + ", alias)",
         "    target.bar_put = bar_put",
-        "    monkeypatch.setattr(target, 'other', other)",
+        "    monkeypatch.setattr(target, " + repr("other") + ", other)",
+        "    assert target.slugify(" + repr("x") + ") == " + repr("x"),
         "",
     ]
     source = "\n".join(lines)
     report = test_probe.probe(source, BUNDLE, "slugify")
     found = mismatches(report)
-    assert len(found) == 1
-    assert field(found[0], "line") == bar_get_line(lines)
-    assert field(found[0], "message") == (
-        "bar_get takes 1 parameters; the interface of comp-bar gives 2"
-    )
-    assert len(first) == 1
-    for key in ("kind", "severity", "line", "message"):
-        assert field(found[0], key) == field(first[0], key)
+    assert len(found) == 1, found
+    finding = found[0]
+    assert field(finding, "line") == def_line(source, "def bar_get(")
+    assert field(finding, "message") == EXPECTED_MESSAGE
+    assert field(finding, "severity") == "error"
 
 
 def test_star_args_fake_satisfies_any_count():
@@ -100,82 +95,82 @@ def test_star_args_fake_satisfies_any_count():
         "",
         "",
         "def bar_get(*args):",
-        "    return 'v'",
+        "    return " + repr("v"),
         "",
         "",
         "def bar_put(key):",
         "    return None",
         "",
         "",
-        "def other(a, b, c):",
-        "    return None",
-        "",
-        "",
         "alias = bar_get",
         "",
         "",
-        "def test_install(monkeypatch):",
-        "    monkeypatch.setattr(target, 'bar_get', alias)",
-        "    monkeypatch.setattr(target, 'bar_put', bar_put)",
+        "def test_fakes(monkeypatch):",
+        "    monkeypatch.setattr(target, " + repr("bar_get") + ", alias)",
+        "    monkeypatch.setattr(target, " + repr("bar_put") + ", bar_put)",
+        "    assert target.slugify(" + repr("x") + ") == " + repr("x"),
         "",
     ]
-    report = test_probe.probe("\n".join(lines), BUNDLE, "slugify")
+    source = "\n".join(lines)
+    report = test_probe.probe(source, BUNDLE, "slugify")
     assert mismatches(report) == []
 
 
-def test_uninstalled_helper_is_not_a_fake():
+def test_uninstalled_helper_is_never_a_fake():
     lines = [
         "import slugify as target",
         "",
         "",
         "def bar_get():",
-        "    return 'v'",
+        "    return " + repr("k"),
         "",
         "",
         "def test_helper():",
-        "    assert bar_get() == 'v'",
-        "    assert target is not None",
+        "    key = bar_get()",
+        "    assert target.slugify(key) == key",
         "",
     ]
-    report = test_probe.probe("\n".join(lines), BUNDLE, "slugify")
+    source = "\n".join(lines)
+    report = test_probe.probe(source, BUNDLE, "slugify")
     assert mismatches(report) == []
 
 
-def test_string_literal_fake_and_bracketed_interface():
+def test_fake_module_source_in_string_literal_is_checked():
     bundle = {
         "dependency_interfaces": {
-            "comp-bar": (
-                "bar_get(a: int, /, b: dict[str, tuple[int, int]], *, c: str) -> str"
-            )
+            "comp-bar": "bar_get(a: int, /, b: dict[str, tuple[int, int]], *, c: str) -> str"
         }
     }
     lines = [
-        "import slugify as target",          # 1
-        "",                                  # 2
-        "",                                  # 3
-        "def bar_get(a, b, *, c):",          # 4
-        "    return 'v'",                    # 5
-        "",                                  # 6
-        "",                                  # 7
-        "x = y = bar_get",                   # 8
-        "",                                  # 9
-        'FAKE_SOURCE = """',                 # 10
-        "# fake comp-bar module",            # 11
-        "def bar_get(a, b):",                # 12
-        "    return 'v'",                    # 13
-        '"""',                               # 14
-        "",                                  # 15
-        "",                                  # 16
-        "def test_install(monkeypatch):",    # 17
-        "    monkeypatch.setattr(target, 'bar_get', bar_get)",
+        "import slugify as target",  # 1
+        "",  # 2
+        "",  # 3
+        "def bar_get(a, b, *, c):",  # 4
+        "    return " + repr("v"),  # 5
+        "",  # 6
+        "",  # 7
+        "x = y = bar_get",  # 8
+        "",  # 9
+        'FAKE_SOURCE = """',  # 10
+        "# fake module for comp-bar",  # 11
+        "def bar_get(a, b):",  # 12
+        "    return a",  # 13
+        '"""',  # 14
+        "",  # 15
+        "",  # 16
+        "def test_fake(monkeypatch):",  # 17
+        "    monkeypatch.setattr(target, " + repr("bar_get") + ", bar_get)",
         "    assert FAKE_SOURCE",
+        "    assert target.slugify(" + repr("x") + ") == " + repr("x"),
         "",
     ]
-    assert lines[11] == "def bar_get(a, b):"
-    report = test_probe.probe("\n".join(lines), bundle, "slugify")
+    source = "\n".join(lines)
+    assert source.split("\n")[11] == "def bar_get(a, b):"
+    report = test_probe.probe(source, bundle, "slugify")
     found = mismatches(report)
-    assert len(found) == 1
-    assert field(found[0], "line") == 12
-    assert field(found[0], "message") == (
+    assert len(found) == 1, found
+    finding = found[0]
+    assert field(finding, "line") == 12
+    assert field(finding, "message") == (
         "bar_get takes 2 parameters; the interface of comp-bar gives 3"
     )

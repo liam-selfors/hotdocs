@@ -1,15 +1,15 @@
-# hotdocs-criterion: sha256:de47683241619f6b3e29aafe268e2cb3ea1155dcb9d69b9b987db2a7e72be255
+# hotdocs-criterion: sha256:b7f128d19166ccdd3fab53e7005211ad5c0e4c4af9f4e8fa14f1d394ff7416e8
 import test_probe
-
-
-TEST_SOURCE = (
-    "def test_opens_page(browser):\n"
-    "    browser.open(\"x.html\")\n"
-)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+TEST_SOURCE = (
+    "def test_opens_page(browser):\n"
+    "    browser.open(" + repr("x.html") + ")\n"
+)
 
 
 def test_declared_driver_fixture_reaches_code_under_test():

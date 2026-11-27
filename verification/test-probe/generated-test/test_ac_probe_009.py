@@ -1,10 +1,6 @@
-# hotdocs-criterion: sha256:0121d8d1390b0c5c61fb152d56460513d8948837d5380d0554be4a0bf91c8468
+# hotdocs-criterion: sha256:cc89e7ad36d7586b0ace560de7abc07fa71fe977e04c0432987253c4d5fc5f44
 import os
-import shlex
-import stat
 import sys
-
-import pytest
 
 import test_probe
 
@@ -23,49 +19,43 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _plant_wrapper(tmp_path):
-    pkg_root = tmp_path / "wraponly_site"
-    pkg_dir = pkg_root / "wraponly_pkg"
-    pkg_dir.mkdir(parents=True)
-    (pkg_dir / "__init__.py").write_text("VALUE = 1\n")
-
-    wrapper = tmp_path / "wrapper_python"
-    script = (
+def make_wrapper(tmp_path):
+    w = tmp_path
+    site = w / "site"
+    site.mkdir()
+    (site / "wraponly_pkg.py").write_text("")
+    wrapper = w / "pywrap"
+    content = (
         "#!/bin/sh\n"
-        + "PYTHONPATH=" + shlex.quote(str(pkg_root))
-        + '"${PYTHONPATH:+:$PYTHONPATH}"\n'
-        + "export PYTHONPATH\n"
-        + "exec " + shlex.quote(sys.executable) + ' "$@"\n'
+        + 'PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}'
+        + str(w)
+        + '/site" exec \''
+        + sys.executable
+        + "' \"$@\"\n"
     )
-    wrapper.write_text(script)
-    wrapper.chmod(
-        wrapper.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-    )
-    return str(wrapper), str(pkg_root)
+    wrapper.write_text(content)
+    os.chmod(str(wrapper), 0o755)
+    return str(wrapper)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the wrapper is a POSIX shell script")
-def test_ac_probe_009_wrapper_interpreter(tmp_path):
-    wrapper, pkg_root = _plant_wrapper(tmp_path)
-    assert pkg_root not in sys.path
-
-    report = test_probe.probe(SOURCE, {}, "slugify", interpreter=wrapper)
-    findings = list(field(report, "findings"))
-    assert findings == []
+def test_ac_probe_009_wrapper_interpreter_resolves_import(tmp_path):
+    interpreter = make_wrapper(tmp_path)
+    report = test_probe.probe(SOURCE, {}, "slugify", interpreter=interpreter)
+    findings = field(report, "findings")
+    assert findings == [], findings
     assert field(report, "ok") is True
     assert field(report, "tests_run") == 1
     assert field(report, "tests_reached") == 1
 
 
-def test_ac_probe_009_default_interpreter(tmp_path):
-    for entry in sys.path:
-        assert not os.path.isdir(os.path.join(entry or ".", "wraponly_pkg"))
-
+def test_ac_probe_009_default_interpreter_cannot_import(tmp_path):
+    make_wrapper(tmp_path)
     report = test_probe.probe(SOURCE, {}, "slugify")
     assert field(report, "ok") is False
-    findings = list(field(report, "findings"))
-    assert len(findings) == 1
+    findings = field(report, "findings")
+    assert len(findings) == 1, findings
     finding = findings[0]
     assert field(finding, "kind") == "unknown_import"
+    assert field(finding, "severity") == "error"
     assert field(finding, "line") == 1
     assert field(finding, "message") == "cannot import 'wraponly_pkg'"
