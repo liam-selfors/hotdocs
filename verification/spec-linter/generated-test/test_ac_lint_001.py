@@ -1,134 +1,191 @@
-# hotdocs-criterion: sha256:4d0cca507829c7a65ea7aa875ecb307c8681a378c397bdf51b01ba3c46466617
-"""AC-LINT-001: a component.md with no `owners` field in its frontmatter
-yields a fail-severity finding for rule R-LINT-001."""
-
+# hotdocs-criterion: sha256:4945e2e3666863f7d6c29bc05385a756cd71122b15d80f9d6a7739943e92e27e
 import json
 from pathlib import Path
 
 import spec_linter
 
 
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
+
+
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+COMPONENT_PATH = 'specs/components/foo/component.md'
 
 
-def _build_corpus(repo_root, with_owners):
-    specs = repo_root / "specs"
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n\n- **Widget** — a small thing used in tests.\n",
-    )
-    comp_dir = specs / "components" / "foo"
-    frontmatter_lines = [
-        "---",
-        "id: comp-foo",
-        "title: Foo",
-        "status: draft",
-    ]
-    if with_owners:
-        frontmatter_lines.append("owners: [test-team]")
-    frontmatter_lines += [
-        "depends_on: []",
-        "sealed: true",
-        "source_path: legacy/foo/",
-        "---",
-    ]
-    body = (
-        "\n".join(frontmatter_lines)
-        + "\n\n# Foo\n\n"
-        + "## Purpose\n\nFoo does a small thing for tests.\n\n"
-        + "## Scope\n\n- In scope: the small thing.\n- Out of scope: everything else.\n\n"
-        + "## Definitions\n\nNone.\n\n"
-        + "## Behavior\n\nSee `requirements/`.\n\n"
-        + "## Interfaces\n\nSee `interface/`.\n\n"
-        + "## Data\n\nSee `interface/data/`.\n\n"
-        + "## Acceptance criteria\n\nSee `acceptance/`.\n\n"
-        + "## Non-functional constraints\n\nSee `constraints.md`.\n\n"
-        + "## Open questions\n\n"
-        + "## Change log\n\n- Initial draft.\n"
-    )
-    _write(comp_dir / "component.md", body)
-    _write(
-        comp_dir / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do the small thing.\n",
-    )
-    _write(
-        comp_dir / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n\n"
-        "```gherkin\n"
-        "Given a foo\n"
-        "When it runs\n"
-        "Then it does the small thing\n"
-        "```\n",
-    )
-    _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\n- None beyond defaults.\n",
-    )
+def _no_owners_changes():
+    original = CLEAN_CORPUS[COMPONENT_PATH]
+    assert 'owners: [team-a]\n' in original
+    return {COMPONENT_PATH: original.replace('owners: [team-a]\n', '', 1)}
 
 
-def _lint_001_fail_findings(report):
+def _r001_fail_findings(findings):
     out = []
-    for finding in field(report, "findings"):
-        if (
-            str(field(finding, "rule_id")) == "R-LINT-001"
-            and str(field(finding, "severity")) == "fail"
-        ):
-            out.append(finding)
+    for f in findings:
+        if field(f, "rule_id") == "R-LINT-001" and field(f, "severity") == "fail":
+            out.append(f)
     return out
 
 
-def test_missing_owners_yields_r_lint_001_fail(tmp_path):
+def _norm(path_value):
+    return str(path_value).replace("\\", "/")
+
+
+def test_clean_corpus_has_no_r_lint_001_fail(tmp_path):
     repo_root = tmp_path / "repo"
-    _build_corpus(repo_root, with_owners=False)
+    repo_root.mkdir()
+    write_corpus(repo_root)
+    report = spec_linter.lint(None, repo_root)
+    assert _r001_fail_findings(field(report, "findings")) == []
+    assert field(report, "hard_failures") == 0
+
+
+def test_missing_owners_in_component_md_gives_fail_r_lint_001(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    write_corpus(repo_root, _no_owners_changes())
 
     report = spec_linter.lint(None, repo_root)
-
-    matches = _lint_001_fail_findings(report)
-    assert matches, "expected a fail-severity R-LINT-001 finding, got: " + repr(
-        field(report, "findings")
-    )
-    files = [str(field(f, "file")).replace("\\", "/") for f in matches]
-    assert any(f.endswith("specs/components/foo/component.md") for f in files), files
+    findings = field(report, "findings")
+    hits = _r001_fail_findings(findings)
+    assert hits, "expected a fail-severity R-LINT-001 finding, got: " + repr(findings)
+    assert any(_norm(field(f, "file")).endswith(COMPONENT_PATH) for f in hits)
     assert field(report, "hard_failures") >= 1
 
 
-def test_present_owners_yields_no_r_lint_001_finding(tmp_path):
+def test_missing_owners_cli_json_report(tmp_path, capsys):
     repo_root = tmp_path / "repo"
-    _build_corpus(repo_root, with_owners=True)
-
-    report = spec_linter.lint(None, repo_root)
-
-    for finding in field(report, "findings"):
-        if str(field(finding, "rule_id")) == "R-LINT-001":
-            file_ = str(field(finding, "file")).replace("\\", "/")
-            assert not file_.endswith("specs/components/foo/component.md"), repr(finding)
-
-
-def test_cli_reports_r_lint_001_and_exits_1(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    _build_corpus(repo_root, with_owners=False)
+    repo_root.mkdir()
+    write_corpus(repo_root, _no_owners_changes())
 
     code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
-    captured = capsys.readouterr()
-
+    out = capsys.readouterr().out
     assert code == 1
-    doc = json.loads(captured.out)
-    matches = [
-        f
-        for f in doc["findings"]
+    doc = json.loads(out)
+    hits = [
+        f for f in doc["findings"]
         if f["rule_id"] == "R-LINT-001" and f["severity"] == "fail"
     ]
-    assert matches, captured.out
-    assert any(
-        str(f["file"]).replace("\\", "/").endswith("specs/components/foo/component.md")
-        for f in matches
-    )
+    assert hits
+    assert any(_norm(f["file"]).endswith(COMPONENT_PATH) for f in hits)
     assert doc["summary"]["hard_failures"] >= 1

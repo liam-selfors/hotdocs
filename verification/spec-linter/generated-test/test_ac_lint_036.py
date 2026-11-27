@@ -1,93 +1,203 @@
-# hotdocs-criterion: sha256:558f9814df2d85dcbcc00426bb9d8627820bde08de37f1212b94d2876da5f0b6
-from pathlib import Path
+# hotdocs-criterion: sha256:931f65d9560474d07d7a56888cfbb72f83e9869d5e65d017696b4569669e07fd
+"""AC-LINT-036 (covers R-LINT-014): a multi-file glossary backed by an
+architecture-level bounded-context split decision, or a single glossary,
+produces no R-LINT-014 finding."""
 
 import pytest
 
 import spec_linter
 
 
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
+
+
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
 GLOSSARY = (
-    "# Glossary\n"
-    "\n"
-    "Canonical vocabulary.\n"
-    "\n"
-    "- **Widget** — a thing the system manages.\n"
+    '# Glossary\n'
+    '\n'
+    '- **Foo** — a thing that make_foo returns.\n'
 )
 
-BILLING_GLOSSARY = (
-    "# Billing Glossary\n"
-    "\n"
-    "Vocabulary of the billing subsystem.\n"
-    "\n"
-    "- **Invoice** — a bill sent to a customer.\n"
+GLOSSARY_BILLING = (
+    '# Billing glossary\n'
+    '\n'
+    '- **Invoice** — a bill sent to a customer.\n'
 )
 
 
-def architecture_doc(phrase: str) -> str:
+def architecture_split(phrase):
     return (
-        "---\n"
-        "id: arch-glossary-split\n"
-        "title: Glossary Split\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Glossary Split\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Billing and the core pipeline do not share vocabulary, so the glossary\n"
-        "is split along a " + phrase + " line: specs/glossary.md for the core,\n"
-        "specs/glossary-billing.md for billing.\n"
+        '---\n'
+        'id: arch-glossary-split\n'
+        'title: Glossary Split\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        '---\n'
+        '\n'
+        '# Glossary Split\n'
+        '\n'
+        'Billing and core do not share vocabulary, so the glossary is split '
+        'along a ' + phrase + ' boundary: billing terms live in '
+        '`specs/glossary-billing.md`, all others in `specs/glossary.md`.\n'
     )
 
 
-def r014_findings(report):
-    findings = field(report, "findings")
-    return [f for f in findings if field(f, "rule_id") == "R-LINT-014"]
-
-
-@pytest.mark.parametrize("phrase", ["bounded context", "bounded-context", "Bounded-Context"])
-def test_two_glossaries_with_bounded_context_split_has_no_r_lint_014(tmp_path, phrase):
-    repo_root = tmp_path
-    write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    write(repo_root / "specs" / "glossary-billing.md", BILLING_GLOSSARY)
-    write(repo_root / "specs" / "architecture" / "glossary-split.md", architecture_doc(phrase))
-
+def lint_014_findings(repo_root):
     report = spec_linter.lint(None, repo_root)
-
-    assert r014_findings(report) == []
-
-
-def test_single_glossary_without_architecture_file_has_no_r_lint_014(tmp_path):
-    repo_root = tmp_path
-    write(repo_root / "specs" / "glossary.md", GLOSSARY)
-
-    report = spec_linter.lint(None, repo_root)
-
-    assert r014_findings(report) == []
+    return [
+        f for f in field(report, "findings")
+        if field(f, "rule_id") == "R-LINT-014"
+    ]
 
 
-def test_two_glossaries_without_split_decision_is_flagged(tmp_path):
-    # Sanity check from R-LINT-014 itself: without a bounded-context
-    # architecture doc, each glossary file but specs/glossary.md is flagged.
-    repo_root = tmp_path
-    write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    write(repo_root / "specs" / "glossary-billing.md", BILLING_GLOSSARY)
+@pytest.mark.parametrize("phrase", ["bounded context", "Bounded-Context"])
+def test_split_glossary_with_bounded_context_decision_has_no_finding(tmp_path, phrase):
+    write_corpus(tmp_path, {
+        'specs/glossary.md': GLOSSARY,
+        'specs/glossary-billing.md': GLOSSARY_BILLING,
+        'specs/architecture/glossary-split.md': architecture_split(phrase),
+    })
+    assert lint_014_findings(tmp_path) == []
 
-    report = spec_linter.lint(None, repo_root)
 
-    found = r014_findings(report)
-    assert len(found) == 1
-    assert str(field(found[0], "file")).replace("\\", "/").endswith("glossary-billing.md")
-    assert field(found[0], "severity") == "fail"
+def test_single_glossary_without_architecture_file_has_no_finding(tmp_path):
+    write_corpus(tmp_path, {'specs/glossary.md': GLOSSARY})
+    assert not (tmp_path / 'specs' / 'architecture').exists()
+    assert lint_014_findings(tmp_path) == []
+
+
+def test_control_split_glossary_without_decision_is_flagged(tmp_path):
+    # Control: the same split with no bounded-context decision is flagged,
+    # once, on the non-canonical glossary file only.
+    write_corpus(tmp_path, {
+        'specs/glossary.md': GLOSSARY,
+        'specs/glossary-billing.md': GLOSSARY_BILLING,
+    })
+    findings = lint_014_findings(tmp_path)
+    assert len(findings) == 1
+    assert field(findings[0], "file").replace("\\", "/").endswith(
+        "specs/glossary-billing.md"
+    )
+    assert field(findings[0], "severity") == "fail"

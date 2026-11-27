@@ -1,221 +1,242 @@
-# hotdocs-criterion: sha256:2ac3f4ebac38fbe1205fb5f840c8d120f599bb8bb4a8fd1c66864fd7dd6bfc15
-import importlib.util
-import sys
-from pathlib import Path
-
+# hotdocs-criterion: sha256:0b5023d6cd04a1c44e77d7631b0d9b5c42aad2f1c71c8b91d7a2eaa3c704fce5
 import pytest
 
 import spec_linter
 
 
-def _load_spec_linter():
-    gen = next(p for p in Path(spec_linter.__file__).resolve().parents if p.name == "gen")
-    base = gen / "spec-linter"
-    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = module
-    spec.loader.exec_module(module)
-    return module
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
+
+
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_REL = "specs/components/foo/component.md"
+COMPONENT_REL = 'specs/components/foo/component.md'
 
 
-def _frontmatter_lines(drivers_line):
-    lines = [
-        "---",
-        "id: comp-foo",
-        "title: Foo",
-        "status: draft",
-        "owners: [pipeline-team]",
-        "depends_on: []",
-        "sealed: true",
-        "source_path: legacy/foo/",
-    ]
-    if drivers_line is not None:
-        lines.append(drivers_line)
-    lines.append("---")
-    return lines
+def component_with_drivers(drivers_line):
+    text = CLEAN_CORPUS[COMPONENT_REL]
+    marker = 'depends_on: []\n'
+    assert marker in text
+    return text.replace(marker, marker + drivers_line + '\n', 1)
 
 
-BODY_LINES = [
-    "",
-    "# Foo",
-    "",
-    "## Purpose",
-    "",
-    "Foo does one small thing for its callers.",
-    "",
-    "## Scope",
-    "",
-    "- In scope: the one small thing.",
-    "- Out of scope: everything else.",
-    "",
-    "## Definitions",
-    "",
-    "None.",
-    "",
-    "## Behavior",
-    "",
-    "See `requirements/`.",
-    "",
-    "## Interfaces",
-    "",
-    "See `interface/`.",
-    "",
-    "## Data",
-    "",
-    "See `interface/data/`.",
-    "",
-    "## Acceptance criteria",
-    "",
-    "See `acceptance/`.",
-    "",
-    "## Non-functional constraints",
-    "",
-    "See `constraints.md`.",
-    "",
-    "## Open questions",
-    "",
-    "## Change log",
-    "",
-    "- Initial draft.",
-    "",
-]
+def drivers_line_number(text):
+    for index, line in enumerate(text.splitlines(), start=1):
+        if line.startswith('drivers:'):
+            return index
+    raise AssertionError('no drivers line')
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def norm(path):
+    return str(path).replace('\\', '/')
 
 
-def _build_corpus(repo_root, drivers_line):
-    specs = repo_root / "specs"
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n\n- **Widget** — a small thing foo handles.\n",
-    )
-    comp = specs / "components" / "foo"
-    fm = _frontmatter_lines(drivers_line)
-    _write(comp / "component.md", "\n".join(fm + BODY_LINES))
-    _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST return the widget it is given.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n\n"
-        "Given a widget\n"
-        "When foo is called with it\n"
-        "Then foo returns the same widget\n",
-    )
-    _write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nfoo(widget: str) -> str\n```\n\nReturns `widget` unchanged.\n",
-    )
-    _write(
-        comp / "constraints.md",
-        "# Constraints\n\n"
-        "- Latency: foo returns within 10 ms; measured by timing 100 calls in a test.\n",
-    )
-    drivers_index = None
-    if drivers_line is not None:
-        drivers_index = fm.index(drivers_line) + 1
-    return drivers_index
-
-
-def _driver_definition(repo_root):
-    _write(
-        repo_root / "specs" / "architecture" / "test-driver-mine.md",
-        "---\n"
-        "id: arch-test-driver-mine\n"
-        "title: Test Driver mine\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "---\n\n"
-        "# Test Driver mine\n\n"
-        "## Purpose\n\n"
-        "A test driver defined in this repository.\n",
-    )
-
-
-def _findings_on_line(report, line):
+def findings_on_line(report, rel, line):
     out = []
-    for f in field(report, "findings"):
-        if field(f, "file") == COMPONENT_REL and field(f, "line") == line:
-            out.append(f)
+    for finding in field(report, 'findings'):
+        if norm(field(finding, 'file')) == rel and field(finding, 'line') == line:
+            out.append(finding)
     return out
 
 
-def test_baseline_corpus_is_lint_clean(tmp_path):
-    linter = _load_spec_linter()
-    _build_corpus(tmp_path, None)
-    report = linter.lint(None, tmp_path)
-    assert field(report, "hard_failures") == 0, [
-        (field(f, "rule_id"), field(f, "file"), field(f, "line"), field(f, "message"))
-        for f in field(report, "findings")
-    ]
+DRIVER_DEFINITION = (
+    '---\n'
+    'id: arch-test-driver-mine\n'
+    'title: Test Driver mine\n'
+    'status: draft\n'
+    'owners: [team-a]\n'
+    'depends_on: []\n'
+    '---\n'
+    '\n'
+    '# Test Driver mine\n'
+    '\n'
+    '## Purpose\n'
+    '\n'
+    'A test driver defined in this repository.\n'
+)
+
+
+def test_clean_corpus_is_lint_clean(tmp_path):
+    repo_root = tmp_path / 'repo'
+    write_corpus(repo_root)
+    report = spec_linter.lint(None, repo_root)
+    assert field(report, 'hard_failures') == 0
 
 
 @pytest.mark.parametrize(
-    "item, with_definition, expected",
+    'item, extra, expected_message',
     [
-        ("Bad_Name", False, "driver 'Bad_Name' is not a driver name"),
-        ("nodrv", False, "test driver 'nodrv' has no definition or adapter"),
         (
-            "mine",
-            True,
-            "test driver 'mine' is defined in this repository; depends_on must list comp-driver-mine",
+            'Bad_Name',
+            {},
+            "driver 'Bad_Name' is not a driver name",
+        ),
+        (
+            'nodrv',
+            {},
+            "test driver 'nodrv' has no definition or adapter",
+        ),
+        (
+            'mine',
+            {'specs/architecture/test-driver-mine.md': DRIVER_DEFINITION},
+            "test driver 'mine' is defined in this repository; "
+            "depends_on must list comp-driver-mine",
         ),
     ],
 )
-def test_bad_drivers_item_reports_one_fail_on_drivers_line(tmp_path, item, with_definition, expected):
-    linter = _load_spec_linter()
+def test_bad_driver_item_gives_exactly_one_fail_on_drivers_line(
+    tmp_path, item, extra, expected_message
+):
+    repo_root = tmp_path / 'repo'
+    text = component_with_drivers('drivers: [' + item + ']')
+    changes = {COMPONENT_REL: text}
+    changes.update(extra)
+    write_corpus(repo_root, changes)
 
-    baseline_root = tmp_path / "baseline"
-    _build_corpus(baseline_root, None)
-    assert linter.lint(None, baseline_root).hard_failures == 0
+    line = drivers_line_number(text)
+    report = spec_linter.lint(None, repo_root)
+    on_line = findings_on_line(report, COMPONENT_REL, line)
+    fails = [f for f in on_line if field(f, 'severity') == 'fail']
 
-    repo_root = tmp_path / "repo"
-    drivers_line = "drivers: [" + item + "]"
-    line = _build_corpus(repo_root, drivers_line)
-    if with_definition:
-        _driver_definition(repo_root)
-
-    report = linter.lint(None, repo_root)
-    on_line = _findings_on_line(report, line)
-    fails = [f for f in on_line if field(f, "severity") == "fail"]
     assert len(fails) == 1, [
-        (field(f, "rule_id"), field(f, "severity"), field(f, "message")) for f in on_line
+        (field(f, 'severity'), field(f, 'message')) for f in on_line
     ]
-    assert field(fails[0], "message") == expected
+    assert field(fails[0], 'message') == expected_message
 
 
-def test_driver_with_planted_adapter_has_no_finding(tmp_path):
-    linter = _load_spec_linter()
+def test_driver_with_planted_adapter_and_no_definition_has_no_finding(tmp_path):
+    repo_root = tmp_path / 'repo'
+    text = component_with_drivers('drivers: [fake]')
+    write_corpus(repo_root, {COMPONENT_REL: text})
 
-    baseline_root = tmp_path / "baseline"
-    _build_corpus(baseline_root, None)
-    assert linter.lint(None, baseline_root).hard_failures == 0
+    adapter = repo_root / 'gen' / 'driver-fake' / 'driver_fake.py'
+    adapter.parent.mkdir(parents=True, exist_ok=True)
+    adapter.write_text('DRIVER = ' + repr('fake') + '\n', encoding='utf-8')
+    assert not (repo_root / 'specs' / 'architecture' / 'test-driver-fake.md').exists()
 
-    repo_root = tmp_path / "repo"
-    line = _build_corpus(repo_root, "drivers: [fake]")
-    _write(
-        repo_root / "gen" / "driver-fake" / "driver_fake.py",
-        "NAME = " + repr("fake") + "\n",
-    )
-    assert not (repo_root / "specs" / "architecture" / "test-driver-fake.md").exists()
+    line = drivers_line_number(text)
+    report = spec_linter.lint(None, repo_root)
+    on_line = findings_on_line(report, COMPONENT_REL, line)
 
-    report = linter.lint(None, repo_root)
-    on_line = _findings_on_line(report, line)
     assert on_line == [], [
-        (field(f, "rule_id"), field(f, "severity"), field(f, "message")) for f in on_line
+        (field(f, 'severity'), field(f, 'message')) for f in on_line
     ]

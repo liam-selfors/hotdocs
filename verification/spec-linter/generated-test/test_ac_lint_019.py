@@ -1,173 +1,203 @@
-# hotdocs-criterion: sha256:54b746f0c076c47f64b25bddd194871c74aa3636d391da822e09591841594f7f
-"""AC-LINT-019: a spec line ending in two trailing spaces is a fail-severity
-R-LINT-019 finding naming that line."""
-
+# hotdocs-criterion: sha256:b051479f62ab625193a4e15905f71078755f2f186453538124ef2bc83a05a81c
 from pathlib import Path
 
-import pytest
-
 import spec_linter
+
+
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
+
+
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_LINES = [
-    "---",
-    "id: comp-foo",
-    "title: Foo",
-    "status: draft",
-    "owners: [pipeline-team]",
-    "depends_on: []",
-    "sealed: true",
-    "source_path: legacy/foo/",
-    "---",
-    "",
-    "# Foo",
-    "",
-    "## Purpose",
-    "",
-    "Foo does one small thing for the tests.",
-    "",
-    "## Scope",
-    "",
-    "- In scope: the one thing.",
-    "- Out of scope: everything else.",
-    "",
-    "## Definitions",
-    "",
-    "None.",
-    "",
-    "## Behavior",
-    "",
-    "See `requirements/`.",
-    "",
-    "## Interfaces",
-    "",
-    "See `interface/`.",
-    "",
-    "## Data",
-    "",
-    "See `interface/data/`.",
-    "",
-    "## Acceptance criteria",
-    "",
-    "See `acceptance/`.",
-    "",
-    "## Non-functional constraints",
-    "",
-    "See `constraints.md`.",
-    "",
-    "## Open questions",
-    "",
-    "## Change log",
-    "",
-    "- Initial draft.",
-]
-
-REQUIREMENT_LINES = [
-    "# R-FOO-001",
-    "",
-    "**R-FOO-001** — Foo MUST do the one thing.",
-    "",
-]
-
-ACCEPTANCE_LINES = [
-    "# AC-FOO-001",
-    "",
-    "Covers: R-FOO-001",
-    "Kind: generated-test",
-    "",
-    "```gherkin",
-    "Given a foo",
-    "When it runs",
-    "Then it does the one thing",
-    "```",
-]
-
-CONSTRAINTS_LINES = [
-    "# Constraints",
-    "",
-    "- None beyond the defaults; measured by review.",
-]
-
-GLOSSARY_LINES = [
-    "# Glossary",
-    "",
-    "- **Foo** — a test component.",
-]
-
-COMP_REL = "specs/components/foo/component.md"
-REQ_REL = "specs/components/foo/requirements/R-FOO-001.md"
+TARGET_REL = 'specs/components/foo/requirements/R-FOO-001.md'
 
 
-def write_lines(path, lines):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def _norm(p):
+    return str(p).replace('\\', '/')
 
 
-def build_corpus(repo_root, trailing=None):
-    """trailing: (rel_path, 1-based line number) whose line gets two trailing spaces."""
-    files = {
-        COMP_REL: list(COMPONENT_LINES),
-        REQ_REL: list(REQUIREMENT_LINES),
-        "specs/components/foo/acceptance/AC-FOO-001.md": list(ACCEPTANCE_LINES),
-        "specs/components/foo/constraints.md": list(CONSTRAINTS_LINES),
-        "specs/glossary.md": list(GLOSSARY_LINES),
-    }
-    if trailing is not None:
-        rel, lineno = trailing
-        files[rel][lineno - 1] = files[rel][lineno - 1] + "  "
-    for rel, lines in files.items():
-        write_lines(repo_root / rel, lines)
-
-
-def names_file(finding_file, repo_root, rel):
-    text = str(finding_file).replace("\\", "/")
-    if text == rel:
-        return True
-    try:
-        return Path(text).resolve().relative_to(repo_root.resolve()).as_posix() == rel
-    except (ValueError, OSError):
-        return False
-
-
-def lint_019_findings(repo_root):
-    report = spec_linter.lint(None, repo_root)
-    findings = field(report, "findings")
-    return report, [f for f in findings if field(f, "rule_id") == "R-LINT-019"]
+def _r019(report):
+    return [f for f in field(report, 'findings') if field(f, 'rule_id') == 'R-LINT-019']
 
 
 def test_clean_corpus_has_no_trailing_whitespace_finding(tmp_path):
-    repo_root = tmp_path / "repo"
-    build_corpus(repo_root)
-    _, found = lint_019_findings(repo_root)
-    assert found == []
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    write_corpus(repo_root)
+    report = spec_linter.lint(None, repo_root)
+    assert _r019(report) == []
 
 
-@pytest.mark.parametrize(
-    "rel, lineno",
-    [
-        (REQ_REL, 3),   # body line of a unit file
-        (COMP_REL, 3),  # a frontmatter line ("title: Foo")
-        (COMP_REL, 15), # a body line of component.md
-    ],
-)
-def test_two_trailing_spaces_is_fail_finding_naming_line(tmp_path, rel, lineno):
-    repo_root = tmp_path / "repo"
-    build_corpus(repo_root, trailing=(rel, lineno))
+def test_trailing_two_spaces_reports_fail_finding_on_that_line(tmp_path):
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    changed = (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.  \n'
+    )
+    write_corpus(repo_root, {TARGET_REL: changed})
 
-    # The fixture really has exactly that one line with trailing whitespace.
-    text = (repo_root / rel).read_text(encoding="utf-8")
-    assert text.splitlines()[lineno - 1].endswith("  ")
+    report = spec_linter.lint(None, repo_root)
+    findings = _r019(report)
 
-    report, found = lint_019_findings(repo_root)
+    assert len(findings) == 1, findings
+    finding = findings[0]
+    assert field(finding, 'severity') == 'fail'
+    file_value = _norm(field(finding, 'file'))
+    assert file_value == TARGET_REL or file_value.endswith('/' + TARGET_REL)
+    assert field(finding, 'line') == 3
+    assert field(report, 'hard_failures') >= 1
 
-    assert len(found) == 1, found
-    finding = found[0]
-    assert field(finding, "severity") == "fail"
-    assert names_file(field(finding, "file"), repo_root, rel), field(finding, "file")
-    assert field(finding, "line") == lineno
-    assert isinstance(field(finding, "message"), str)
-    assert field(report, "hard_failures") >= 1
+
+def test_trailing_spaces_in_frontmatter_also_fail(tmp_path):
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    rel = 'specs/components/foo/component.md'
+    original = CLEAN_CORPUS[rel]
+    changed = original.replace('title: Foo\n', 'title: Foo  \n', 1)
+    assert changed != original
+    write_corpus(repo_root, {rel: changed})
+
+    report = spec_linter.lint(None, repo_root)
+    findings = _r019(report)
+
+    assert len(findings) == 1, findings
+    finding = findings[0]
+    assert field(finding, 'severity') == 'fail'
+    file_value = _norm(field(finding, 'file'))
+    assert file_value == rel or file_value.endswith('/' + rel)
+    assert field(finding, 'line') == 3
+
+
+def test_cli_exits_1_on_trailing_whitespace(tmp_path, capsys):
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    changed = (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.  \n'
+    )
+    write_corpus(repo_root, {TARGET_REL: changed})
+    code = spec_linter.main(['--format=json', '--repo-root=' + str(repo_root)])
+    assert code == 1

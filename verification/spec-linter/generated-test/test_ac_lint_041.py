@@ -1,216 +1,192 @@
-# hotdocs-criterion: sha256:9367768377c7610ee5bee77a7173c4d69bac51c0ba181cc521e0202d7b8c3d3b
+# hotdocs-criterion: sha256:7161b23b9328c088d241735f20e77ce2dbaeb399c3122300e5b86721038c5a86
 import json
-from pathlib import Path
-
-import pytest
 
 import spec_linter
+
+
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
+
+
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+WARN_CHANGES = {
+    'specs/components/foo/interface/cli.md': (
+        '# CLI\n'
+        '\n'
+        '```\n'
+        'foo [--bar]\n'
+        '```\n'
+    ),
+}
+
+FAIL_CHANGES = {
+    'specs/components/foo/acceptance/AC-FOO-001.md':
+        CLEAN_CORPUS['specs/components/foo/acceptance/AC-FOO-001.md'].replace(
+            'Kind: generated-test\n', ''
+        ),
+}
 
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [pipeline-team]\n"
-    "depends_on: []\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo returns a greeting for a name.\n"
-    "\n"
-    "## Rationale\n"
-    "\n"
-    "Chosen in `D1`.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "- In scope: greeting.\n"
-    "- Out of scope: everything else.\n"
-    "\n"
-    "## Definitions\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Behavior\n"
-    "\n"
-    "See `requirements/`.\n"
-    "\n"
-    "## Interfaces\n"
-    "\n"
-    "See `interface/`.\n"
-    "\n"
-    "## Data\n"
-    "\n"
-    "See `interface/data/`.\n"
-    "\n"
-    "## Acceptance criteria\n"
-    "\n"
-    "See `acceptance/`.\n"
-    "\n"
-    "## Non-functional constraints\n"
-    "\n"
-    "See `constraints.md`.\n"
-    "\n"
-    "## Open questions\n"
-    "\n"
-    "## Change log\n"
-    "\n"
-    "- Initial draft.\n"
-)
-
-REQUIREMENT_MD = (
-    "# R-FOO-001\n"
-    "\n"
-    "**R-FOO-001** \u2014 `greet(name)` MUST return `hello <name>` (`D1`).\n"
-)
-
-LIBRARY_MD = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "greet(name: str) -> str\n"
-    "```\n"
-)
-
-GOOD_ACCEPTANCE_MD = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given the name \"bob\"\n"
-    "When greet(\"bob\") runs\n"
-    "Then it returns \"hello bob\"\n"
-    "```\n"
-)
-
-BAD_ACCEPTANCE_MD = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "The greeting for bob is hello bob.\n"
-)
-
-CONSTRAINTS_MD = (
-    "# Constraints\n"
-    "\n"
-    "- greet returns within 1 second, measured by a timed call.\n"
-)
-
-DECISION_MD = (
-    "---\n"
-    "id: D1\n"
-    "title: Greeting format\n"
-    "status: draft\n"
-    "owners: [pipeline-team]\n"
-    "---\n"
-    "\n"
-    "# D1\n"
-    "\n"
-    "Greetings are `hello <name>`.\n"
-)
-
-GLOSSARY_MD = (
-    "# Glossary\n"
-    "\n"
-    "- **Greeting** \u2014 the text `greet` returns.\n"
-)
-
-
-def fake_checker_source(findings):
-    return (
-        "def check(repo_root):\n"
-        "    return [dict(f) for f in " + repr(findings) + "]\n"
-    )
-
-
-def build_clean_corpus(root, warn=False):
-    write(root / "specs" / "glossary.md", GLOSSARY_MD)
-    write(root / "specs" / "decisions" / "D1.md", DECISION_MD)
-    comp = root / "specs" / "components" / "foo"
-    write(comp / "component.md", COMPONENT_MD)
-    write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
-    write(comp / "interface" / "library.md", LIBRARY_MD)
-    write(comp / "acceptance" / "AC-FOO-001.md", GOOD_ACCEPTANCE_MD)
-    write(comp / "constraints.md", CONSTRAINTS_MD)
-    citation_findings = []
-    if warn:
-        citation_findings = [
-            {
-                "rule_id": "R-CITE-001",
-                "severity": "warn",
-                "file": "specs/components/foo/requirements/R-FOO-001.md",
-                "line": 3,
-                "message": "citation D1 may not state this fact",
-            }
-        ]
-    write(
-        root / "gen" / "citation-checker" / "citation_checker.py",
-        fake_checker_source(citation_findings),
-    )
-    write(
-        root / "gen" / "size-checker" / "size_checker.py",
-        fake_checker_source([]),
-    )
-
-
-def run_json(capsys, root, extra=()):
+def _run(argv, capsys):
     capsys.readouterr()
-    code = spec_linter.main(["--repo-root=" + str(root), "--format=json"] + list(extra))
+    code = spec_linter.main(argv)
     out = capsys.readouterr().out
-    return code, json.loads(out)
+    return code, out
 
 
-def test_clean_corpus_returns_zero(tmp_path, capsys):
-    root = tmp_path / "repo"
-    build_clean_corpus(root)
-    code, report = run_json(capsys, root)
+def test_clean_corpus_json_exit_0(tmp_path, capsys):
+    write_corpus(tmp_path)
+    code, out = _run(["--repo-root=" + str(tmp_path), "--format=json"], capsys)
     assert code == 0
+    report = json.loads(out)
     assert report["summary"]["hard_failures"] == 0
 
 
-def test_one_warn_edit_strict_changes_exit(tmp_path, capsys):
-    root = tmp_path / "repo"
-    build_clean_corpus(root, warn=True)
-    code, report = run_json(capsys, root)
+def test_one_warn_exit_0_then_strict_exit_1(tmp_path, capsys):
+    write_corpus(tmp_path, WARN_CHANGES)
+    args = ["--repo-root=" + str(tmp_path), "--format=json"]
+    code, out = _run(list(args), capsys)
     assert code == 0
-    assert report["summary"]["hard_failures"] == 0
-    code_strict, report_strict = run_json(capsys, root, ["--strict"])
+    json.loads(out)
+    code_strict, out_strict = _run(list(args) + ["--strict"], capsys)
     assert code_strict == 1
-    assert report_strict["summary"]["hard_failures"] >= 1
+    json.loads(out_strict)
 
 
-def test_one_fail_edit_returns_one_with_lint_010(tmp_path, capsys):
-    root = tmp_path / "repo"
-    build_clean_corpus(root)
-    write(
-        root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        BAD_ACCEPTANCE_MD,
-    )
-    code, report = run_json(capsys, root)
+def test_one_fail_exit_1_with_one_r_lint_010_finding(tmp_path, capsys):
+    write_corpus(tmp_path, FAIL_CHANGES)
+    code, out = _run(["--repo-root=" + str(tmp_path), "--format=json"], capsys)
     assert code == 1
-    lint_010 = [f for f in report["findings"] if field(f, "rule_id") == "R-LINT-010"]
-    assert len(lint_010) == 1
+    report = json.loads(out)
+    lint010 = [f for f in report["findings"] if f["rule_id"] == "R-LINT-010"]
+    assert len(lint010) == 1
+    assert lint010[0]["severity"] == "fail"
 
 
-def test_bad_format_is_usage_error(tmp_path, capsys):
+def test_bad_format_exit_2(tmp_path, capsys, monkeypatch):
+    write_corpus(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    capsys.readouterr()
     assert spec_linter.main(["--format=xml"]) == 2
+    capsys.readouterr()
+    assert spec_linter.main(["--repo-root=" + str(tmp_path), "--format=xml"]) == 2

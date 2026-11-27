@@ -1,178 +1,343 @@
-# hotdocs-criterion: sha256:c546d81e6b85449b549167353193021a7b21d5b899c59bfcb0b8d1e94ca1ad9d
+# hotdocs-criterion: sha256:78cc07302daf27b6f14bc52e2cb47c43c6c8a9100530c89b77d5982139ee920f
 from pathlib import Path
 
 import spec_linter
 
 
-SECTIONS = [
-    "Layout",
-    "Environment",
-    "Surface",
-    "Running criteria",
-    "Strength check",
-    "Test author guidance",
-    "Generator guidance",
-]
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
 
-WEB_REL = "specs/components/web/component.md"
+
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+WEB_PATH = 'specs/components/web/component.md'
+
+SECTIONS = [
+    'Layout',
+    'Environment',
+    'Surface',
+    'Running criteria',
+    'Strength check',
+    'Test author guidance',
+    'Generator guidance',
+]
 
 
-def component_md(comp_id, title, extra_lines):
-    lines = [
-        "---",
-        "id: " + comp_id,
-        "title: " + title,
-        "status: draft",
-        "owners: [pipeline-team]",
-    ]
-    lines.extend(extra_lines)
-    lines.extend([
-        "sealed: true",
-        "source_path: legacy/" + comp_id + "/",
-        "---",
-        "",
-        "# " + title,
-        "",
-        "## Purpose",
-        "",
-        "A fixture component.",
-        "",
-        "## Scope",
-        "",
-        "- In scope: fixture only.",
-        "",
-        "## Definitions",
-        "",
-        "None.",
-        "",
-        "## Behavior",
-        "",
-        "See `requirements/`.",
-        "",
-        "## Interfaces",
-        "",
-        "See `interface/`.",
-        "",
-        "## Data",
-        "",
-        "See `interface/data/`.",
-        "",
-        "## Acceptance criteria",
-        "",
-        "See `acceptance/`.",
-        "",
-        "## Non-functional constraints",
-        "",
-        "See `constraints.md`.",
-        "",
-        "## Open questions",
-        "",
-        "## Change log",
-        "",
-        "- Initial draft.",
-        "",
-    ])
-    return "\n".join(lines)
+def component_body(title):
+    return (
+        '\n'
+        '# ' + title + '\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Does ' + title + ' things.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** its things. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    )
 
 
-def definition_md():
-    lines = [
-        "---",
-        "id: arch-asset-kind-demo",
-        "title: Asset Kind demo",
-        "status: draft",
-        "owners: [pipeline-team]",
-        "depends_on: []",
-        "---",
-        "",
-        "# Asset Kind demo",
-        "",
-    ]
+def web_component(assets_line):
+    return (
+        '---\n'
+        'id: comp-web\n'
+        'title: Web\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: [comp-kind-demo]\n'
+        + assets_line + '\n'
+        'sealed: true\n'
+        'source_path: legacy/web/\n'
+        '---\n'
+        + component_body('Web')
+    )
+
+
+def kind_demo_component():
+    return (
+        '---\n'
+        'id: comp-kind-demo\n'
+        'title: Kind demo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'sealed: true\n'
+        'source_path: legacy/kind-demo/\n'
+        '---\n'
+        + component_body('Kind demo')
+    )
+
+
+def definition_text():
+    text = (
+        '---\n'
+        'id: arch-asset-kind-demo\n'
+        'title: Asset Kind demo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        '---\n'
+        '\n'
+        '# Asset Kind demo\n'
+    )
     for name in SECTIONS:
-        lines.append("## " + name)
-        lines.append("")
-        lines.append("Text for " + name + ".")
-        lines.append("")
-    return "\n".join(lines)
+        text += '\n## ' + name + '\n\nOne line of ' + name.lower() + ' text.\n'
+    return text
 
 
-def build_corpus(repo_root, assets_line):
-    repo_root = Path(repo_root)
-    (repo_root / "specs" / "product").mkdir(parents=True, exist_ok=True)
-    (repo_root / "specs" / "vars").mkdir(parents=True, exist_ok=True)
-    (repo_root / "specs" / "decisions").mkdir(parents=True, exist_ok=True)
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Fixture** — a test fixture.\n")
-    write(repo_root / "specs" / "architecture" / "asset-kind-demo.md", definition_md())
-    write(
-        repo_root / "specs" / "components" / "kind-demo" / "component.md",
-        component_md("comp-kind-demo", "Kind demo", ["depends_on: []"]),
-    )
-    write(
-        repo_root / "specs" / "components" / "web" / "component.md",
-        component_md("comp-web", "Web", ["depends_on: [comp-kind-demo]", assets_line]),
-    )
-    return repo_root
+def unit_files(slug, prefix):
+    rid = 'R-' + prefix + '-001'
+    aid = 'AC-' + prefix + '-001'
+    return {
+        'specs/components/' + slug + '/requirements/' + rid + '.md': (
+            '# ' + rid + '\n'
+            '\n'
+            '**' + rid + '** — The component MUST do its thing.\n'
+        ),
+        'specs/components/' + slug + '/acceptance/' + aid + '.md': (
+            '# ' + aid + '\n'
+            '\n'
+            'Covers: ' + rid + '\n'
+            'Kind: generated-test\n'
+            '\n'
+            '```gherkin\n'
+            'Given nothing\n'
+            'When the thing is done\n'
+            'Then it is done\n'
+            '```\n'
+        ),
+        'specs/components/' + slug + '/constraints.md': (
+            '# ' + slug + ' — Non-Functional Constraints\n'
+            '\n'
+            '- **Pure.** No I/O.\n'
+        ),
+    }
+
+
+def build(repo_root, assets_line):
+    changes = {
+        WEB_PATH: web_component(assets_line),
+        'specs/components/kind-demo/component.md': kind_demo_component(),
+        'specs/architecture/asset-kind-demo.md': definition_text(),
+    }
+    changes.update(unit_files('web', 'WEB'))
+    changes.update(unit_files('kind-demo', 'KIND-DEMO'))
+    write_corpus(repo_root, changes)
 
 
 def assets_line_number(repo_root):
-    text = (Path(repo_root) / WEB_REL).read_text(encoding="utf-8")
-    for i, line in enumerate(text.splitlines(), start=1):
-        if line.startswith("assets:"):
-            return i
-    raise AssertionError("no assets line")
+    lines = (repo_root / WEB_PATH).read_text(encoding='utf-8').splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith('assets:'):
+            return i + 1
+    raise AssertionError('no assets line')
 
 
 def lint034(repo_root):
     report = spec_linter.lint(None, repo_root)
-    return [f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-034"]
+    return [
+        f for f in field(report, 'findings')
+        if field(f, 'rule_id') == 'R-LINT-034'
+    ]
 
 
-def test_valid_assets_have_no_r_lint_034_finding(tmp_path):
-    repo_root = build_corpus(tmp_path, "assets: [demo:static/app.js]")
-    findings = lint034(repo_root)
-    assert findings == [], [field(f, "message") for f in findings]
+def test_valid_asset_has_no_finding(tmp_path):
+    repo_root = Path(tmp_path)
+    build(repo_root, 'assets: [demo:static/app.js]')
+    assert lint034(repo_root) == []
 
 
 def test_invalid_entries_reported_in_order(tmp_path):
-    line = (
-        "assets: [demo, Demo:a.js, demo:/abs.js, demo:a" + "\\" + "b.js, "
-        "demo:x/../y.js, demo:static/m.py, python:pkg]"
-    )
-    repo_root = build_corpus(tmp_path, line)
+    repo_root = Path(tmp_path)
+    entries = [
+        'demo',
+        'Demo:a.js',
+        'demo:/abs.js',
+        'demo:a\\b.js',
+        'demo:x/../y.js',
+        'demo:static/m.py',
+        'python:pkg',
+    ]
+    build(repo_root, 'assets: [' + ', '.join(entries) + ']')
     findings = lint034(repo_root)
     expected = [
         "asset 'demo' is not <kind>:<path>",
         "asset 'Demo:a.js' is not <kind>:<path>",
         "asset 'demo:/abs.js': path must be relative with / separators",
-        "asset 'demo:a" + "\\" + "b.js': path must be relative with / separators",
+        "asset 'demo:a\\b.js': path must be relative with / separators",
         "asset 'demo:x/../y.js': path contains ..",
         "asset 'demo:static/m.py': path ends in .py",
         "asset 'python:pkg': python is never declared",
     ]
-    assert [field(f, "message") for f in findings] == expected
-    expected_line = assets_line_number(repo_root)
-    for f in findings:
-        assert field(f, "file") == WEB_REL
-        assert field(f, "severity") == "fail"
-        assert field(f, "line") == expected_line
+    web_findings = [f for f in findings if field(f, 'file') == WEB_PATH]
+    assert [field(f, 'message') for f in web_findings] == expected
+    assert len(findings) == len(expected)
+    line = assets_line_number(repo_root)
+    for f in web_findings:
+        assert field(f, 'severity') == 'fail'
+        assert field(f, 'line') == line
 
 
 def test_assets_not_a_list(tmp_path):
-    repo_root = build_corpus(tmp_path, "assets: demo:static/app.js")
+    repo_root = Path(tmp_path)
+    build(repo_root, 'assets: demo:static/app.js')
     findings = lint034(repo_root)
-    assert [field(f, "message") for f in findings] == [
-        "assets must be a list of <kind>:<path> strings"
+    assert [field(f, 'message') for f in findings] == [
+        'assets must be a list of <kind>:<path> strings'
     ]
     f = findings[0]
-    assert field(f, "file") == WEB_REL
-    assert field(f, "severity") == "fail"
-    assert field(f, "line") == assets_line_number(repo_root)
+    assert field(f, 'severity') == 'fail'
+    assert field(f, 'file') == WEB_PATH
+    assert field(f, 'line') == assets_line_number(repo_root)
