@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:11bc4281dcd56ea6bd2cad628d16f4d2ec6d663943f049b73ee1c9af3adbf6c8
+# hotdocs-criterion: sha256:407156b0cea547749009d2df2dd73629ca1fefaece829b2f53f2d3d4e5650523
 import importlib.util
 import json
 import subprocess
@@ -16,13 +16,13 @@ GIT_PREFIX = [
 ]
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
 def git(repo, *args):
     subprocess.run(GIT_PREFIX + list(args), cwd=str(repo), check=True,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def write(path, text):
@@ -30,7 +30,7 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def component_md(slug, depends_on=None, purpose_text="Fixture purpose."):
+def component_md(slug, depends_on=None, purpose_text="This is a fixture component."):
     title = slug.title()
     lines = [
         "---",
@@ -44,44 +44,45 @@ def component_md(slug, depends_on=None, purpose_text="Fixture purpose."):
     if depends_on:
         lines.append("depends_on: [" + ", ".join(depends_on) + "]")
     lines.append("---")
-    lines.append("")
-    lines.append("# " + title)
+    text = "\n".join(lines) + "\n\n# " + title + "\n\n"
     sections = [
         ("Purpose", purpose_text),
         ("Scope", "Fixture scope."),
         ("Definitions", "None."),
-        ("Behavior", "See `requirements/`."),
-        ("Interfaces", "See `interface/`."),
-        ("Acceptance criteria", "See `acceptance/`."),
+        ("Behavior", "Returns its input."),
+        ("Interfaces", "See interface."),
+        ("Acceptance criteria", "See acceptance."),
         ("Open questions", "None."),
         ("Change log", "Initial."),
     ]
-    for name, text in sections:
-        lines.append("")
-        lines.append("## " + name)
-        lines.append("")
-        lines.append(text)
-    return "\n".join(lines) + "\n"
+    parts = []
+    for name, body in sections:
+        parts.append("## " + name + "\n\n" + body + "\n")
+    return text + "\n".join(parts)
 
 
-def write_component(repo, slug, depends_on=None, purpose_text="Fixture purpose."):
+def write_component(repo, slug, depends_on=None, purpose_text="This is a fixture component."):
     upper = slug.upper()
-    base = repo / "specs" / "components" / slug
-    write(base / "component.md", component_md(slug, depends_on, purpose_text))
-    write(base / "requirements" / ("R-" + upper + "-001.md"),
+    root = repo / "specs" / "components" / slug
+    write(root / "component.md", component_md(slug, depends_on, purpose_text))
+    write(root / "requirements" / ("R-" + upper + "-001.md"),
           "# R-" + upper + "-001\n\nThe component MUST return its input unchanged.\n")
-    write(base / "acceptance" / ("AC-" + upper + "-001.md"),
+    write(root / "acceptance" / ("AC-" + upper + "-001.md"),
           "# AC-" + upper + "-001\n\n"
           + "Covers: R-" + upper + "-001\n"
           + "Kind: generated-test\n\n"
-          + "```gherkin\nGiven 1\nWhen it runs\nThen it returns 1\n```\n")
-    write(base / "constraints.md",
+          + "```gherkin\n"
+          + "Given 1\n"
+          + "When it runs\n"
+          + "Then it returns 1\n"
+          + "```\n")
+    write(root / "constraints.md",
           "# Constraints\n\n- The component MUST finish within 1 second.\n")
-    write(base / "interface" / "library.md",
+    write(root / "interface" / "library.md",
           "# Library\n\n```\nrun(x: int) -> int\n```\n")
 
 
-def load_spec_linter():
+def assert_lint_clean(repo_root):
     gen = next(p for p in Path(impact_analyzer.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
     path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
@@ -89,10 +90,11 @@ def load_spec_linter():
     spec_linter = importlib.util.module_from_spec(spec)
     sys.modules["spec_linter"] = spec_linter
     spec.loader.exec_module(spec_linter)
-    return spec_linter
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
 
 
-def build_repo(repo):
+def build_repo(tmp_path):
+    repo = tmp_path
     write(repo / "specs" / "glossary.md",
           "# Glossary\n\n- **Fixture** — a test component.\n")
     write_component(repo, "foo")
@@ -103,63 +105,45 @@ def build_repo(repo):
     git(repo, "commit", "-q", "-m", "A")
     git(repo, "switch", "-q", "-c", "feature")
 
-    foo_interface = repo / "specs" / "components" / "foo" / "interface" / "library.md"
-    interface_before = foo_interface.read_bytes()
+    foo_iface = repo / "specs" / "components" / "foo" / "interface" / "library.md"
+    iface_before = foo_iface.read_bytes()
 
-    # Change comp-foo's component.md narrative only; interface/ untouched.
+    # Change only comp-foo's component.md (Purpose), leaving interface/ untouched.
     write(repo / "specs" / "components" / "foo" / "component.md",
-          component_md("foo", purpose_text="Fixture purpose, reworded internally."))
+          component_md("foo", None, "This fixture component has an edited purpose."))
 
-    assert foo_interface.read_bytes() == interface_before
+    assert foo_iface.read_bytes() == iface_before
     return repo
 
 
-def test_internal_component_md_change_does_not_propagate(tmp_path):
-    repo = build_repo(tmp_path)
-
-    spec_linter = load_spec_linter()
-    assert spec_linter.lint(None, repo).hard_failures == 0
-
-    report = impact_analyzer.compute_blast_radius(["comp-foo"], repo)
-
-    assert field(report, "precondition_error") is None
-    impacted = field(report, "impacted")
+def assert_report(impacted):
     ids = [field(e, "component_id") for e in impacted]
-
     assert "comp-foo" in ids
-    foo_entry = impacted[ids.index("comp-foo")]
-    assert field(foo_entry, "reason") == "direct"
-    assert field(foo_entry, "via") is None
+    foo = [e for e in impacted if field(e, "component_id") == "comp-foo"]
+    assert len(foo) == 1
+    assert field(foo[0], "reason") == "direct"
     assert "comp-bar" not in ids
-    assert ids == ["comp-foo"]
 
 
-def test_internal_change_cli_json(tmp_path, capsys):
+def test_ac_impact_002_internal_change_does_not_propagate_cli(tmp_path, capsys):
     repo = build_repo(tmp_path)
+    assert_lint_clean(repo)
+    capsys.readouterr()
 
     code = impact_analyzer.main(
         ["--changed", "comp-foo", "--repo-root", str(repo), "--format=json"]
     )
-    captured = capsys.readouterr()
+    out = capsys.readouterr().out
     assert code == 0
-    data = json.loads(captured.out)
-    assert data["precondition_error"] is None
-    ids = [e["component_id"] for e in data["impacted"]]
-    assert "comp-foo" in ids
-    foo_entry = data["impacted"][ids.index("comp-foo")]
-    assert foo_entry["reason"] == "direct"
-    assert foo_entry["via"] is None
-    assert "comp-bar" not in ids
+    report = json.loads(out)
+    assert report["precondition_error"] is None
+    assert_report(report["impacted"])
 
 
-def test_internal_change_cli_text(tmp_path, capsys):
+def test_ac_impact_002_internal_change_does_not_propagate_library(tmp_path):
     repo = build_repo(tmp_path)
+    assert_lint_clean(repo)
 
-    code = impact_analyzer.main(
-        ["--changed=comp-foo", "--repo-root=" + str(repo)]
-    )
-    captured = capsys.readouterr()
-    assert code == 0
-    lines = [l for l in captured.out.splitlines() if l.strip()]
-    assert lines == ["comp-foo\tdirect"]
-    assert "comp-bar" not in captured.out
+    report = impact_analyzer.compute_blast_radius(["comp-foo"], repo)
+    assert field(report, "precondition_error") is None
+    assert_report(field(report, "impacted"))

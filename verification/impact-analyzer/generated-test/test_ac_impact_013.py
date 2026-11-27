@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:6924a3e0260b4920d63b522bcb0e3cab78edb19b304c93b70ddc1c431af5fb8c
+# hotdocs-criterion: sha256:3944de57f95e9f12ab7f138fc471b07a646bd96511b5f18a514302a457e9d629
 import importlib.util
 import subprocess
 import sys
@@ -7,8 +7,27 @@ from pathlib import Path
 import impact_analyzer
 
 
+GIT_PREFIX = [
+    "git",
+    "-c", "user.name=hotdocs-test",
+    "-c", "user.email=test@example.com",
+    "-c", "commit.gpgsign=false",
+]
+
+
+def git(repo, *args):
+    subprocess.run(GIT_PREFIX + list(args), cwd=str(repo), check=True,
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def opt_field(value, name):
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
 
 
 def load_spec_linter():
@@ -22,26 +41,16 @@ def load_spec_linter():
     return spec_linter
 
 
-def git(repo, *args):
-    cmd = [
-        "git",
-        "-c", "user.name=hotdocs-test",
-        "-c", "user.email=test@example.com",
-        "-c", "commit.gpgsign=false",
-    ] + list(args)
-    subprocess.run(cmd, cwd=str(repo), check=True, capture_output=True)
-
-
 def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
-def write_component(repo, slug, depends_on=None, depends_on_guarantees=None, guarantees=None):
-    upper = slug.upper()
+def write_component(repo, slug, depends_on=None, depends_on_guarantees=None, guarantees=()):
+    up = slug.upper()
     title = slug.title()
-    root = repo / "specs" / "components" / slug
-    fm = [
+    base = repo / "specs" / "components" / slug
+    lines = [
         "---",
         "id: comp-" + slug,
         "title: " + title,
@@ -50,124 +59,93 @@ def write_component(repo, slug, depends_on=None, depends_on_guarantees=None, gua
         "sealed: true",
         "source_path: legacy/" + slug + "/",
     ]
-    if depends_on:
-        fm.append("depends_on: [" + ", ".join(depends_on) + "]")
-    if depends_on_guarantees:
-        fm.append("depends_on_guarantees: [" + ", ".join(depends_on_guarantees) + "]")
-    fm.append("---")
-    lines = fm + ["", "# " + title]
-    for section in [
-        "Purpose",
-        "Scope",
-        "Definitions",
-        "Behavior",
-        "Interfaces",
-        "Acceptance criteria",
-        "Open questions",
-        "Change log",
-    ]:
-        lines += ["", "## " + section, "", "Text for " + section.lower() + "."]
-    write(root / "component.md", "\n".join(lines) + "\n")
+    if depends_on is not None:
+        lines.append("depends_on: [" + ", ".join(depends_on) + "]")
+    if depends_on_guarantees is not None:
+        lines.append("depends_on_guarantees: [" + ", ".join(depends_on_guarantees) + "]")
+    lines.append("---")
+    lines.append("")
+    lines.append("# " + title)
+    for section in ["Purpose", "Scope", "Definitions", "Behavior", "Interfaces",
+                    "Acceptance criteria", "Open questions", "Change log"]:
+        lines.append("")
+        lines.append("## " + section)
+        lines.append("")
+        lines.append("Text for " + section.lower() + ".")
+    write(base / "component.md", "\n".join(lines) + "\n")
 
-    rid = "R-" + upper + "-001"
-    write(
-        root / "requirements" / (rid + ".md"),
-        "# " + rid + "\n\nThe component MUST return its input unchanged.\n",
-    )
-    acid = "AC-" + upper + "-001"
-    write(
-        root / "acceptance" / (acid + ".md"),
-        "# " + acid + "\n\n"
-        + "Covers: " + rid + "\n"
-        + "Kind: generated-test\n\n"
-        + "```gherkin\nGiven 1\nWhen it runs\nThen it returns 1\n```\n",
-    )
-    write(
-        root / "constraints.md",
-        "# Constraints\n\n- The component MUST finish within 1 second.\n",
-    )
-    write(
-        root / "interface" / "library.md",
-        "# Library\n\n```\nrun(x: int) -> int\n```\n",
-    )
-    for gid in guarantees or []:
-        write(
-            root / "interface" / "guarantees" / (gid + ".md"),
-            "# " + gid + "\n\nThe component MUST keep promise " + gid + ".\n",
-        )
-    return root
+    rid = "R-" + up + "-001"
+    write(base / "requirements" / (rid + ".md"),
+          "# " + rid + "\n\nThe component MUST return its input unchanged.\n")
+    acid = "AC-" + up + "-001"
+    write(base / "acceptance" / (acid + ".md"),
+          "# " + acid + "\n\nCovers: " + rid + "\nKind: generated-test\n\n"
+          "```gherkin\nGiven 1\nWhen it runs\nThen it returns 1\n```\n")
+    write(base / "constraints.md",
+          "# Constraints\n\n- The component MUST finish within 1 second.\n")
+    write(base / "interface" / "library.md",
+          "# Library\n\n```\nrun(x: int) -> int\n```\n")
+    for gid in guarantees:
+        write_guarantee(base / "interface" / "guarantees" / (gid + ".md"), gid,
+                        "return a value")
 
 
-def build_fixture(repo):
-    write(repo / "specs" / "glossary.md", "# Glossary\n\n- **Fixture** — a test component.\n")
-    foo = write_component(repo, "foo", guarantees=["G-FOO-001", "G-FOO-002", "G-FOO-003"])
-    gdir = foo / "interface" / "guarantees"
-    write(gdir / "README.md", "# Guarantees\n\nScaffolding only.\n")
-    write(gdir / "notes.txt", "some notes\n")
-    write(gdir / "old" / "G-FOO-009.md", "# G-FOO-009\n\nThe component MUST keep an old promise.\n")
+def write_guarantee(path, gid, sentence):
+    write(path, "# " + gid + "\n\nThe component MUST " + sentence + ".\n")
+
+
+def impacted_tuples(report):
+    assert field(report, "precondition_error") is None
+    out = []
+    for entry in field(report, "impacted"):
+        gids = opt_field(entry, "guarantee_ids")
+        out.append((
+            field(entry, "component_id"),
+            field(entry, "reason"),
+            field(entry, "via"),
+            list(gids) if gids is not None else None,
+        ))
+    return out
+
+
+def test_ac_impact_013(tmp_path):
+    repo = tmp_path
+    write(repo / "specs" / "glossary.md",
+          "# Glossary\n\n- **Fixture** — a test component.\n")
+    write_component(repo, "foo", guarantees=["G-FOO-001", "G-FOO-002", "G-FOO-003"])
     write_component(repo, "qux", guarantees=["G-QUX-001"])
-    write_component(
-        repo,
-        "bar",
-        depends_on=["comp-foo", "comp-qux"],
-        depends_on_guarantees=["G-QUX-001"],
-    )
+    write_component(repo, "bar", depends_on=["comp-foo", "comp-qux"],
+                    depends_on_guarantees=["G-QUX-001"])
+
+    gdir = repo / "specs" / "components" / "foo" / "interface" / "guarantees"
+    write(gdir / "README.md", "# Guarantees\n\nThese are the guarantees.\n")
+    write(gdir / "notes.txt", "some notes\n")
+    write_guarantee(gdir / "old" / "G-FOO-009.md", "G-FOO-009", "keep an old promise")
 
     git(repo, "init", "-q", "-b", "main")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "A")
     git(repo, "switch", "-q", "-c", "feature")
-    return gdir
 
+    # Feature branch: only non-guarantee files under interface/guarantees/ change.
+    write(gdir / "README.md", "# Guarantees\n\nThese are the edited guarantees.\n")
+    write(gdir / "notes.txt", "some edited notes\n")
+    write_guarantee(gdir / "old" / "G-FOO-009.md", "G-FOO-009", "keep an edited old promise")
 
-def apply_non_guarantee_changes(gdir):
-    write(gdir / "README.md", "# Guarantees\n\nScaffolding only, edited.\n")
-    write(gdir / "notes.txt", "some notes, edited\n")
-    write(gdir / "old" / "G-FOO-009.md", "# G-FOO-009\n\nThe component MUST keep an edited old promise.\n")
-
-
-def summarize(report):
-    assert field(report, "precondition_error") is None
-    out = []
-    for entry in field(report, "impacted"):
-        gids = field(entry, "guarantee_ids")
-        out.append(
-            (
-                field(entry, "component_id"),
-                field(entry, "reason"),
-                field(entry, "via"),
-                None if gids is None else list(gids),
-            )
-        )
-    return out
-
-
-def test_non_guarantee_files_trigger_nothing(tmp_path):
-    repo = tmp_path
-    gdir = build_fixture(repo)
     spec_linter = load_spec_linter()
-    assert spec_linter.lint(None, repo).hard_failures == 0
-
-    apply_non_guarantee_changes(gdir)
     assert spec_linter.lint(None, repo).hard_failures == 0
 
     report = impact_analyzer.compute_blast_radius(["comp-foo"], repo)
-    assert summarize(report) == [("comp-foo", "direct", None, None)]
+    assert impacted_tuples(report) == [("comp-foo", "direct", None, None)]
 
-
-def test_narrowing_for_other_upstream_does_not_narrow_foo(tmp_path):
-    repo = tmp_path
-    gdir = build_fixture(repo)
-    spec_linter = load_spec_linter()
-    assert spec_linter.lint(None, repo).hard_failures == 0
-
-    apply_non_guarantee_changes(gdir)
-    write(gdir / "G-FOO-002.md", "# G-FOO-002\n\nThe component MUST keep a changed promise G-FOO-002.\n")
+    # Now also edit G-FOO-002 and delete G-FOO-003.
+    write_guarantee(gdir / "G-FOO-002.md", "G-FOO-002", "return a different value")
     (gdir / "G-FOO-003.md").unlink()
+
     assert spec_linter.lint(None, repo).hard_failures == 0
 
     report = impact_analyzer.compute_blast_radius(["comp-foo"], repo)
-    assert summarize(report) == [
+    assert impacted_tuples(report) == [
         ("comp-foo", "direct", None, None),
         ("comp-bar", "transitive-guarantee", "comp-foo", ["G-FOO-002", "G-FOO-003"]),
     ]

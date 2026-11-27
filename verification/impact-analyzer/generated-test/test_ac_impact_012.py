@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:9446bd392422bdd4d0173dcdd89474a76ff4b6b6637c15201c471cc916774c50
+# hotdocs-criterion: sha256:d379461e0d3472381d17f038cd70a5c40968a7a6e6578566fc3a93cc0719bed3
 import importlib.util
 import json
 import subprocess
@@ -8,7 +8,7 @@ from pathlib import Path
 import impact_analyzer
 
 
-GIT = [
+GIT_PREFIX = [
     "git",
     "-c", "user.name=hotdocs-test",
     "-c", "user.email=test@example.com",
@@ -21,20 +21,20 @@ def field(value, name):
 
 
 def git(repo, *args):
-    subprocess.run(GIT + list(args), cwd=str(repo), check=True,
+    subprocess.run(GIT_PREFIX + list(args), cwd=str(repo), check=True,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
 def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
-def make_component(repo, slug, depends_on=None):
+def write_component(repo, slug, depends_on=None):
     upper = slug.upper()
     title = slug.title()
     base = repo / "specs" / "components" / slug
-    fm = [
+    fm_lines = [
         "---",
         "id: comp-" + slug,
         "title: " + title,
@@ -44,21 +44,34 @@ def make_component(repo, slug, depends_on=None):
         "source_path: legacy/" + slug + "/",
     ]
     if depends_on:
-        fm.append("depends_on: [" + ", ".join(depends_on) + "]")
-    fm.append("---")
-    body = ["", "# " + title]
-    for section in ["Purpose", "Scope", "Definitions", "Behavior",
-                    "Interfaces", "Acceptance criteria", "Open questions",
-                    "Change log"]:
-        body += ["", "## " + section, "", "Fixture text."]
-    write(base / "component.md", "\n".join(fm + body) + "\n")
-    write(base / "requirements" / ("R-" + upper + "-001.md"),
-          "# R-" + upper + "-001\n\nThe component MUST return its input unchanged.\n")
-    write(base / "acceptance" / ("AC-" + upper + "-001.md"),
-          "# AC-" + upper + "-001\n\n"
-          + "Covers: R-" + upper + "-001\n"
-          + "Kind: generated-test\n\n"
-          + "```gherkin\nGiven 1\nWhen it runs\nThen it returns 1\n```\n")
+        fm_lines.append("depends_on: [" + ", ".join(depends_on) + "]")
+    fm_lines.append("---")
+    body_lines = ["", "# " + title]
+    for section in [
+        "Purpose", "Scope", "Definitions", "Behavior", "Interfaces",
+        "Acceptance criteria", "Open questions", "Change log",
+    ]:
+        body_lines.append("")
+        body_lines.append("## " + section)
+        body_lines.append("")
+        body_lines.append("Placeholder text for " + section.lower() + ".")
+    write(base / "component.md", "\n".join(fm_lines + body_lines) + "\n")
+
+    req_id = "R-" + upper + "-001"
+    ac_id = "AC-" + upper + "-001"
+    write(base / "requirements" / (req_id + ".md"),
+          "# " + req_id + "\n\nThe component MUST return its input unchanged.\n")
+    write(base / "acceptance" / (ac_id + ".md"),
+          "# " + ac_id + "\n"
+          "\n"
+          "Covers: " + req_id + "\n"
+          "Kind: generated-test\n"
+          "\n"
+          "```gherkin\n"
+          "Given 1\n"
+          "When it runs\n"
+          "Then it returns 1\n"
+          "```\n")
     write(base / "constraints.md",
           "# Constraints\n\n- The component MUST finish within 1 second.\n")
     write(base / "interface" / "library.md",
@@ -76,12 +89,12 @@ def load_spec_linter():
     return spec_linter
 
 
-def test_ac_impact_012_repo_root_defaults_to_git_root_from_subdirectory(tmp_path, capsys, monkeypatch):
+def test_ac_impact_012(tmp_path, monkeypatch, capsys):
     repo = tmp_path
     write(repo / "specs" / "glossary.md",
           "# Glossary\n\n- **Fixture** — a test component.\n")
-    make_component(repo, "foo")
-    make_component(repo, "bar", depends_on=["comp-foo"])
+    write_component(repo, "foo")
+    write_component(repo, "bar", depends_on=["comp-foo"])
 
     git(repo, "init", "-q", "-b", "main")
     git(repo, "add", "-A")
@@ -95,12 +108,13 @@ def test_ac_impact_012_repo_root_defaults_to_git_root_from_subdirectory(tmp_path
     capsys.readouterr()
 
     code = impact_analyzer.main(["--changed", "comp-foo", "--format=json"])
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
 
-    assert code == 0
-    report = json.loads(out)
-    assert report["precondition_error"] is None
-    entries = [e for e in report["impacted"] if e["component_id"] == "comp-foo"]
-    assert len(entries) == 1
-    assert entries[0]["reason"] == "direct"
-    assert entries[0]["via"] is None
+    assert code == 0, "stdout=" + repr(captured.out) + " stderr=" + repr(captured.err)
+    report = json.loads(captured.out)
+    assert field(report, "precondition_error") is None
+    impacted = field(report, "impacted")
+    foo_entries = [e for e in impacted if field(e, "component_id") == "comp-foo"]
+    assert len(foo_entries) == 1, repr(impacted)
+    assert field(foo_entries[0], "reason") == "direct"
+    assert field(foo_entries[0], "via") is None

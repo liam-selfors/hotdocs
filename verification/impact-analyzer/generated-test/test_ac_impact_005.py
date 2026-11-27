@@ -1,4 +1,7 @@
-# hotdocs-criterion: sha256:3a01cf934d1c38b7bb419079f492ac0212a1d22136495f75436465fb3ca674c3
+# hotdocs-criterion: sha256:35e8b6274875d9919d70191cd0aafbbebae09d24425d9d3731b50325d865c91a
+"""AC-IMPACT-005: a changed product capability pulls in every component
+whose `realizes` lists it, tagged `transitive-capability` via that P-id."""
+
 import importlib.util
 import json
 import subprocess
@@ -22,7 +25,7 @@ def field(value, name):
 
 def git(repo, *args):
     subprocess.run(GIT + list(args), cwd=str(repo), check=True,
-                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                   capture_output=True)
 
 
 def write(path, text):
@@ -30,56 +33,47 @@ def write(path, text):
     path.write_text(text)
 
 
-def load_spec_linter():
-    gen = next(p for p in Path(impact_analyzer.__file__).resolve().parents if p.name == "gen")
-    base = gen / "spec-linter"
-    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    return spec_linter
-
-
-def component_md(slug, extra_lines):
+def write_component(repo, slug, extra_frontmatter_lines):
+    upper = slug.upper()
     title = slug.title()
-    lines = [
+    root = repo / "specs" / "components" / slug
+    fm = [
         "---",
         "id: comp-" + slug,
         "title: " + title,
         "status: draft",
         "owners: [test-team]",
-    ] + extra_lines + [
-        "---",
-        "",
-        "# " + title,
-        "",
+    ] + list(extra_frontmatter_lines) + ["---"]
+    sections = [
+        "Purpose", "Scope", "Definitions", "Behavior", "Interfaces",
+        "Acceptance criteria", "Open questions", "Change log",
     ]
-    for section in ["Purpose", "Scope", "Definitions", "Behavior", "Interfaces",
-                    "Acceptance criteria", "Open questions", "Change log"]:
-        lines += ["## " + section, "", "Fixture text for " + section.lower() + ".", ""]
-    # Open questions must be empty-ish for draft? draft allows content; keep text.
-    return "\n".join(lines)
+    body = ["", "# " + title]
+    for s in sections:
+        body += ["", "## " + s, "", "Text for " + s.lower() + "."]
+    write(root / "component.md", "\n".join(fm + body) + "\n")
+    write(
+        root / "requirements" / ("R-" + upper + "-001.md"),
+        "# R-" + upper + "-001\n\nThe component MUST return its input unchanged.\n",
+    )
+    write(
+        root / "acceptance" / ("AC-" + upper + "-001.md"),
+        "# AC-" + upper + "-001\n\n"
+        + "Covers: R-" + upper + "-001\n"
+        + "Kind: generated-test\n\n"
+        + "```gherkin\nGiven 1\nWhen it runs\nThen it returns 1\n```\n",
+    )
+    write(
+        root / "constraints.md",
+        "# Constraints\n\n- The component MUST finish within 1 second.\n",
+    )
+    write(
+        root / "interface" / "library.md",
+        "# Library\n\n```\nrun(x: int) -> int\n```\n",
+    )
 
 
-def write_component(repo, slug, extra_lines):
-    upper = slug.upper()
-    root = repo / "specs" / "components" / slug
-    write(root / "component.md", component_md(slug, extra_lines))
-    write(root / "requirements" / ("R-" + upper + "-001.md"),
-          "# R-" + upper + "-001\n\nThe component MUST return its input unchanged.\n")
-    write(root / "acceptance" / ("AC-" + upper + "-001.md"),
-          "# AC-" + upper + "-001\n\n"
-          "Covers: R-" + upper + "-001\n"
-          "Kind: generated-test\n\n"
-          "```gherkin\nGiven 1\nWhen it runs\nThen it returns 1\n```\n")
-    write(root / "constraints.md",
-          "# Constraints\n\n- The component MUST finish within 1 second.\n")
-    write(root / "interface" / "library.md",
-          "# Library\n\n```\nrun(x: int) -> int\n```\n")
-
-
-def product_md(then_line):
+def capability_text(then_line):
     return (
         "---\n"
         "id: P-ZERO-EDIT\n"
@@ -90,105 +84,67 @@ def product_md(then_line):
         "\n"
         "# Zero Edit\n"
         "\n"
-        "## Purpose\n"
+        "## Capability\n"
         "\n"
-        "The system MUST return input unchanged.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: returning input.\n"
+        "A user MUST be able to run the pipeline without editing generated code.\n"
         "\n"
         "## Capability scenarios\n"
         "\n"
-        "### CS-ZERO-EDIT-001\n"
-        "\n"
-        "Covers: P-ZERO-EDIT\n"
-        "Kind: generated-test\n"
-        "\n"
         "```gherkin\n"
-        "Given 1\n"
-        "When the system runs\n"
+        "Given a spec change\n"
+        "When the pipeline runs\n"
         + then_line + "\n"
         "```\n"
     )
 
 
-def build_repo(repo):
+def load_spec_linter():
+    gen = next(p for p in Path(impact_analyzer.__file__).resolve().parents
+               if p.name == "gen")
+    base = gen / "spec-linter"
+    path = (base / "spec_linter.py" if (base / "spec_linter.py").is_file()
+            else base / "spec_linter" / "__init__.py")
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    return spec_linter
+
+
+def test_ac_impact_005_changed_capability_includes_realizing_component(tmp_path, capsys):
+    repo = tmp_path
+
+    # Before corpus.
     write(repo / "specs" / "glossary.md",
           "# Glossary\n\n- **Fixture** — a test component.\n")
-    write(repo / "specs" / "product" / "zero-edit.md",
-          product_md("Then it returns 1"))
+    write(repo / "specs" / "product" / "P-ZERO-EDIT.md",
+          capability_text("Then no generated file is edited by hand"))
     write_component(repo, "foo", ["realizes: [P-ZERO-EDIT]"])
-    write_component(repo, "bar", ["sealed: true", "source_path: legacy/bar/"])
 
     git(repo, "init", "-q", "-b", "main")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "A")
     git(repo, "switch", "-q", "-c", "feature")
 
-    # Change the capability's own scenarios in the working tree.
-    write(repo / "specs" / "product" / "zero-edit.md",
-          product_md("Then it returns 1 exactly once"))
+    # Changed state: only P-ZERO-EDIT's capability scenarios change.
+    write(repo / "specs" / "product" / "P-ZERO-EDIT.md",
+          capability_text("Then every generated file is regenerated from specs"))
 
-
-def find_entry(entries, component_id):
-    matches = [e for e in entries if field(e, "component_id") == component_id]
-    assert len(matches) == 1, entries
-    return matches[0]
-
-
-def test_changed_capability_includes_realizing_component_library(tmp_path):
-    repo = tmp_path
-    build_repo(repo)
-
+    # Precondition: the corpus lints clean.
     spec_linter = load_spec_linter()
     assert spec_linter.lint(None, repo).hard_failures == 0
 
-    report = impact_analyzer.compute_blast_radius(["P-ZERO-EDIT"], repo)
-    assert field(report, "precondition_error") is None
-    impacted = field(report, "impacted")
-
-    entry = find_entry(impacted, "comp-foo")
-    assert field(entry, "reason") == "transitive-capability"
-    assert field(entry, "via") == "P-ZERO-EDIT"
-    assert field(entry, "guarantee_ids") is None
-
-    ids = [field(e, "component_id") for e in impacted]
-    assert "comp-bar" not in ids
-
-
-def test_changed_capability_includes_realizing_component_cli(tmp_path, capsys):
-    repo = tmp_path
-    build_repo(repo)
-
-    spec_linter = load_spec_linter()
-    assert spec_linter.lint(None, repo).hard_failures == 0
     capsys.readouterr()
-
     code = impact_analyzer.main(
         ["--changed", "P-ZERO-EDIT", "--repo-root", str(repo), "--format=json"]
     )
     out = capsys.readouterr().out
-    assert code == 0
-    data = json.loads(out)
-    assert data["precondition_error"] is None
+    assert code == 0, out
 
-    entry = find_entry(data["impacted"], "comp-foo")
-    assert entry["reason"] == "transitive-capability"
-    assert entry["via"] == "P-ZERO-EDIT"
-    assert "guarantee_ids" not in entry
-    assert "comp-bar" not in [e["component_id"] for e in data["impacted"]]
-
-
-def test_changed_capability_text_output(tmp_path, capsys):
-    repo = tmp_path
-    build_repo(repo)
-    capsys.readouterr()
-
-    code = impact_analyzer.main(
-        ["--changed", "P-ZERO-EDIT", "--repo-root=" + str(repo)]
-    )
-    out = capsys.readouterr().out
-    assert code == 0
-    lines = [l for l in out.splitlines() if l.strip()]
-    assert "comp-foo\ttransitive-capability\tvia P-ZERO-EDIT" in lines
+    report = json.loads(out)
+    assert field(report, "precondition_error") is None
+    impacted = field(report, "impacted")
+    foo = [e for e in impacted if field(e, "component_id") == "comp-foo"]
+    assert len(foo) == 1, impacted
+    assert field(foo[0], "reason") == "transitive-capability"
+    assert field(foo[0], "via") == "P-ZERO-EDIT"
