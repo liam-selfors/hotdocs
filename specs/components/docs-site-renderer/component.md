@@ -3,7 +3,7 @@ id: comp-docs-site-renderer
 title: Docs Site Renderer
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-corpus-graph-builder, comp-kind-javascript, comp-driver-browser]
+depends_on: [comp-corpus-graph-builder, comp-kind-javascript, comp-driver-browser, comp-ui-style]
 realizes: [P-AMBIGUITY-GATE]
 sealed: false
 assets: [javascript:static/app.js]

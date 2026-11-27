@@ -7,7 +7,9 @@
   by `kind` with verification result; provenance (model pin, prompt
   version, last cold-regen timestamp, freshness relative to
   `notes/initial-ideas.md`'s own D1); size vs. that file's own D2 caps,
-  color-coded; `sealed`/pinned-override exemption status; owners —
+  in one `<span class="size tone-<tone>">` element, `<tone>` the tone
+  `specs/architecture/visual-style.md` "Tones" maps its `size_status`
+  to, the detail page's only element carrying a `tone-` class; `sealed`/pinned-override exemption status; owners —
   that file's own D9's enumerated list, minus the verification-toggle item
   D9 originally specified (`cross_model_divergence_check`/`fallback_standby_build`),
   since this build has no repo-wide toggles to display (see

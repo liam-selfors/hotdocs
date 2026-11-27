@@ -34,4 +34,9 @@ The page's script is the declared asset `static/app.js`
 `provenance_tracker_ui.py` and inlined as `R-UI-001` states; reading
 it is the component's own file, not a fifth source under `R-UI-004`.
 
-Implements: `specs/architecture/cli-conventions.md`
+The page's only CSS is `comp-ui-style`'s `style_element()`, loaded as
+`specs/architecture/visual-style.md` "Pages" states and written once in
+`<head>` (`R-UI-001`); like the asset, it is the tool's own file, not a
+source under `R-UI-004`.
+
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/visual-style.md`

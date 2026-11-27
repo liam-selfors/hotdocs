@@ -40,7 +40,10 @@ given, and every value crossing it is plain Python (`str`, `int`,
 
 **Session**
 
-- `open(target, *, width=1280, height=800) -> Page` — `target` is a
+- `open(target, *, width=1280, height=800, color_scheme="light") -> Page`
+  — `color_scheme` is `"light"` or `"dark"`, the page's
+  `prefers-color-scheme`, else `color_scheme is light or dark: <value>`;
+  `target` is a
   file path (`str` or `Path`, absolute, or relative to the test's
   `tmp_path`) opened as a `file://` URL, or an `http://` URL whose host
   is `127.0.0.1`, `localhost` or `[::1]`. Anything else raises
@@ -85,7 +88,11 @@ given, and every value crossing it is plain Python (`str`, `int`,
 - Reads that need one element: `text() -> str` (visible text,
   trimmed), `value() -> str`, `attribute(name) -> str | None`,
   `checked() -> bool`, `box() -> dict` (`{"x", "y", "width",
-  "height"}` in viewport pixels, rounded to integers).
+  "height"}` in viewport pixels, rounded to integers),
+  `style(property) -> str` (the computed value of `property`, as
+  `getComputedStyle(element).getPropertyValue(property)` returns it,
+  stripped: a colour as `rgb(r, g, b)` or `rgba(r, g, b, a)`, a length
+  in `px`, a custom property's value as declared).
 - Reads over every match, never waiting: `count() -> int`,
   `texts() -> list[str]`, `visible() -> bool` (at least one match is
   visible).
@@ -112,7 +119,8 @@ passed, so a read after it sees the result without waiting.
   an empty list.
 - Each session is a fresh profile: no cookies, storage or cache from
   another test; locale `en-US`, time zone `UTC`, device scale factor 1,
-  reduced motion, light colour scheme, no service workers.
+  reduced motion, the colour scheme `open` was given (light unless
+  asked), no service workers.
 - Playwright runs in its own process, started by the adapter from the
   environment's interpreter, with an environment of only `PATH`,
   `HOME` (the test's `tmp_path`) and `PLAYWRIGHT_BROWSERS_PATH`. It may
@@ -138,8 +146,9 @@ a thread, open `http://127.0.0.1:<port>/`, and stop it in a `finally`.
 Find elements the way a user would: by role and accessible name, label
 or visible text; use `css` or `test_id` only for what the interface
 names by id or class. Assert on what the page shows (`text`, `texts`,
-`count`, `visible`, `value`, `attribute`, `url`) and on
-`console_errors()`, never on pixels or on `screenshot` files. Every
+`count`, `visible`, `value`, `attribute`, `url`, and `style` for a
+look the criterion states) and on `console_errors()`, never on pixels
+or on `screenshot` files. Every
 selector and expected text comes from the criterion, the requirement
 or the interface; a criterion that needs one they do not state is a
 spec gap, not something to guess. Do not import Playwright, start a
