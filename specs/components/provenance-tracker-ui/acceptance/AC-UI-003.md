@@ -10,5 +10,6 @@ When index.html is inspected
 Then it contains no <form element, no href attribute other than ones
   beginning with "#", and exactly two script elements: the
   id="tracker-snapshot" JSON data block and one <script type="module">
-  element (its exact text is AC-UI-011's concern, not this criterion's)
+  element whose text is static/app.js's text followed by
+  "\ninit(document);\n", as R-UI-001 writes it
 ```
