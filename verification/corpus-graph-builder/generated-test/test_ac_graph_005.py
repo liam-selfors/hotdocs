@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:7c0d157e5a3bb918ec14b9f01eec3c4f7d4ad5580957a23fc1e2dcbdf2ee4f49
+# hotdocs-criterion: sha256:fa1e8be7ea1e64e65c4b11a64736965c447f0acf8ead6a28fa0c3bf652d75406
 from pathlib import Path
 
 import pytest
@@ -10,12 +10,12 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def write_component(repo_root, slug, uses_var):
+def _write_component(repo_root, slug, uses_var):
     text = (
         "---\n"
         + "id: comp-" + slug + "\n"
@@ -33,54 +33,50 @@ def write_component(repo_root, slug, uses_var):
         + "\n"
         + "## Purpose\n"
         + "\n"
-        + "A fixture component used to test orphan-var aggregates.\n"
+        + "A fixture component used to test the orphan-var rate.\n"
     )
-    write(repo_root / "specs" / "components" / slug / "component.md", text)
+    _write(repo_root / "specs" / "components" / slug / "component.md", text)
 
 
-def write_var(repo_root, name):
+def _write_var(repo_root, var_id):
     text = (
         "---\n"
-        + "id: VAR-" + name + "\n"
-        + "title: Var " + name + "\n"
+        + "id: " + var_id + "\n"
+        + "title: Var " + var_id + "\n"
         + "status: draft\n"
         + "owners: [pipeline-team]\n"
         + "---\n"
         + "\n"
-        + "# VAR-" + name + "\n"
+        + "# " + var_id + "\n"
         + "\n"
         + "A fixture var declaration.\n"
     )
-    write(repo_root / "specs" / "vars" / (name + ".md"), text)
+    _write(repo_root / "specs" / "vars" / (var_id + ".md"), text)
 
 
-def orphan_var_rate(graph):
-    aggregates = field(graph, "aggregates")
-    return field(aggregates, "orphan_var_rate")
-
-
-def test_orphan_var_rate_is_half_with_one_of_two_vars_used(tmp_path):
+def test_orphan_var_rate_two_of_three(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    write_var(repo_root, "ONE")
-    write_var(repo_root, "TWO")
-    write_component(repo_root, "a", ["VAR-ONE"])
+    for var_id in ["VAR-ONE", "VAR-TWO", "VAR-THREE"]:
+        _write_var(repo_root, var_id)
+    _write_component(repo_root, "a", ["VAR-ONE"])
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
-    rate = orphan_var_rate(graph)
-    assert isinstance(rate, (int, float)) and not isinstance(rate, bool)
-    assert rate == pytest.approx(0.5)
+    aggregates = field(graph, "aggregates")
+    rate = field(aggregates, "orphan_var_rate")
+    assert rate == pytest.approx(2 / 3)
 
 
-def test_orphan_var_rate_is_zero_without_vars_directory(tmp_path):
+def test_orphan_var_rate_zero_without_vars_directory(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    write_component(repo_root, "a", [])
+    _write_component(repo_root, "a", [])
     assert not (repo_root / "specs" / "vars").exists()
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
-    rate = orphan_var_rate(graph)
-    assert isinstance(rate, (int, float)) and not isinstance(rate, bool)
+    aggregates = field(graph, "aggregates")
+    rate = field(aggregates, "orphan_var_rate")
     assert rate == 0.0
+    assert isinstance(rate, float)

@@ -1,11 +1,9 @@
-"""CLI: hotdocs corpus-graph build [--repo-root=<dir>]."""
+"""`hotdocs corpus-graph build` (interface/cli.md, R-GRAPH-007)."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-
-from . import build_corpus_graph, write_corpus_graph
 
 USAGE = "usage: hotdocs corpus-graph build [--repo-root=<dir>]"
 
@@ -17,12 +15,13 @@ def _usage_error(cause: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from . import build_corpus_graph, write_corpus_graph
+
     if argv is None:
         argv = sys.argv[1:]
     argv = list(argv)
     if not argv or argv[0] != "build":
         return _usage_error("expected 'build'")
-
     repo_root = "."
     rest = argv[1:]
     i = 0
@@ -38,12 +37,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             return _usage_error(f"unknown argument: {token}")
         i += 1
-
     try:
         root = Path(repo_root)
         path = write_corpus_graph(build_corpus_graph(root), root)
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    print(str(path))
+    print(path)
     return 0

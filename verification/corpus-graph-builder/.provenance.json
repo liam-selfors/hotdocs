@@ -1,5 +1,9 @@
 {
-  "spec_bundle_hash": "sha256:0f5880db695cd942bb43f95051e92a67f7a1e10e03603aef586b9245bee5ac4b",
+  "spec_bundle_hash": "sha256:85d49d6aa7f83ad35d4eb09712eeb18905a0bdfbbe23fbfa7d59d269e5c80d9d",
+  "spec_bundle_parts": {
+    "spec": "sha256:96ab7bd5747a2772022c578464b9b5900c695a9496e5340522953ffd658f3fd6",
+    "dependency_code": "sha256:783c265d16fce7bf65bf75ddb045fd2a6cc39fb95c99c0f931a0ad1b0e436104"
+  },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -17,13 +21,13 @@
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
-    "verifier": "verifier-orchestrator@3.5.0",
+    "verifier": "verifier-orchestrator@4.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-25T07:56:19Z",
+  "generated_at": "2026-11-27T07:17:54Z",
   "verification_run_id": "corpus-graph-builder-attempt-1",
   "verification_report": {
     "component_id": "comp-corpus-graph-builder",
@@ -50,13 +54,25 @@
         "id": "AC-GRAPH-004",
         "covers": "R-GRAPH-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 3,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GRAPH-005",
         "covers": "R-GRAPH-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 3,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GRAPH-006",
@@ -93,6 +109,12 @@
         "covers": "R-GRAPH-003",
         "kind": "generated-test",
         "result": "pass"
+      },
+      {
+        "id": "AC-GRAPH-012",
+        "covers": "R-GRAPH-008",
+        "kind": "generated-test",
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -108,7 +130,7 @@
       "R-GRAPH-010": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8269230769230769,
+    "mutation_score": 0.9574468085106383,
     "mutation_error": null,
     "assets": [
       {
@@ -123,6 +145,7 @@
         "lockfile_sha256": null
       }
     ],
+    "drivers": [],
     "overall": "pass"
   },
   "license_scan": {
@@ -352,5 +375,6 @@
       },
       "lockfile_sha256": null
     }
-  ]
+  ],
+  "drivers": []
 }
