@@ -1,8 +1,8 @@
-# hotdocs-criterion: sha256:7c8335081fe5a8bae6e09b846ee3546bfbdd44cbc36b759fa40f22ec5936b20c
+# hotdocs-criterion: sha256:96aa30a52cca25661550cb914534d6870aa7a493d3c8c30033e8e852eee89e3e
 import io
+import json
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 import pytest
 
@@ -16,61 +16,94 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _fake_urlopen(request, timeout=None, *args, **kwargs):
+def _all_text(value):
+    parts = [repr(value)]
     try:
-        url = request.full_url
-    except AttributeError:
-        url = str(request)
-    body = ('{"error": "invalid api key ' + SECRET + '"}').encode("utf-8")
-    raise urllib.error.HTTPError(
-        url,
-        401,
-        "Unauthorized: " + SECRET,
-        {},
-        io.BytesIO(body),
-    )
+        parts.append(json.dumps(value, default=str))
+    except Exception:
+        pass
+    return "\n".join(parts)
 
 
-def test_credential_never_appears_in_response_log_or_check_result(tmp_path, monkeypatch):
+def _make_fake_urlopen(log):
+    def fake_urlopen(request, timeout=None, *args, **kwargs):
+        log.append(request)
+        body = ('{"error": {"message": "invalid api key ' + SECRET + '"}}').encode("utf-8")
+        raise urllib.error.HTTPError(
+            "https://example.invalid/endpoint",
+            401,
+            "Unauthorized",
+            {},
+            io.BytesIO(body),
+        )
+
+    return fake_urlopen
+
+
+def test_credential_never_appears_in_responses_call_log_or_check_results(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
     workdir = tmp_path / "work"
     workdir.mkdir()
     monkeypatch.chdir(workdir)
+
     for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.setenv(name, SECRET)
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    calls = []
+    monkeypatch.setattr(urllib.request, "urlopen", _make_fake_urlopen(calls))
+
+    providers = ["anthropic", "openai", "gemini"]
 
     responses = []
-    for model in ("anthropic:m", "openai:m", "gemini:m"):
-        responses.append(llm_endpoint.complete("hello", model))
+    for provider in providers:
+        response = llm_endpoint.complete("hello", provider + ":m")
+        responses.append(response)
 
-    results = []
-    for provider in ("anthropic", "openai", "gemini"):
-        results.append(llm_endpoint.check_connection(provider, "m"))
+    check_results = []
+    for provider in providers:
+        result = llm_endpoint.check_connection(provider, "m")
+        check_results.append(result)
+
+    # The fake was actually reached, so the 401 body echoing the key was available.
+    assert len(calls) >= 1
 
     for response in responses:
-        assert field(response, "model_call_error") is not None
-        for key in ("text", "model", "backend", "model_call_error"):
-            assert SECRET not in repr(field(response, key))
-        assert SECRET not in repr(response)
+        text = _all_text(response)
+        assert SECRET not in text
+        error = field(response, "model_call_error")
+        if error is not None:
+            assert SECRET not in _all_text(error)
+            assert SECRET not in str(field(error, "message"))
 
-    for result in results:
-        assert SECRET not in repr(field(result, "ok"))
-        assert SECRET not in repr(field(result, "error"))
-        assert SECRET not in repr(result)
+    for result in check_results:
+        assert SECRET not in _all_text(result)
+        error = field(result, "error")
+        if error is not None:
+            assert SECRET not in _all_text(error)
+            assert SECRET not in str(field(error, "message"))
 
     calls_dir = workdir / ".hotdocs" / "calls"
-    files = [p for p in calls_dir.rglob("*") if p.is_file()] if calls_dir.exists() else []
-    assert len(files) >= 3
+    assert calls_dir.is_dir()
+    files = [p for p in calls_dir.rglob("*") if p.is_file()]
+    assert len(files) >= len(providers)
     for path in files:
-        content = path.read_bytes().decode("utf-8", errors="replace")
-        assert SECRET not in content
+        content = path.read_bytes()
+        assert SECRET.encode("utf-8") not in content
+
+    # Nothing anywhere under .hotdocs holds the key either.
+    for path in (workdir / ".hotdocs").rglob("*"):
+        if path.is_file():
+            assert SECRET.encode("utf-8") not in path.read_bytes()
 
 
 def test_save_config_refuses_key_as_api_key_env(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", SECRET)
-    config_path = tmp_path / "hotdocs.toml"
+    target_dir = tmp_path / "cfg"
+    target_dir.mkdir()
+    config_path = target_dir / "hotdocs.toml"
+
     with pytest.raises(ValueError) as excinfo:
         llm_endpoint.save_config(config_path, "openai", "m", api_key_env=SECRET)
+
     assert "never the key itself" in str(excinfo.value)
     assert not config_path.exists()

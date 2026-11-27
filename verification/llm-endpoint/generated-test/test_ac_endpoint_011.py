@@ -1,5 +1,7 @@
-# hotdocs-criterion: sha256:cecfa9fd342cc1a58fae6e64cca3eb3cda5a048d0402e10406fb659a000a3f58
+# hotdocs-criterion: sha256:ef0e4965f8888292ea2f827e942c222c5beab6745f6f6168e45a3ad2e5c19192
 import json
+
+import pytest
 import urllib.request
 
 import llm_endpoint
@@ -9,14 +11,16 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _isolate(monkeypatch, tmp_path):
+@pytest.fixture
+def clean_env(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.chdir(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return work
 
 
-def test_parse_ollama_prefix_and_bare_tag(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-
+def test_ollama_prefix_versus_bare_tag(clean_env):
     provider, model = llm_endpoint.parse_model("ollama:llama3.1:8b")
     assert provider == "ollama"
     assert model == "llama3.1:8b"
@@ -25,20 +29,20 @@ def test_parse_ollama_prefix_and_bare_tag(monkeypatch, tmp_path):
     assert provider is None
     assert model == "llama3.1:8b"
 
+    resolved = llm_endpoint.resolve_provider("ollama:llama3.1:8b", None)
+    assert field(resolved, "provider") == "ollama"
+    assert field(resolved, "model") == "llama3.1:8b"
 
-def test_bare_name_uses_config_and_other_prefix_uses_its_defaults(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
 
-    toml_text = (
+def test_bare_name_uses_config_and_other_prefix_uses_defaults(clean_env):
+    config_path = clean_env / "hotdocs.toml"
+    config_path.write_text(
         "[llm]\n"
-        + "provider = " + json.dumps("openai") + "\n"
-        + "model = " + json.dumps("gpt-6-astra") + "\n"
-        + "api_key_env = " + json.dumps("MY_KEY") + "\n"
-        + "timeout_seconds = 400\n"
+        "provider = " + json.dumps("openai") + "\n"
+        "model = " + json.dumps("gpt-6-astra") + "\n"
+        "api_key_env = " + json.dumps("MY_KEY") + "\n"
+        "timeout_seconds = 400\n"
     )
-    config_path = tmp_path / "hotdocs.toml"
-    config_path.write_text(toml_text, encoding="utf-8")
-
     config = llm_endpoint.load_config(config_path)
     assert config is not None
 
@@ -51,29 +55,28 @@ def test_bare_name_uses_config_and_other_prefix_uses_its_defaults(monkeypatch, t
     gem = llm_endpoint.resolve_provider("gemini:gemini-4-argon", config)
     assert field(gem, "provider") == "gemini"
     assert field(gem, "model") == "gemini-4-argon"
-    assert field(gem, "base_url") == "https://generativelanguage.googleapis.com"
     assert field(gem, "api_key_env") == "GEMINI_API_KEY"
+    assert field(gem, "base_url") == "https://generativelanguage.googleapis.com"
     assert field(gem, "timeout_seconds") == llm_endpoint.DEFAULT_TIMEOUT_SECONDS
+    assert field(gem, "timeout_seconds") == 600
 
 
 class _FakeResponse:
-    def __init__(self, body):
-        self._body = body
+    def __init__(self, payload):
+        self._payload = payload
 
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, *exc):
         return False
 
-    def read(self, *args, **kwargs):
-        return self._body
+    def read(self):
+        return self._payload
 
 
-def test_provider_gets_stripped_model_but_response_keeps_identifier(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
-
+def test_provider_gets_stripped_model_but_response_keeps_identifier(clean_env, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
     recorded = []
     reply = {
         "id": "msg_test",
@@ -86,32 +89,33 @@ def test_provider_gets_stripped_model_but_response_keeps_identifier(monkeypatch,
         "usage": {"input_tokens": 1, "output_tokens": 1},
     }
 
-    def recorder(request, timeout=None, *args, **kwargs):
+    def recorder(request, *args, **kwargs):
         recorded.append(request)
         return _FakeResponse(json.dumps(reply).encode("utf-8"))
 
     monkeypatch.setattr(urllib.request, "urlopen", recorder)
 
-    resp = llm_endpoint.complete("hi", "anthropic:claude-sonnet-5-5")
+    response = llm_endpoint.complete("hi", "anthropic:claude-sonnet-5-5")
 
     assert len(recorded) >= 1
-    data = recorded[-1].data
+    request = recorded[-1]
+    data = request.data if hasattr(request, "data") else None
+    assert data is not None
     if isinstance(data, bytes):
         data = data.decode("utf-8")
     body = json.loads(data)
     assert body["model"] == "claude-sonnet-5-5"
 
-    assert field(resp, "model") == "anthropic:claude-sonnet-5-5"
-    assert field(resp, "model_call_error") is None
+    assert field(response, "model") == "anthropic:claude-sonnet-5-5"
+    assert field(response, "backend") == "anthropic"
+    assert field(response, "model_call_error") is None
 
 
-def test_injected_backend_receives_identifier_unchanged(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    log_path = tmp_path / "backend.log"
+def test_injected_backend_receives_identifier_unchanged(clean_env):
+    seen = []
 
     def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(model + "\n")
+        seen.append(model)
         return {
             "text": "ok",
             "model": model,
@@ -119,8 +123,6 @@ def test_injected_backend_receives_identifier_unchanged(monkeypatch, tmp_path):
             "model_call_error": None,
         }
 
-    resp = llm_endpoint.complete("hi", "anthropic:claude-sonnet-5-5", backend=backend)
-
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert lines == ["anthropic:claude-sonnet-5-5"]
-    assert field(resp, "model") == "anthropic:claude-sonnet-5-5"
+    response = llm_endpoint.complete("hi", "anthropic:claude-sonnet-5-5", backend=backend)
+    assert seen == ["anthropic:claude-sonnet-5-5"]
+    assert field(response, "model") == "anthropic:claude-sonnet-5-5"

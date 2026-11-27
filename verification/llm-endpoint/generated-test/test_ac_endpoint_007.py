@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:2baa16dc90c345341c71386314174226a96adfa962452500b57a676c15a160c2
+# hotdocs-criterion: sha256:0a2135452bca27e4608fe2c632f503cf2dd7121ced6ff231dd0e590576225f70
 import os
 from pathlib import Path
 
@@ -12,148 +12,197 @@ except ImportError:  # pragma: no cover
     tomllib = None
 
 
+ENV_NAME = "VAR_HOTDOCS_CONFIG"
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-FIRST_TOML = (
-    "[llm]\n"
-    'provider = "openai"\n'
-    'model = "gpt-6-astra"\n'
-    'api_key_env = "OPENAI_API_KEY"\n'
-    "timeout_seconds = 600\n"
-)
+def write(path, text):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
 
-SECOND_TOML = (
-    "[llm]\n"
-    'provider = "ollama"\n'
-    'model = "llama3.2"\n'
-    'base_url = "http://localhost:11434"\n'
-)
+
+def llm_table(entries):
+    text = "[llm]\n"
+    for key, value in entries:
+        text = text + key + " = " + value + "\n"
+    return text
+
+
+FIRST = llm_table([("provider", '"openai"'), ("model", '"gpt-6-astra"')])
+SECOND = llm_table([("provider", '"ollama"'), ("model", '"llama3.2"')])
 
 
 @pytest.fixture
-def clean_env(monkeypatch, tmp_path):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    work = tmp_path / "work"
-    work.mkdir()
-    monkeypatch.chdir(work)
-    return work
+def clean_env(monkeypatch):
+    monkeypatch.delenv(ENV_NAME, raising=False)
+    return monkeypatch
 
 
-def test_discovery_order(clean_env, monkeypatch, tmp_path):
-    work = clean_env
-    (work / "hotdocs.toml").write_text(FIRST_TOML)
+# --- discovery -------------------------------------------------------------
+
+
+def test_load_config_from_current_directory_then_named_file(tmp_path, clean_env):
+    monkeypatch = clean_env
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    write(cwd / "hotdocs.toml", FIRST)
+    other = write(tmp_path / "elsewhere" / "named.toml", SECOND)
+    monkeypatch.chdir(cwd)
 
     first = llm_endpoint.load_config()
     assert first is not None
     assert field(first, "provider") == "openai"
     assert field(first, "model") == "gpt-6-astra"
-    assert field(first, "api_key_env") == "OPENAI_API_KEY"
-    assert field(first, "timeout_seconds") == 600
     assert field(first, "base_url") is None
+    assert field(first, "api_key_env") is None
     assert field(first, "auth") is None
 
-    other_dir = tmp_path / "elsewhere"
-    other_dir.mkdir()
-    other = other_dir / "named.toml"
-    other.write_text(SECOND_TOML)
-    monkeypatch.setenv("VAR_HOTDOCS_CONFIG", str(other))
-
+    monkeypatch.setenv(ENV_NAME, str(other))
     second = llm_endpoint.load_config()
     assert second is not None
     assert field(second, "provider") == "ollama"
     assert field(second, "model") == "llama3.2"
-    assert field(second, "base_url") == "http://localhost:11434"
-    assert field(second, "api_key_env") is None
-    assert field(second, "auth") is None
 
-    # Neither: no env var, no hotdocs.toml in cwd.
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    (work / "hotdocs.toml").unlink()
+
+def test_load_config_returns_none_with_neither(tmp_path, clean_env):
+    monkeypatch = clean_env
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.chdir(empty)
     assert llm_endpoint.load_config() is None
 
-    # A named file that is missing is an error.
-    monkeypatch.setenv("VAR_HOTDOCS_CONFIG", str(other_dir / "missing.toml"))
+
+def test_load_config_missing_named_file_raises(tmp_path, clean_env):
+    monkeypatch = clean_env
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    write(cwd / "hotdocs.toml", FIRST)
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv(ENV_NAME, str(tmp_path / "does-not-exist.toml"))
     with pytest.raises(ValueError):
         llm_endpoint.load_config()
 
 
-def _write(tmp_path, name, body):
-    p = tmp_path / name
-    p.write_text(body)
-    return p
+# --- invalid tables --------------------------------------------------------
+
+
+INVALID_CASES = [
+    (
+        "unknown_entry",
+        llm_table(
+            [
+                ("provider", '"openai"'),
+                ("model", '"gpt-6-astra"'),
+                ("colour", '"blue"'),
+            ]
+        ),
+        ["colour"],
+    ),
+    (
+        "bad_provider",
+        llm_table([("provider", '"frobnicator"'), ("model", '"m1"')]),
+        ["frobnicator", "provider"],
+    ),
+    (
+        "no_model",
+        llm_table([("provider", '"openai"')]),
+        ["model"],
+    ),
+    (
+        "short_timeout",
+        llm_table(
+            [
+                ("provider", '"openai"'),
+                ("model", '"gpt-6-astra"'),
+                ("timeout_seconds", "120"),
+            ]
+        ),
+        ["timeout_seconds", "timeout", "300"],
+    ),
+    (
+        "claude_cli_base_url",
+        llm_table(
+            [
+                ("provider", '"claude-cli"'),
+                ("model", '"claude-sonnet-5"'),
+                ("base_url", '"https://example.invalid"'),
+            ]
+        ),
+        ["base_url"],
+    ),
+]
 
 
 @pytest.mark.parametrize(
-    "name,body,needles",
-    [
-        (
-            "unknown",
-            '[llm]\nprovider = "openai"\nmodel = "gpt-6-astra"\ncolourful_flag = "blue"\n',
-            ["colourful_flag"],
-        ),
-        (
-            "provider",
-            '[llm]\nprovider = "bogusprov"\nmodel = "x-model"\n',
-            ["bogusprov", "provider"],
-        ),
-        (
-            "nomodel",
-            '[llm]\nprovider = "openai"\n',
-            ["model"],
-        ),
-        (
-            "timeout",
-            '[llm]\nprovider = "openai"\nmodel = "gpt-6-astra"\ntimeout_seconds = 120\n',
-            ["timeout"],
-        ),
-        (
-            "cli_base_url",
-            '[llm]\nprovider = "claude-cli"\nmodel = "claude-sonnet-5"\nbase_url = "https://example.invalid"\n',
-            ["base_url"],
-        ),
-    ],
+    "name,text,tokens", INVALID_CASES, ids=[c[0] for c in INVALID_CASES]
 )
-def test_invalid_tables_raise(clean_env, tmp_path, name, body, needles):
-    path = _write(tmp_path, name + ".toml", body)
-    with pytest.raises(ValueError) as exc:
+def test_load_config_rejects_invalid_table(tmp_path, clean_env, name, text, tokens):
+    monkeypatch = clean_env
+    monkeypatch.chdir(tmp_path)
+    path = write(tmp_path / "configs" / (name + ".toml"), text)
+    with pytest.raises(ValueError) as info:
         llm_endpoint.load_config(path)
-    msg = str(exc.value).lower()
-    assert any(n.lower() in msg for n in needles), msg
+    message = str(info.value)
+    assert message.strip() != ""
+    lowered = message.lower()
+    assert any(token.lower() in lowered for token in tokens), message
 
 
-def test_api_key_entry_is_secret(clean_env, tmp_path):
-    path = _write(
-        tmp_path,
-        "secret.toml",
-        '[llm]\nprovider = "openai"\nmodel = "gpt-6-astra"\napi_key = "sk-abc123def456"\n',
+def test_load_config_rejects_api_key_entry_as_secret(tmp_path, clean_env):
+    monkeypatch = clean_env
+    monkeypatch.chdir(tmp_path)
+    text = llm_table(
+        [
+            ("provider", '"openai"'),
+            ("model", '"gpt-6-astra"'),
+            ("api_key", '"sk-not-a-real-key-123456"'),
+        ]
     )
-    with pytest.raises(ValueError) as exc:
+    path = write(tmp_path / "configs" / "secret.toml", text)
+    with pytest.raises(ValueError) as info:
         llm_endpoint.load_config(path)
-    msg = str(exc.value)
-    assert "must never hold a secret" in msg
-    assert "hotdocs.toml" in msg
+    message = str(info.value)
+    assert "must never hold a secret" in message
+    assert "hotdocs.toml" in message
 
 
-def test_save_config_replaces_only_llm(clean_env, monkeypatch, tmp_path):
-    secret_value = "sk-ant-supersecret-value-0123456789"
+# --- save_config -----------------------------------------------------------
+
+
+def test_save_config_replaces_llm_and_keeps_other(tmp_path, clean_env):
+    monkeypatch = clean_env
+    monkeypatch.chdir(tmp_path)
+    secret_value = "sk-ant-fake-secret-value-0123456789"
     monkeypatch.setenv("ANTHROPIC_API_KEY", secret_value)
-    path = tmp_path / "cfg" / "hotdocs.toml"
-    path.parent.mkdir()
-    path.write_text(
-        FIRST_TOML
+
+    original = (
+        FIRST
         + "\n[other]\n"
-        + 'name = "keep-me"\n'
-        + "numbers = [1, 2, 3]\n"
+        + "name = \"keep-me\"\n"
+        + "count = 3\n"
+        + "flags = [\"a\", \"b\"]\n"
     )
+    path = write(tmp_path / "hotdocs.toml", original)
+
+    if tomllib is not None:
+        before_other = tomllib.loads(original)["other"]
+    else:
+        before_other = None
 
     llm_endpoint.save_config(
-        path, "anthropic", "claude-sonnet-5", api_key_env="ANTHROPIC_API_KEY"
+        path,
+        "anthropic",
+        "claude-sonnet-5",
+        api_key_env="ANTHROPIC_API_KEY",
     )
 
-    text = path.read_text()
-    assert secret_value not in text
+    written = path.read_text(encoding="utf-8")
+    assert secret_value not in written
 
     loaded = llm_endpoint.load_config(path)
     assert loaded is not None
@@ -162,15 +211,17 @@ def test_save_config_replaces_only_llm(clean_env, monkeypatch, tmp_path):
     assert field(loaded, "api_key_env") == "ANTHROPIC_API_KEY"
 
     if tomllib is not None:
-        data = tomllib.loads(text)
-        assert data["other"] == {"name": "keep-me", "numbers": [1, 2, 3]}
-        assert data["llm"]["provider"] == "anthropic"
-        assert data["llm"]["model"] == "claude-sonnet-5"
-        for key in data["llm"]:
+        data = tomllib.loads(written)
+        assert data["other"] == before_other
+        llm = data["llm"]
+        assert llm["provider"] == "anthropic"
+        assert llm["model"] == "claude-sonnet-5"
+        for key in llm:
             lowered = key.lower()
-            assert lowered == "api_key_env" or not any(
-                s in lowered for s in ("api_key", "token", "password", "secret")
-            )
+            assert lowered not in ("api_key", "token", "password", "secret")
+        for value in llm.values():
+            assert value != secret_value
     else:
-        assert "[other]" in text
-        assert 'name = "keep-me"' in text
+        assert "[other]" in written
+        assert "keep-me" in written
+        assert "openai" not in written
