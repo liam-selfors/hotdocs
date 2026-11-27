@@ -5,7 +5,7 @@ Kind: generated-test
 
 ```gherkin
 Given capabilities P-ONE, P-TWO and P-THREE, comp-a with
-  realizes ["P-ONE"] (the item quoted), comp-b with no relations, comp-c
+  realizes [P-ONE], comp-b with no relations, comp-c
   with depends_on [comp-b], and comp-d with no relations
 When build_corpus_graph runs
 Then aggregates.orphan_capability_rate is 2/3 and

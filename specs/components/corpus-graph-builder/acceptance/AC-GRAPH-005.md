@@ -5,7 +5,7 @@ Kind: generated-test
 
 ```gherkin
 Given vars VAR-ONE, VAR-TWO and VAR-THREE and comp-a with uses_var
-  ['VAR-ONE'] (the item single-quoted)
+  [VAR-ONE]
 When build_corpus_graph runs
 Then aggregates.orphan_var_rate is 2/3
 
