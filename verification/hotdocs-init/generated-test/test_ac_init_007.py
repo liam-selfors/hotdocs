@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:7ed516fdba39ea58c01f005704ccdd8edd7941a5f62e3ae70ae25c7090c328ed
+# hotdocs-criterion: sha256:1eddf897979c763a19d10fbd5f22a151d9d6dac8f54cdfe4b333a9189af99587
 import importlib.metadata
 import inspect
 import os
@@ -9,62 +9,52 @@ import pytest
 import hotdocs_init
 
 
-SECRET = "sk-" + "abc123"
+SECRET = "sk-abc123"
 
-PROVIDERS = {
-    "claude-cli": {
-        "default_base_url": None,
-        "default_api_key_env": None,
-        "needs_base_url": False,
-        "suggested_model": "claude-sonnet-5",
-    },
-    "anthropic": {
-        "default_base_url": "https://api.anthropic.com",
-        "default_api_key_env": "ANTHROPIC_API_KEY",
-        "needs_base_url": False,
-        "suggested_model": "claude-sonnet-5",
-    },
-    "openai": {
-        "default_base_url": "https://api.openai.com/v1",
-        "default_api_key_env": "OPENAI_API_KEY",
-        "needs_base_url": False,
-        "suggested_model": "gpt-6-astra",
-    },
-    "openai-compatible": {
-        "default_base_url": None,
-        "default_api_key_env": None,
-        "needs_base_url": True,
-        "suggested_model": "",
-    },
-    "gemini": {
-        "default_base_url": "https://generativelanguage.googleapis.com",
-        "default_api_key_env": "GEMINI_API_KEY",
-        "needs_base_url": False,
-        "suggested_model": "gemini-4-argon",
-    },
-    "ollama": {
-        "default_base_url": "http://localhost:11434",
-        "default_api_key_env": None,
-        "needs_base_url": False,
-        "suggested_model": "llama3.2",
-    },
-}
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
 
 FAKE_BODY = '''
+import json
+import tomllib
+from pathlib import Path
 
-def _log(name):
-    with open(_LOG, "a", encoding="utf-8") as fh:
-        fh.write(name + "\\n")
+
+def _log(name, **kw):
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps([name, {k: repr(v) for k, v in kw.items()}]) + "\\n")
+
+
+PROVIDERS = {
+    "claude-cli": {"default_base_url": None, "default_api_key_env": None,
+                   "needs_base_url": False, "suggested_model": "claude-sonnet-5"},
+    "anthropic": {"default_base_url": "https://api.anthropic.com",
+                  "default_api_key_env": "ANTHROPIC_API_KEY",
+                  "needs_base_url": False, "suggested_model": "claude-sonnet-5"},
+    "openai": {"default_base_url": "https://api.openai.com/v1",
+               "default_api_key_env": "OPENAI_API_KEY",
+               "needs_base_url": False, "suggested_model": "gpt-6-astra"},
+    "openai-compatible": {"default_base_url": None, "default_api_key_env": None,
+                          "needs_base_url": True, "suggested_model": ""},
+    "gemini": {"default_base_url": "https://generativelanguage.googleapis.com",
+               "default_api_key_env": "GEMINI_API_KEY",
+               "needs_base_url": False, "suggested_model": "gemini-4-argon"},
+    "ollama": {"default_base_url": "http://localhost:11434", "default_api_key_env": None,
+               "needs_base_url": False, "suggested_model": "llama3.2"},
+}
 
 
 def detect_providers(env=None, probe_ollama=True):
-    _log("detect_providers")
+    _log("detect_providers", env_given=env is not None, probe_ollama=probe_ollama)
     out = []
     for name, info in PROVIDERS.items():
+        available = name == "openai"
         out.append({
             "provider": name,
-            "available": True,
-            "reason": "fake",
+            "available": available,
+            "reason": "key set" if available else "not configured",
             "suggested_model": info["suggested_model"],
             "api_key_env": info["default_api_key_env"],
         })
@@ -73,7 +63,8 @@ def detect_providers(env=None, probe_ollama=True):
 
 def check_connection(provider, model, base_url=None, api_key_env=None,
                      timeout_seconds=30, auth=None):
-    _log("check_connection")
+    _log("check_connection", provider=provider, model=model, base_url=base_url,
+         api_key_env=api_key_env, timeout_seconds=timeout_seconds, auth=auth)
     if provider not in PROVIDERS:
         raise ValueError("unknown provider")
     if PROVIDERS[provider]["needs_base_url"] and not base_url:
@@ -81,13 +72,13 @@ def check_connection(provider, model, base_url=None, api_key_env=None,
     return {"ok": True, "error": None}
 
 
-def save_config(config_path, provider, model, base_url=None,
-                api_key_env=None, timeout_seconds=None, auth=None):
-    _log("save_config")
-    if provider not in PROVIDERS:
-        raise ValueError("unknown provider")
-    if not model:
-        raise ValueError("model required")
+def save_config(config_path, provider, model, base_url=None, api_key_env=None,
+                timeout_seconds=None, auth=None):
+    _log("save_config", config_path=str(config_path), provider=provider, model=model,
+         base_url=base_url, api_key_env=api_key_env,
+         timeout_seconds=timeout_seconds, auth=auth)
+    if provider not in PROVIDERS or not model:
+        raise ValueError("invalid config")
     path = Path(config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     kept = []
@@ -97,26 +88,24 @@ def save_config(config_path, provider, model, base_url=None,
             stripped = line.strip()
             if stripped.startswith("["):
                 in_llm = stripped == "[llm]"
-                if in_llm:
-                    continue
             if not in_llm:
                 kept.append(line)
-    lines = ["[llm]"]
-    values = [("provider", provider), ("model", model), ("base_url", base_url),
-              ("api_key_env", api_key_env), ("timeout_seconds", timeout_seconds),
-              ("auth", auth)]
-    for key, value in values:
-        if value is not None:
-            lines.append(key + " = " + json.dumps(value))
-    text = "\\n".join(lines) + "\\n"
-    if kept:
-        text = "\\n".join(kept) + "\\n\\n" + text
-    path.write_text(text, encoding="utf-8")
+    lines = kept + ["[llm]", "provider = " + json.dumps(provider),
+                    "model = " + json.dumps(model)]
+    if base_url is not None:
+        lines.append("base_url = " + json.dumps(base_url))
+    if api_key_env is not None:
+        lines.append("api_key_env = " + json.dumps(api_key_env))
+    if timeout_seconds is not None:
+        lines.append("timeout_seconds = " + str(int(timeout_seconds)))
+    if auth is not None:
+        lines.append("auth = " + json.dumps(auth))
+    path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
 
 
 def load_config(config_path=None):
-    _log("load_config")
-    path = Path(config_path) if config_path is not None else Path("hotdocs.toml")
+    _log("load_config", config_path=str(config_path))
+    path = Path(config_path) if config_path is not None else Path.cwd() / "hotdocs.toml"
     if not path.is_file():
         return None
     try:
@@ -126,67 +115,51 @@ def load_config(config_path=None):
     llm = data.get("llm")
     if llm is None:
         return None
-    keys = ["provider", "model", "base_url", "api_key_env", "timeout_seconds", "auth"]
-    return {k: llm.get(k) for k in keys}
+    return {k: llm.get(k) for k in
+            ("provider", "model", "base_url", "api_key_env", "timeout_seconds", "auth")}
 '''
 
 
-def make_setup(tmp_path, name):
-    base = tmp_path / name
-    tool = base / "tool"
-    proj = base / "proj"
-    logs = base / "logs"
-    for d in (tool, proj, logs):
-        d.mkdir(parents=True)
-    log_path = logs / "calls.log"
+def make_env(tmp_path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log = log_dir / "llm_calls.log"
+
+    tool = tmp_path / "tool"
     ep = tool / "gen" / "llm-endpoint"
     ep.mkdir(parents=True)
-    source = (
-        "import json\n"
-        "import tomllib\n"
-        "from pathlib import Path\n\n"
-        "_LOG = " + repr(str(log_path)) + "\n"
-        "PROVIDERS = " + repr(PROVIDERS) + "\n"
-        + FAKE_BODY
-    )
-    (ep / "llm_endpoint.py").write_text(source, encoding="utf-8")
+    (ep / "llm_endpoint.py").write_text("LOG = " + repr(str(log)) + "\n" + FAKE_BODY,
+                                        encoding="utf-8")
     slugs = tool / "examples" / "slugify" / "specs" / "product"
     slugs.mkdir(parents=True)
-    (slugs / "slugs.md").write_text("# Slugs\n\nA fake product spec.\n", encoding="utf-8")
+    (slugs / "slugs.md").write_text("# Slugs\n\nTurn titles into slugs.\n", encoding="utf-8")
     (tool / "requirements.txt").write_text(
-        "pytest==" + importlib.metadata.version("pytest") + "\n", encoding="utf-8"
-    )
+        "pytest==" + importlib.metadata.version("pytest") + "\n", encoding="utf-8")
     (tool / "pyproject.toml").write_text(
-        "[project]\n" + "name = " + '"hotdocs"' + "\n" + "version = " + '"9.8.7a1"' + "\n",
-        encoding="utf-8",
-    )
-    return tool, proj, log_path
+        '[project]\nname = "hotdocs"\nversion = "9.8.7a1"\n', encoding="utf-8")
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    return tool, proj, log
 
 
-def snapshot(root, skip_pycache=False):
-    result = {}
+def snapshot(root, exclude):
+    files = {}
+    dirs = set()
     for p in sorted(Path(root).rglob("*")):
-        rel = p.relative_to(root)
-        if skip_pycache and "__pycache__" in rel.parts:
+        if "__pycache__" in p.parts:
             continue
-        if p.is_file():
-            result[str(rel)] = p.read_bytes()
+        if any(p == e or e in p.parents for e in exclude):
+            continue
+        rel = str(p.relative_to(root))
+        if p.is_dir():
+            dirs.add(rel)
         else:
-            result[str(rel)] = None
-    return result
+            files[rel] = p.read_bytes()
+    return files, dirs
 
 
-def fake_env():
-    env = {"OPENAI_API_KEY": "placeholder-value"}
-    if "PATH" in os.environ:
-        env["PATH"] = os.environ["PATH"]
-    return env
-
-
-def call_run(tmp_path, name, argv, capsys):
-    tool, proj, log_path = make_setup(tmp_path, name)
-    before_proj = snapshot(proj)
-    before_tool = snapshot(tool, skip_pycache=True)
+def call_run(argv, tool, cwd, env, capsys):
     outputs = []
     prompts = []
 
@@ -198,28 +171,15 @@ def call_run(tmp_path, name, argv, capsys):
         return ""
 
     capsys.readouterr()
-    code = hotdocs_init.run(
-        argv,
-        tool_root=tool,
-        input_fn=input_fn,
-        output_fn=output_fn,
-        env=fake_env(),
-        cwd=proj,
-    )
+    rc = hotdocs_init.run(argv, tool_root=tool, input_fn=input_fn,
+                          output_fn=output_fn, env=env, cwd=cwd)
     captured = capsys.readouterr()
-    after_proj = snapshot(proj)
-    after_tool = snapshot(tool, skip_pycache=True)
-    log_text = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
-    all_text = "\n".join(outputs + prompts + [captured.out, captured.err])
-    return {
-        "code": code,
-        "proj_unchanged": before_proj == after_proj,
-        "tool_unchanged": before_tool == after_tool,
-        "log": log_text,
-        "text": all_text,
-        "err": captured.err,
-        "proj": proj,
-    }
+    text = "\n".join(outputs + prompts + [captured.out, captured.err])
+    return rc, text
+
+
+def base_env():
+    return {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
 
 
 USAGE_CASES = [
@@ -228,6 +188,7 @@ USAGE_CASES = [
     ["a", "b"],
     ["--provider", "nope"],
     ["--provider=openai", "--model"],
+    ["--provider", "openai", "--api-key-env", SECRET],
     ["--provider", "openai", "--api-key-env", "9X"],
     ["--provider", "claude-cli", "--base-url", "http://h"],
     ["--provider", "claude-cli", "--api-key-env", "K"],
@@ -238,80 +199,61 @@ USAGE_CASES = [
 ]
 
 
-@pytest.mark.parametrize("argv", USAGE_CASES, ids=[" ".join(a) for a in USAGE_CASES])
+@pytest.mark.parametrize("argv", USAGE_CASES, ids=lambda a: " ".join(a))
 def test_usage_errors_return_2_and_write_nothing(tmp_path, capsys, argv):
-    res = call_run(tmp_path, "case", list(argv), capsys)
-    assert res["code"] == 2
-    assert res["proj_unchanged"], "something was written under <dir>"
-    assert res["tool_unchanged"], "something was written under the tool root"
-    assert "save_config" not in res["log"]
+    tool, proj, log = make_env(tmp_path)
+    exclude = [tmp_path / "logs"]
+    before = snapshot(tmp_path, exclude)
+
+    rc, text = call_run(list(argv), tool, proj, base_env(), capsys)
+
+    assert rc == 2
+    after = snapshot(tmp_path, exclude)
+    assert after == before, "a usage error wrote something"
+    assert not (proj / "a").exists()
+    assert not (proj / "b").exists()
+    assert list(proj.iterdir()) == []
+
+    if argv == ["--provider", "nope"]:
+        for key in ("claude-cli", "anthropic", "openai", "openai-compatible",
+                    "gemini", "ollama"):
+            assert key in text, "the 'nope' message does not list " + key
+
+    if SECRET in argv:
+        assert SECRET not in text
+        for p in tmp_path.rglob("*"):
+            if p.is_file():
+                assert SECRET.encode() not in p.read_bytes(), str(p)
 
 
-def test_unknown_provider_message_lists_keys(tmp_path, capsys):
-    res = call_run(tmp_path, "nope", ["--provider", "nope"], capsys)
-    assert res["code"] == 2
-    assert res["proj_unchanged"]
-    for key in PROVIDERS:
-        assert key in res["text"], key
+SUCCESS_ARGVS = []
+for _form in ("split", "equals"):
+    _prov = ["--provider", "openai"] if _form == "split" else ["--provider=openai"]
+    for _order in ("provider_first", "yes_first"):
+        _flags = _prov + ["--yes"] if _order == "provider_first" else ["--yes"] + _prov
+        for _dir_pos in ("last", "first"):
+            SUCCESS_ARGVS.append((_form + "-" + _order + "-dir_" + _dir_pos, _flags, _dir_pos))
 
 
-def test_secret_like_api_key_env_is_never_echoed(tmp_path, capsys):
-    res = call_run(
-        tmp_path, "secret", ["--provider", "openai", "--api-key-env", SECRET], capsys
-    )
-    assert res["code"] == 2
-    assert res["proj_unchanged"]
-    assert res["tool_unchanged"]
-    assert "save_config" not in res["log"]
-    assert SECRET not in res["text"]
-    assert SECRET not in res["log"]
-
-
-def test_invalid_api_key_env_digit_start_not_echoed(tmp_path, capsys):
-    res = call_run(tmp_path, "digit", ["--provider", "openai", "--api-key-env", "9X"], capsys)
-    assert res["code"] == 2
-    assert res["proj_unchanged"]
-    assert SECRET not in res["text"]
-
-
-SUCCESS_ORDERS = [
-    lambda d: ["--provider", "openai", "--yes", d],
-    lambda d: ["--yes", "--provider", "openai", d],
-    lambda d: [d, "--provider", "openai", "--yes"],
-    lambda d: ["--provider=openai", "--yes", d],
-    lambda d: ["--yes", "--provider=openai", d],
-    lambda d: [d, "--yes", "--provider=openai"],
-]
-
-
-@pytest.mark.parametrize("index", range(len(SUCCESS_ORDERS)))
-def test_valid_provider_and_yes_returns_0(tmp_path, capsys, index):
-    tool, proj, log_path = make_setup(tmp_path, "ok")
-    argv = SUCCESS_ORDERS[index](str(proj))
-
-    def input_fn(prompt=""):
-        return ""
-
-    def output_fn(*args, **kwargs):
-        pass
-
-    code = hotdocs_init.run(
-        argv,
-        tool_root=tool,
-        input_fn=input_fn,
-        output_fn=output_fn,
-        env=fake_env(),
-        cwd=proj,
-    )
-    assert code == 0
-
-
-def test_main_signature_and_usage_error(tmp_path, monkeypatch, capsys):
-    params = list(inspect.signature(hotdocs_init.main).parameters)
-    assert params == ["argv"]
+@pytest.mark.parametrize("case", SUCCESS_ARGVS, ids=lambda c: c[0])
+def test_provider_openai_yes_returns_0(tmp_path, capsys, case):
+    _, flags, dir_pos = case
+    tool, proj, log = make_env(tmp_path)
     work = tmp_path / "work"
     work.mkdir()
-    monkeypatch.chdir(work)
-    before = snapshot(work)
-    assert hotdocs_init.main(["--bogus"]) == 2
-    assert snapshot(work) == before
+    env = dict(os.environ)
+    env["OPENAI_API_KEY"] = "placeholder-value"
+    target = str(proj)
+    argv = list(flags) + [target] if dir_pos == "last" else [target] + list(flags)
+
+    rc, text = call_run(argv, tool, work, env, capsys)
+
+    assert rc == 0, text
+
+
+def test_main_signature_and_usage_error(capsys):
+    params = list(inspect.signature(hotdocs_init.main).parameters)
+    assert params == ["argv"]
+    rc = hotdocs_init.main(["--bogus"])
+    capsys.readouterr()
+    assert rc == 2
