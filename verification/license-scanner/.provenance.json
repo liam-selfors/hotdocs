@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:68e5de0754e83cb06652b345ee3c95ee62390aa2c5b2313a99f41149eff3a6fd",
+  "spec_bundle_hash": "sha256:131204b5e6eaf23e7525cb54688eb7cf684711519e569bdadf4305de8787c514",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -13,17 +13,17 @@
   },
   "attempts": 1,
   "attempt_history": [],
-  "pipeline_version": "v3",
+  "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
-    "verifier": "verifier-orchestrator@3.5.0",
+    "verifier": "verifier-orchestrator@4.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-25T07:40:29Z",
+  "generated_at": "2026-11-27T05:06:50Z",
   "verification_run_id": "license-scanner-attempt-1",
   "verification_report": {
     "component_id": "comp-license-scanner",
@@ -32,97 +32,193 @@
         "id": "AC-LICENSE-001",
         "covers": "R-LICENSE-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-002",
         "covers": "R-LICENSE-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-003",
         "covers": "R-LICENSE-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-003b",
         "covers": "R-LICENSE-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-003c",
         "covers": "R-LICENSE-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-004",
         "covers": "R-LICENSE-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-005",
         "covers": "R-LICENSE-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-006",
         "covers": "R-LICENSE-006",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-007",
         "covers": "R-LICENSE-007",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-008",
         "covers": "R-LICENSE-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-009",
         "covers": "R-LICENSE-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-010",
         "covers": "R-LICENSE-008",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-011",
         "covers": "R-LICENSE-009",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-012",
         "covers": "R-LICENSE-010",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-013",
         "covers": "R-LICENSE-011",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-014",
         "covers": "R-LICENSE-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-LICENSE-015",
@@ -152,7 +248,7 @@
       "R-LICENSE-012": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8157894736842105,
+    "mutation_score": 0.8676470588235294,
     "mutation_error": null,
     "assets": [
       {
@@ -167,6 +263,7 @@
         "lockfile_sha256": null
       }
     ],
+    "drivers": [],
     "overall": "pass"
   },
   "license_scan": {

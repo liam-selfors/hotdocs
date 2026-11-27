@@ -1,273 +1,246 @@
-# hotdocs-criterion: sha256:719c723074ae2cdb5d6cf9d15a16ae9ea87b4b36eaf6dd26a5d65b6092f41110
+# hotdocs-criterion: sha256:796e9682a8aafa0770e1a806f5924ebb6accb860d1a1ade1ba0491d6f47b6e3b
 import hashlib
 import json
+import os
 from pathlib import Path
-
-import pytest
 
 import license_scanner
 
 
-COMPONENT_ID = "comp-foo"
-COMPONENT_SLUG = "foo"
+COMPONENT_ID = "comp-sample"
+COMPONENT_SLUG = "sample"
+ENV = "VAR_LICENSE_CORPUS_PATH"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _fake_cache_manager_source(log_path):
-    lines = [
-        "import dataclasses",
-        "",
-        "LOG = " + repr(str(log_path)),
-        "",
-        "",
-        "def _log(name):",
-        "    with open(LOG, 'a') as f:",
-        "        f.write(name + '\\n')",
-        "",
-        "",
-        "@dataclasses.dataclass",
-        "class CacheKey:",
-        "    spec_bundle_hash: str",
-        "    gate_inputs_hash: str",
-        "    gate_version: str",
-        "    model_pin: str",
-        "",
-        "    def __post_init__(self):",
-        "        _log('CacheKey')",
-        "",
-        "",
-        "@dataclasses.dataclass",
-        "class CachedResult:",
-        "    gate_type: str",
-        "    payload: dict",
-        "    stored_at: str",
-        "",
-        "    def __post_init__(self):",
-        "        _log('CachedResult')",
-        "",
-        "",
-        "class Miss:",
-        "    def __eq__(self, other):",
-        "        return isinstance(other, Miss)",
-        "",
-        "    def __hash__(self):",
-        "        return 0",
-        "",
-        "",
-        "class SchemaValidationError(ValueError):",
-        "    pass",
-        "",
-        "",
-        "def get(cache_key, *, repo_root=None):",
-        "    _log('get')",
-        "    return Miss()",
-        "",
-        "",
-        "def put(cache_key, result, *, repo_root=None):",
-        "    _log('put')",
-        "    return None",
-        "",
-        "",
-        "def now_iso():",
-        "    _log('now_iso')",
-        "    import datetime",
-        "    return datetime.datetime.now(datetime.timezone.utc).strftime("
-        + repr("%Y-%m-%dT%H:%M:%SZ")
-        + ")",
-        "",
-        "",
-        "def stats(*, repo_root=None):",
-        "    _log('stats')",
-        "    return " + repr({"entry_count": 0}),
-        "",
-        "",
-        "def main(argv=None):",
-        "    _log('main')",
-        "    return 0",
-        "",
-    ]
-    return "\n".join(lines)
+def write_fake_cache_manager(repo_root, log_path):
+    base = Path(repo_root) / "gen" / "cache-manager"
+    base.mkdir(parents=True, exist_ok=True)
+    src = (
+        "import dataclasses\n"
+        "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "def _log(name):\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(name + '\\n')\n"
+        "\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class CacheKey:\n"
+        "    spec_bundle_hash: str\n"
+        "    gate_inputs_hash: str\n"
+        "    gate_version: str\n"
+        "    model_pin: str\n"
+        "\n"
+        "    def __post_init__(self):\n"
+        "        _log('CacheKey')\n"
+        "\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class CachedResult:\n"
+        "    gate_type: str\n"
+        "    payload: dict\n"
+        "    stored_at: str\n"
+        "\n"
+        "    def __post_init__(self):\n"
+        "        _log('CachedResult')\n"
+        "\n"
+        "\n"
+        "class Miss:\n"
+        "    def __eq__(self, other):\n"
+        "        return isinstance(other, Miss)\n"
+        "\n"
+        "    def __hash__(self):\n"
+        "        return hash('Miss')\n"
+        "\n"
+        "\n"
+        "class SchemaValidationError(ValueError):\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "def get(cache_key, *, repo_root=None):\n"
+        "    _log('get')\n"
+        "    return Miss()\n"
+        "\n"
+        "\n"
+        "def put(cache_key, result, *, repo_root=None):\n"
+        "    _log('put')\n"
+        "    return None\n"
+        "\n"
+        "\n"
+        "def now_iso():\n"
+        "    _log('now_iso')\n"
+        "    return '2026-01-01T00:00:00Z'\n"
+        "\n"
+        "\n"
+        "def stats(*, repo_root=None):\n"
+        "    _log('stats')\n"
+        "    return {'entry_count': 0}\n"
+    )
+    (base / "cache_manager.py").write_text(src, encoding="utf-8")
 
 
-def _write_fake_cache_manager(repo_root, log_path):
-    d = repo_root / "gen" / "cache-manager"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "cache_manager.py").write_text(_fake_cache_manager_source(log_path))
-
-
-def _write_component(repo_root):
-    d = repo_root / "gen" / COMPONENT_SLUG
-    d.mkdir(parents=True, exist_ok=True)
+def write_component(repo_root):
+    comp_dir = Path(repo_root) / "gen" / COMPONENT_SLUG
+    comp_dir.mkdir(parents=True, exist_ok=True)
     src = (
         "def compute_total(items, factor):\n"
         "    total = 0\n"
         "    for item in items:\n"
-        "        total = total + item * factor + 1\n"
+        "        total = total + item * factor\n"
         "    return total\n"
+        "\n"
+        "\n"
+        "def describe(name, count):\n"
+        "    return name + ' has ' + str(count) + ' entries in total now'\n"
     )
-    (d / "foo.py").write_text(src)
+    (comp_dir / "sample.py").write_text(src, encoding="utf-8")
 
 
-def _corpus(version, n_entries=1):
+def make_corpus(version, n_entries=1):
     entries = []
     for i in range(n_entries):
         entries.append(
             {
                 "reference_id": "ref-" + str(i + 1).zfill(3),
-                "license_family": "MIT",
-                "risk_tier": "low",
-                "hashes": [hashlib.sha256(("x" + str(i)).encode("utf-8")).hexdigest()],
+                "license_family": "GPL",
+                "risk_tier": "high",
+                "hashes": [hashlib.sha256(("window-" + str(i)).encode("utf-8")).hexdigest()],
             }
         )
-    return {"corpus_version": version, "block_threshold": 0.7, "entries": entries}
+    return {"corpus_version": version, "block_threshold": 0.70, "entries": entries}
 
 
-def _read_log(log_path):
-    if not log_path.exists():
-        return []
-    return [line for line in log_path.read_text().splitlines() if line.strip()]
+def write_corpus(path, corpus):
+    Path(path).write_text(json.dumps(corpus, indent=2), encoding="utf-8")
+
+
+def expected_usable_version(path, version):
+    h = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]
+    return "license_scanner@4.0." + str(version) + "+" + h
+
+
+def setup_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "cache_calls.log"
+    write_fake_cache_manager(repo_root, log_path)
+    write_component(repo_root)
+    return repo_root, log_path
+
+
+def test_gate_version_matches_scan_for_usable_corpus(tmp_path, monkeypatch):
+    repo_root, _ = setup_repo(tmp_path)
+    corpus_path = tmp_path / "corpus.json"
+    write_corpus(corpus_path, make_corpus(4))
+    monkeypatch.setenv(ENV, str(corpus_path))
+
+    gv = license_scanner.gate_version(repo_root)
+    result = license_scanner.scan(COMPONENT_ID, repo_root)
+
+    assert isinstance(gv, str)
+    assert gv == field(result, "gate_version")
+    assert gv == expected_usable_version(corpus_path, 4)
+
+
+def test_gate_version_changes_with_corpus_version_and_content(tmp_path, monkeypatch):
+    repo_root, _ = setup_repo(tmp_path)
+    corpus_path = tmp_path / "corpus.json"
+    write_corpus(corpus_path, make_corpus(4))
+    monkeypatch.setenv(ENV, str(corpus_path))
+
+    before = license_scanner.gate_version(repo_root)
+
+    # corpus_version changed to 5
+    write_corpus(corpus_path, make_corpus(5))
+    after_version_bump = license_scanner.gate_version(repo_root)
+    assert isinstance(after_version_bump, str)
+    assert after_version_bump != before
+    assert after_version_bump == field(license_scanner.scan(COMPONENT_ID, repo_root), "gate_version")
+
+    # separately: restore version 4, then add an entry with corpus_version unchanged
+    write_corpus(corpus_path, make_corpus(4))
+    baseline = license_scanner.gate_version(repo_root)
+    assert baseline == before
+    write_corpus(corpus_path, make_corpus(4, n_entries=2))
+    after_entry_added = license_scanner.gate_version(repo_root)
+    assert isinstance(after_entry_added, str)
+    assert after_entry_added != baseline
+    assert after_entry_added == field(license_scanner.scan(COMPONENT_ID, repo_root), "gate_version")
+
+
+def test_gate_version_matches_scan_when_no_usable_corpus(tmp_path, monkeypatch):
+    repo_root, _ = setup_repo(tmp_path)
+
+    observed = []
+
+    # unset
+    monkeypatch.delenv(ENV, raising=False)
+    gv_unset = license_scanner.gate_version(repo_root)
+    res_unset = license_scanner.scan(COMPONENT_ID, repo_root)
+    assert gv_unset == field(res_unset, "gate_version")
+    assert gv_unset == "license_scanner@4.0.0-no-reference-corpus"
+    observed.append(gv_unset)
+
+    # set to a missing file
+    missing = tmp_path / "does-not-exist.json"
+    assert not missing.exists()
+    monkeypatch.setenv(ENV, str(missing))
+    gv_missing = license_scanner.gate_version(repo_root)
+    res_missing = license_scanner.scan(COMPONENT_ID, repo_root)
+    assert gv_missing == field(res_missing, "gate_version")
+    assert gv_missing == "license_scanner@4.0.0-corpus-unreadable"
+    observed.append(gv_missing)
+
+    # set to an invalid corpus
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text(json.dumps({"corpus_version": 4, "entries": "not-a-list"}), encoding="utf-8")
+    monkeypatch.setenv(ENV, str(invalid))
+    gv_invalid = license_scanner.gate_version(repo_root)
+    res_invalid = license_scanner.scan(COMPONENT_ID, repo_root)
+    assert gv_invalid == field(res_invalid, "gate_version")
+    assert gv_invalid == "license_scanner@4.0.0-corpus-invalid"
+    observed.append(gv_invalid)
+
+    assert all(isinstance(v, str) for v in observed)
+    assert len(set(observed)) == 3
 
 
 def _snapshot(root):
-    snap = {}
-    if not root.exists():
-        return snap
-    for p in sorted(root.rglob("*")):
-        rel = str(p.relative_to(root))
-        if "__pycache__" in rel:
-            continue
-        if p.is_file():
-            snap[rel] = p.read_bytes()
-        else:
-            snap[rel] = None
-    return snap
+    out = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            p = Path(dirpath) / name
+            out[str(p)] = p.read_bytes()
+    return out
 
 
-@pytest.fixture
-def env(monkeypatch):
-    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    return monkeypatch
-
-
-@pytest.fixture
-def setup(tmp_path, env):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "cache_calls.log"
-    _write_fake_cache_manager(repo_root, log_path)
-    _write_component(repo_root)
+def test_gate_version_without_gen_dir_never_touches_cache_manager(tmp_path, monkeypatch):
     corpus_path = tmp_path / "corpus.json"
-    return repo_root, log_path, corpus_path
+    write_corpus(corpus_path, make_corpus(4))
+    monkeypatch.setenv(ENV, str(corpus_path))
 
+    # Literal case: repo_root with no gen/ directory at all.
+    bare_root = tmp_path / "bare"
+    bare_root.mkdir()
+    before_bare = _snapshot(bare_root)
+    gv_bare = license_scanner.gate_version(bare_root)
+    assert isinstance(gv_bare, str)
+    assert not (bare_root / "gen").exists()
+    assert _snapshot(bare_root) == before_bare
 
-def _gate_version_no_cache_calls(repo_root, log_path):
-    before = len(_read_log(log_path))
-    gv = license_scanner.gate_version(repo_root)
-    after = len(_read_log(log_path))
-    assert after == before, "gate_version must not call cache-manager"
-    assert isinstance(gv, str)
-    return gv
-
-
-def test_gate_version_matches_scan_for_usable_corpus(setup, env):
-    repo_root, log_path, corpus_path = setup
-    corpus_path.write_text(json.dumps(_corpus(4)))
-    env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-
-    gv = _gate_version_no_cache_calls(repo_root, log_path)
-    result = license_scanner.scan(COMPONENT_ID, repo_root)
-
-    assert gv == field(result, "gate_version")
-    assert gv.startswith("license_scanner@4.0.4+")
-
-
-def test_gate_version_changes_on_version_bump_and_on_entry_added(setup, env):
-    repo_root, log_path, corpus_path = setup
-    corpus_path.write_text(json.dumps(_corpus(4)))
-    env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-
-    gv1 = _gate_version_no_cache_calls(repo_root, log_path)
-
-    corpus_path.write_text(json.dumps(_corpus(5)))
-    gv2 = _gate_version_no_cache_calls(repo_root, log_path)
-    assert gv2 != gv1
-
-    corpus_path.write_text(json.dumps(_corpus(5, n_entries=2)))
-    gv3 = _gate_version_no_cache_calls(repo_root, log_path)
-    assert gv3 != gv2
-    assert gv3 != gv1
-
-    result = license_scanner.scan(COMPONENT_ID, repo_root)
-    assert field(result, "gate_version") == gv3
-
-
-def test_gate_version_matches_scan_without_usable_corpus(setup, env, tmp_path):
-    repo_root, log_path, corpus_path = setup
-
-    versions = []
-
-    # Unset
-    env.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
-    gv = _gate_version_no_cache_calls(repo_root, log_path)
-    result = license_scanner.scan(COMPONENT_ID, repo_root)
-    assert gv == field(result, "gate_version")
-    versions.append(gv)
-
-    # Missing file
-    missing = tmp_path / "does-not-exist.json"
-    assert not missing.exists()
-    env.setenv("VAR_LICENSE_CORPUS_PATH", str(missing))
-    gv = _gate_version_no_cache_calls(repo_root, log_path)
-    result = license_scanner.scan(COMPONENT_ID, repo_root)
-    assert gv == field(result, "gate_version")
-    versions.append(gv)
-
-    # Invalid corpus (no entries list)
-    invalid = tmp_path / "invalid.json"
-    invalid.write_text(json.dumps({"corpus_version": 4, "block_threshold": 0.7}))
-    env.setenv("VAR_LICENSE_CORPUS_PATH", str(invalid))
-    gv = _gate_version_no_cache_calls(repo_root, log_path)
-    result = license_scanner.scan(COMPONENT_ID, repo_root)
-    assert gv == field(result, "gate_version")
-    versions.append(gv)
-
-    assert len(set(versions)) == 3, versions
-
-
-def test_gate_version_never_calls_cache_manager_or_writes(tmp_path, env):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "cache_calls.log"
-    # Only the faked cache-manager lives under gen/; no component files.
-    _write_fake_cache_manager(repo_root, log_path)
-    corpus_path = tmp_path / "corpus.json"
-    corpus_path.write_text(json.dumps(_corpus(4)))
-    env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-
-    before = _snapshot(repo_root)
-    gv = license_scanner.gate_version(repo_root)
-    after = _snapshot(repo_root)
-
-    assert isinstance(gv, str)
-    assert _read_log(log_path) == []
-    assert not log_path.exists()
-    assert before == after
-
-
-def test_gate_version_with_no_gen_directory_at_all(tmp_path, env):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    assert not (repo_root / "gen").exists()
-
-    before = _snapshot(repo_root)
-    gv = license_scanner.gate_version(repo_root)
-    after = _snapshot(repo_root)
-
-    assert isinstance(gv, str)
-    assert before == after
-    assert not (repo_root / "gen").exists()
+    # Recording fake cache-manager present, but no component files under gen/.
+    faked_root = tmp_path / "faked"
+    faked_root.mkdir()
+    log_path = tmp_path / "faked_calls.log"
+    write_fake_cache_manager(faked_root, log_path)
+    before_faked = _snapshot(faked_root)
+    gv_faked = license_scanner.gate_version(faked_root)
+    assert isinstance(gv_faked, str)
+    assert not log_path.exists() or log_path.read_text(encoding="utf-8") == ""
+    assert _snapshot(faked_root) == before_faked

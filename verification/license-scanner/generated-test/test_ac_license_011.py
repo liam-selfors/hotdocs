@@ -1,30 +1,30 @@
-# hotdocs-criterion: sha256:3b56f54839825a140bdbd504098abf9f26ce1f5964101e82a7e21c3b112f6c42
+# hotdocs-criterion: sha256:854a02bd9910a3aa1c0b50e6caabb48277bc839b29a35d258c74e63855ee9d5c
 import hashlib
 import json
 import re
+from pathlib import Path
 
 import pytest
 
 import license_scanner
 
 
-SOURCE = (
-    "def compute_total(alpha, beta, gamma):\n"
-    "    result = alpha + beta * gamma\n"
-    "    value = result - alpha / beta\n"
-    "    other = value + gamma * 42\n"
-    "    return other + result + value\n"
-    "\n"
-    "def helper_function(delta, epsilon):\n"
-    "    zeta = delta * epsilon + 7\n"
-    "    theta = zeta - delta + epsilon\n"
-    "    return theta * zeta\n"
-)
-
-
-FAKE_CACHE_MANAGER = (
-    "import datetime\n"
+FAKE_CACHE_MANAGER_SOURCE = (
     "from dataclasses import dataclass\n"
+    "from datetime import datetime, timezone\n"
+    "from pathlib import Path\n"
+    "\n"
+    "\n"
+    "class SchemaValidationError(ValueError):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "class Miss:\n"
+    "    def __eq__(self, other):\n"
+    "        return isinstance(other, Miss)\n"
+    "\n"
+    "    def __hash__(self):\n"
+    "        return 0\n"
     "\n"
     "\n"
     "@dataclass\n"
@@ -42,18 +42,6 @@ FAKE_CACHE_MANAGER = (
     "    stored_at: str\n"
     "\n"
     "\n"
-    "class Miss:\n"
-    "    def __eq__(self, other):\n"
-    "        return isinstance(other, Miss)\n"
-    "\n"
-    "    def __hash__(self):\n"
-    "        return 0\n"
-    "\n"
-    "\n"
-    "class SchemaValidationError(ValueError):\n"
-    "    pass\n"
-    "\n"
-    "\n"
     "def get(cache_key, *, repo_root=None):\n"
     "    return Miss()\n"
     "\n"
@@ -63,13 +51,30 @@ FAKE_CACHE_MANAGER = (
     "\n"
     "\n"
     "def now_iso():\n"
-    "    return datetime.datetime.now(datetime.timezone.utc).strftime("
-    + repr("%Y-%m-%dT%H:%M:%SZ")
-    + ")\n"
+    "    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
     "\n"
     "\n"
     "def stats(*, repo_root=None):\n"
-    "    return dict(entry_count=0)\n"
+    "    return {'entry_count': 0}\n"
+)
+
+COMPONENT_SOURCE = (
+    "def alpha_one(x):\n"
+    "    return x + 1\n"
+    "\n"
+    "\n"
+    "def beta_two(y, z):\n"
+    "    total = y * z + 42\n"
+    "    return total - 7\n"
+    "\n"
+    "\n"
+    "class GammaThing:\n"
+    "    def method_three(self, value):\n"
+    "        result = value + 100\n"
+    "        return result * 3\n"
+    "\n"
+    "    def method_four(self, other):\n"
+    "        return other - 5 + 8\n"
 )
 
 
@@ -77,7 +82,7 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _strip_comments(text):
+def _strip(text):
     text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
     text = re.sub(r'""".*?"""', " ", text, flags=re.S)
     text = re.sub(r"'''.*?'''", " ", text, flags=re.S)
@@ -86,144 +91,120 @@ def _strip_comments(text):
     return text
 
 
-def _window_hashes(text):
-    tokens = [t.lower() for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", _strip_comments(text))]
+def window_hashes(text):
+    tokens = [t.lower() for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", _strip(text))]
     hashes = set()
-    for i in range(len(tokens) - 9 + 1):
+    for i in range(len(tokens) - 8):
         window = "\x1f".join(tokens[i:i + 9])
         hashes.add(hashlib.sha256(window.encode("utf-8")).hexdigest())
-    return sorted(hashes)
-
-
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _build_repo(root):
-    _write(root / "gen" / "foo" / "foo.py", SOURCE)
-    _write(root / "legacy" / "foo" / "foo.py", SOURCE)
-    _write(root / "gen" / "cache-manager" / "cache_manager.py", FAKE_CACHE_MANAGER)
-    comp = root / "specs" / "components" / "foo"
-    _write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-foo]\n"
-        "depends_on: []\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "---\n"
-        "\n"
-        "# Foo\n",
-    )
-    _write(comp / "requirements" / "R-FOO-001.md", "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do foo.\n")
-    _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
-    )
-    return root
-
-
-def _write_corpus(root, hashes, threshold=0.70):
-    corpus = {
-        "corpus_version": 1,
-        "block_threshold": threshold,
-        "entries": [
-            {
-                "reference_id": "ref-001",
-                "license_family": "MIT",
-                "risk_tier": "low",
-                "hashes": hashes,
-            }
-        ],
-    }
-    path = root / "corpus.json"
-    path.write_text(json.dumps(corpus), encoding="utf-8")
-    return path
+    return hashes
 
 
 @pytest.fixture
-def env(monkeypatch, tmp_path):
-    for name in ("VAR_LICENSE_CORPUS_PATH", "VAR_COMPLIANCE_WEBHOOK_URL", "VAR_CACHE_STORE_URL"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.chdir(tmp_path)
-    return monkeypatch
+def repo_root(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    (root / "gen" / "foo").mkdir(parents=True)
+    (root / "gen" / "foo" / "foo.py").write_text(COMPONENT_SOURCE, encoding="utf-8")
+    (root / "gen" / "cache-manager").mkdir(parents=True)
+    (root / "gen" / "cache-manager" / "cache_manager.py").write_text(
+        FAKE_CACHE_MANAGER_SOURCE, encoding="utf-8"
+    )
+    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.chdir(root)
+    return root
 
 
-def test_disjoint_corpus_json_and_text(env, tmp_path, capsys):
-    root = _build_repo(tmp_path / "repo")
-    unrelated = [hashlib.sha256(("unrelated-" + str(i)).encode("utf-8")).hexdigest() for i in range(5)]
-    own = set(_window_hashes(SOURCE))
-    assert own and not (own & set(unrelated))
-    corpus = _write_corpus(root, unrelated)
-    env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus))
+def write_corpus(path, hashes, block_threshold=0.70):
+    data = {
+        "corpus_version": 3,
+        "block_threshold": block_threshold,
+        "entries": [
+            {
+                "reference_id": "ref-001",
+                "license_family": "GPL",
+                "risk_tier": "medium",
+                "hashes": sorted(hashes),
+            }
+        ],
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
 
+
+def unrelated_hashes():
+    return {hashlib.sha256(("unrelated-window-" + str(i)).encode("utf-8")).hexdigest() for i in range(5)}
+
+
+def test_no_overlap_json_not_blocked(repo_root, monkeypatch, capsys):
+    corpus = write_corpus(repo_root / "corpus.json", unrelated_hashes())
+    assert not (window_hashes(COMPONENT_SOURCE) & unrelated_hashes())
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus))
     capsys.readouterr()
-    code = license_scanner.main(["comp-foo", "--repo-root=" + str(root), "--format=json"])
+    rc = license_scanner.main(["comp-foo", "--repo-root=" + str(repo_root), "--format=json"])
     out = capsys.readouterr().out
-    assert code == 0
+    assert rc == 0
     data = json.loads(out)
     assert field(data, "blocked") is False
 
-    code = license_scanner.main(["comp-foo", "--repo-root", str(root), "--format", "text"])
+
+def test_no_overlap_text_space_form(repo_root, monkeypatch, capsys):
+    corpus = write_corpus(repo_root / "corpus.json", unrelated_hashes())
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus))
+    capsys.readouterr()
+    rc = license_scanner.main(["comp-foo", "--repo-root", str(repo_root), "--format", "text"])
     out = capsys.readouterr().out
-    assert code == 0
+    assert rc == 0
     assert "similarity_score" in out
 
 
-def test_verbatim_corpus_blocks(env, tmp_path, capsys):
-    root = _build_repo(tmp_path / "repo")
-    corpus = _write_corpus(root, _window_hashes(SOURCE), threshold=0.70)
-    env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus))
+def test_verbatim_copy_blocked(repo_root, monkeypatch, capsys):
+    hashes = window_hashes(COMPONENT_SOURCE)
+    assert hashes
+    corpus = write_corpus(repo_root / "corpus.json", hashes)
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus))
+    rc = license_scanner.main(["comp-foo", "--repo-root=" + str(repo_root), "--format=json"])
+    assert rc == 1
+    rc_text = license_scanner.main(["comp-foo", "--repo-root=" + str(repo_root), "--format=text"])
+    assert rc_text == 1
 
-    code = license_scanner.main(["comp-foo", "--repo-root=" + str(root), "--format=json"])
+
+def test_corpus_unset_not_evaluated(repo_root, monkeypatch, capsys):
+    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
     capsys.readouterr()
-    assert code == 1
+    rc_text = license_scanner.main(["comp-foo", "--repo-root=" + str(repo_root), "--format=text"])
+    text_out = capsys.readouterr().out
+    assert rc_text == 0
+    assert "NOT EVALUATED: no-reference-corpus" in text_out
 
-
-def test_no_corpus_not_evaluated_exits_zero(env, tmp_path, capsys):
-    root = _build_repo(tmp_path / "repo")
-
-    capsys.readouterr()
-    code = license_scanner.main(["comp-foo", "--repo-root=" + str(root), "--format=text"])
-    out = capsys.readouterr().out
-    assert code == 0
-    assert "NOT EVALUATED: no-reference-corpus" in out
-
-    code = license_scanner.main(["comp-foo", "--repo-root=" + str(root), "--format=json"])
-    out = capsys.readouterr().out
-    assert code == 0
-    data = json.loads(out)
+    rc_json = license_scanner.main(["comp-foo", "--repo-root=" + str(repo_root), "--format=json"])
+    json_out = capsys.readouterr().out
+    assert rc_json == 0
+    data = json.loads(json_out)
     assert field(data, "evaluated") is False
 
 
-def test_missing_corpus_file_unreadable(env, tmp_path, capsys):
-    root = _build_repo(tmp_path / "repo")
-    env.setenv("VAR_LICENSE_CORPUS_PATH", str(root / "does-not-exist.json"))
-
+def test_corpus_missing_file_unreadable(repo_root, monkeypatch, capsys):
+    missing = repo_root / "does-not-exist-corpus.json"
+    assert not missing.exists()
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(missing))
     capsys.readouterr()
-    code = license_scanner.main(["comp-foo", "--repo-root=" + str(root), "--format=text"])
+    rc = license_scanner.main(["comp-foo", "--repo-root=" + str(repo_root), "--format=text"])
     out = capsys.readouterr().out
-    assert code == 1
+    assert rc == 1
     assert "NOT EVALUATED: corpus-unreadable" in out
 
 
 @pytest.mark.parametrize(
-    "argv_suffix",
+    "argv_builder",
     [
-        None,
-        ["comp-foo", "--format=bogus"],
-        ["comp-foo", "--hotdocs-smoke-unknown"],
-        ["comp-foo", "--repo-root"],
+        lambda root: [],
+        lambda root: ["comp-foo", "--repo-root=" + str(root), "--format=bogus"],
+        lambda root: ["comp-foo", "--repo-root=" + str(root), "--hotdocs-smoke-unknown"],
+        lambda root: ["comp-foo", "--repo-root"],
     ],
+    ids=["no-component-id", "bogus-format", "unknown-argument", "repo-root-without-value"],
 )
-def test_usage_errors_exit_two(env, tmp_path, capsys, argv_suffix):
-    root = _build_repo(tmp_path / "repo")
-    env.chdir(root)
-    argv = [] if argv_suffix is None else list(argv_suffix)
-    code = license_scanner.main(argv)
-    capsys.readouterr()
-    assert code == 2
+def test_usage_errors_return_2(repo_root, argv_builder):
+    rc = license_scanner.main(argv_builder(repo_root))
+    assert rc == 2
