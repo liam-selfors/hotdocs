@@ -393,6 +393,15 @@ def _swap_in(component_id: str, sandbox: Path, code_rel: str | None = None) -> N
         shutil.rmtree(real_gen_dir)
     shutil.copytree(sandbox / "gen" / slug, real_gen_dir, ignore=shutil.ignore_patterns("__pycache__"))
 
+    # The verification ran in the sandbox, so its browser criteria's page
+    # screenshots (R-RUNENV-007) are there; the review packet reads them
+    # from the real repo's git-ignored .hotdocs/ (D390).
+    shots = sandbox / ".hotdocs" / "screenshots" / slug
+    real_shots = REAL_REPO / ".hotdocs" / "screenshots" / slug
+    if shots.is_dir():
+        shutil.rmtree(real_shots, ignore_errors=True)
+        shutil.copytree(shots, real_shots)
+
     # Every other verification/<slug>/ directory in this corpus carries a
     # conftest.py that puts gen/<slug>/ on sys.path, so `pytest
     # verification/<slug>` works standalone -- found missing for two
