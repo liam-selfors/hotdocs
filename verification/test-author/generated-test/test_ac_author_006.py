@@ -1,55 +1,42 @@
-# hotdocs-criterion: sha256:843d74901ed9058753156281f537ec40ad7d80fa04bd316605ea87aef9633a58
+# hotdocs-criterion: sha256:40b13f851383ca67910b975682409fda39b9b32ef05fa3e4d25fd1db6ab915e5
+import os
 import re
 from pathlib import Path
-
-import pytest
 
 import test_author
 
 
-NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
+COMPONENT_ID = "comp-widget-maker"
+SLUG = "widget-maker"
+CRITERION_ID = "AC-WIDGET-MAKER-001"
+EXPECTED_FILENAME = "test_ac_widget_maker_001.py"
 
-MOCK_TEST_BODY = "def test_placeholder():\n    assert True\n"
+TEST_BODY = "def test_placeholder():\n    assert 1 + 1 == 2\n"
+
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def body(content):
-    first, _, rest = content.partition("\n")
-    return rest if first.startswith("# hotdocs-criterion:") else content
+def make_bundle():
+    return {
+        "component_id": COMPONENT_ID,
+        "criterion_id": CRITERION_ID,
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - A widget MUST be made.",
+        "interface": "make_widget() -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
 
 
-def make_backend(calls_log):
-    def backend(prompt, model, **params):
-        with open(calls_log, "a", encoding="utf-8") as fh:
-            fh.write("call\n")
-        nonce = re.findall(NONCE_RE, prompt)[-1]
-        text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + MOCK_TEST_BODY
-            + "\n-----END FILE " + nonce + "-----"
-        )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
-
-    return backend
-
-
-def plant_probe_stand_in(repo_root, log_path):
+def write_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
-    src = (
-        "import json\n"
-        "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
-        "\n"
+    source = (
         "class _Report:\n"
         "    def __init__(self):\n"
         "        self.ok = True\n"
@@ -67,113 +54,122 @@ def plant_probe_stand_in(repo_root, log_path):
         "\n"
         "\n"
         "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'module_name': module_name}) + '\\n')\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
         "    return _Report()\n"
     )
-    (probe_dir / "test_probe.py").write_text(src, encoding="utf-8")
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def make_bundle(component_id, criterion_id, covers):
-    return {
-        "component_id": component_id,
-        "criterion_id": criterion_id,
-        "covers": covers,
-        "criterion_text": "Given a thing\nWhen it is done\nThen it works",
-        "requirement_text": covers + " — the thing MUST work.",
-        "interface": "# Library\n\n```\ndo_thing() -> None\n```\n",
-        "glossary": "",
-        "dependency_interfaces": {},
-    }
+def make_mock_backend():
+    def backend(prompt, model, **params):
+        nonce = NONCE_RE.findall(prompt)[-1]
+        text = (
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + TEST_BODY
+            + "\n-----END FILE " + nonce + "-----"
+        )
+        return {
+            "text": text,
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
+
+    return backend
 
 
-@pytest.mark.parametrize(
-    "component_id, slug, criterion_id, covers, filename",
-    [
-        (
-            "comp-widget-maker",
-            "widget-maker",
-            "AC-WIDGET-MAKER-006",
-            "R-WIDGET-MAKER-006",
-            "test_ac_widget_maker_006.py",
-        ),
-        (
-            "comp-foo",
-            "foo",
-            "AC-FOO-003",
-            "R-FOO-003",
-            "test_ac_foo_003.py",
-        ),
-    ],
-)
-def test_output_written_only_under_verification_generated_test(
-    tmp_path, monkeypatch, component_id, slug, criterion_id, covers, filename
-):
+def snapshot(root):
+    result = {}
+    if not root.exists():
+        return result
+    for p in sorted(root.rglob("*")):
+        if p.is_file() and "__pycache__" not in p.parts:
+            result[p.relative_to(root).as_posix()] = p.read_bytes()
+    return result
+
+
+def is_under(path, parent):
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def test_written_file_is_under_generated_test_dir_only(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
 
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    probe_log = logs / "probe_calls.log"
-    model_log = logs / "model_calls.log"
+    log_path = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, log_path)
 
-    plant_probe_stand_in(repo_root, probe_log)
+    # Plant criterion-compiler's own output for the same criterion, so any
+    # write there would be observable.
+    compiled_dir = repo_root / "verification" / SLUG / "compiled"
+    compiled_dir.mkdir(parents=True)
+    compiled_sentinel = "# criterion-compiler output, must stay untouched\n"
+    (compiled_dir / EXPECTED_FILENAME).write_text(compiled_sentinel, encoding="utf-8")
 
-    bundle = make_bundle(component_id, criterion_id, covers)
+    gen_before = snapshot(repo_root / "gen")
+    compiled_before = snapshot(compiled_dir)
+
     result = test_author.author_test(
-        bundle,
+        make_bundle(),
         "mock",
         0,
         repo_root=repo_root,
-        llm_backend=make_backend(model_log),
+        llm_backend=make_mock_backend(),
     )
 
-    # The call succeeded: the model and the probe stand-in were both used.
+    # The call was successful.
     assert field(result, "model_call_error") is None
-    assert model_log.is_file()
-    assert len(model_log.read_text(encoding="utf-8").splitlines()) >= 1
-    assert probe_log.is_file()
-    assert len(probe_log.read_text(encoding="utf-8").splitlines()) >= 1
-
+    assert log_path.is_file(), "the test-probe stand-in was never called"
     file_entry = field(result, "file")
     assert file_entry is not None
-    path_str = field(file_entry, "path")
-    content = field(file_entry, "content")
 
-    # The reported path is relative to repo_root and exactly
-    # verification/<slug>/generated-test/<criterion test filename>.
-    rel = Path(path_str)
-    assert not rel.is_absolute()
-    assert rel.parts == ("verification", slug, "generated-test", filename)
-
-    # It is not under gen/<component>/ nor criterion-compiler's output dir.
-    assert rel.parts[0] != "gen"
-    assert "compiled" not in rel.parts
-
-    written = repo_root / rel
-    assert written.is_file()
-    resolved = written.resolve()
-    gen_component = (repo_root / "gen" / slug).resolve()
-    compiled_dir = (repo_root / "verification" / slug / "compiled").resolve()
-    generated_dir = (repo_root / "verification" / slug / "generated-test").resolve()
-
-    assert resolved.parent == generated_dir
-    assert gen_component not in resolved.parents
-    assert compiled_dir not in resolved.parents
-    assert (repo_root / "gen").resolve() not in resolved.parents
-
-    # The written text matches the returned content and the mock's file.
-    assert written.read_text(encoding="utf-8") == content
-    assert body(content) == MOCK_TEST_BODY
-
-    # Nothing else was written: the only file under verification/ is this one,
-    # nothing landed under gen/<component>/ or criterion-compiler's directory.
-    verification_files = [
-        p for p in (repo_root / "verification").rglob("*") if p.is_file()
-    ]
-    assert [p.resolve() for p in verification_files] == [resolved]
-    assert not (repo_root / "gen" / slug).exists()
-    assert not compiled_dir.exists() or not any(
-        p.is_file() for p in compiled_dir.rglob("*")
+    rel_path_str = field(file_entry, "path")
+    rel_path = Path(rel_path_str)
+    assert not rel_path.is_absolute()
+    assert rel_path.as_posix() == (
+        "verification/" + SLUG + "/generated-test/" + EXPECTED_FILENAME
     )
+
+    written = (repo_root / rel_path).resolve()
+    assert written.is_file()
+
+    root_resolved = repo_root.resolve()
+    generated_test_dir = (root_resolved / "verification" / SLUG / "generated-test")
+    gen_component_dir = root_resolved / "gen" / SLUG
+    gen_dir = root_resolved / "gen"
+    compiled_resolved = compiled_dir.resolve()
+
+    # Directly under verification/<slug>/generated-test/, no nesting.
+    assert written.parent == generated_test_dir
+    assert written.name == EXPECTED_FILENAME
+    assert is_under(written, generated_test_dir)
+
+    # Never under gen/<component>/ (nor gen/ at all) nor criterion-compiler's dir.
+    assert not is_under(written, gen_component_dir)
+    assert not is_under(written, gen_dir)
+    assert not is_under(written, compiled_resolved)
+
+    # Nothing written or modified under gen/ or criterion-compiler's output dir.
+    assert snapshot(repo_root / "gen") == gen_before
+    assert not (repo_root / "gen" / SLUG).exists()
+    assert snapshot(compiled_dir) == compiled_before
+    assert (compiled_dir / EXPECTED_FILENAME).read_text(encoding="utf-8") == compiled_sentinel
+
+    # The only new file under verification/ is the generated-test file.
+    verification_files = snapshot(repo_root / "verification")
+    new_files = sorted(
+        k for k in verification_files if k not in {
+            SLUG + "/compiled/" + EXPECTED_FILENAME,
+        }
+    )
+    assert new_files == [SLUG + "/generated-test/" + EXPECTED_FILENAME]
+
+    # The written file is the one the result reports.
+    assert written.read_text(encoding="utf-8") == field(file_entry, "content")
+    assert os.path.samefile(str(written), str(repo_root / rel_path_str))

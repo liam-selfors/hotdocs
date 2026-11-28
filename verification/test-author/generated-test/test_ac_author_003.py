@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:68200aa4338d6c113c3d417fffca01399d220377619e93005a869412d1af81be
+# hotdocs-criterion: sha256:15ff7e1a7ddbc9ac9b191d5ac225d9e6f71a956a10b9555b7d7f9449c78d396a
 import json
 import re
 
@@ -7,15 +7,19 @@ import pytest
 import test_author
 
 
-CANONICAL_MODEL = "canonical-model-z"
-
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
-TEST_BODY = "def test_placeholder():\n    assert True\n"
+CANONICAL_MODEL = "canonical-mock-model"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def body(content):
+    first, _, rest = content.partition("\n")
+    return rest if first.startswith("# hotdocs-criterion:") else content
+
+
+TEST_BODY = "def test_placeholder():\n    assert True\n"
 
 
 def make_bundle():
@@ -23,15 +27,19 @@ def make_bundle():
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 - A widget MUST be made.",
-        "interface": "make_widget() -> dict",
+        "criterion_text": (
+            "Given a widget spec\n"
+            "When make_widget runs\n"
+            "Then it returns a widget"
+        ),
+        "requirement_text": "**R-WIDGET-MAKER-001** - make_widget MUST return a widget.",
+        "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
 
 
-def write_probe_stand_in(repo_root, log_path):
+def plant_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
@@ -59,45 +67,27 @@ def write_probe_stand_in(repo_root, log_path):
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def write_generator_provenance(repo_root, generator_model):
-    # The component's current code was produced by the generator using model A.
+def plant_generator_provenance(repo_root, model_a):
+    # The component's current code, as the generator produced it with model A.
     gen_dir = repo_root / "gen" / "widget-maker"
     gen_dir.mkdir(parents=True, exist_ok=True)
     (gen_dir / "widget_maker.py").write_text(
-        "def make_widget():\n    return {}\n", encoding="utf-8"
+        "def make_widget(name):\n    return {'name': name}\n", encoding="utf-8"
     )
     manifest = {
         "component_id": "comp-widget-maker",
-        "model": generator_model,
-        "generator_model": generator_model,
-        "seed": 0,
+        "model": model_a,
+        "generator": {"model": model_a},
+        "files": ["widget_maker.py"],
     }
-    (gen_dir / ".provenance.json").write_text(
-        json.dumps(manifest), encoding="utf-8"
-    )
+    (gen_dir / ".provenance.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
-@pytest.mark.parametrize(
-    "generator_model",
-    ["anthropic:claude-generator-a", "ollama:llama3.1:8b"],
-)
-def test_author_test_calls_canonical_model_regardless_of_generator_model(
-    tmp_path, monkeypatch, generator_model
-):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-
-    probe_log = tmp_path / "probe_calls.log"
-    write_probe_stand_in(repo_root, probe_log)
-    write_generator_provenance(repo_root, generator_model)
-
-    backend_log = tmp_path / "backend_calls.log"
-
-    def mock_backend(prompt, model, **params):
-        with open(backend_log, "a", encoding="utf-8") as fh:
+def make_backend(model_log):
+    def backend(prompt, model, **params):
+        with open(model_log, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"model": model}) + "\n")
-        nonce = NONCE_RE.findall(prompt)[-1]
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
             + TEST_BODY
@@ -110,28 +100,55 @@ def test_author_test_calls_canonical_model_regardless_of_generator_model(
             "model_call_error": None,
         }
 
+    return backend
+
+
+@pytest.mark.parametrize(
+    "model_a",
+    [
+        "anthropic:claude-opus-5-5",
+        "ollama:llama3.1:8b",
+        "some-other-generator-model",
+    ],
+)
+def test_author_test_calls_model_with_canonical_model_regardless_of_generator_model(
+    tmp_path, monkeypatch, model_a
+):
+    repo_root = tmp_path / ("repo-" + re.sub(r"[^a-z0-9]+", "-", model_a.lower()))
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+
+    probe_log = tmp_path / ("probe-" + repo_root.name + ".log")
+    model_log = tmp_path / ("models-" + repo_root.name + ".log")
+
+    plant_probe_stand_in(repo_root, probe_log)
+    plant_generator_provenance(repo_root, model_a)
+
+    bundle = make_bundle()
     result = test_author.author_test(
-        make_bundle(),
+        bundle,
         CANONICAL_MODEL,
         0,
         repo_root=repo_root,
-        llm_backend=mock_backend,
+        llm_backend=make_backend(model_log),
     )
 
     assert field(result, "model_call_error") is None
 
-    assert backend_log.is_file(), "the model backend was never called"
+    assert model_log.is_file(), "the model was never called"
     calls = [
         json.loads(line)
-        for line in backend_log.read_text(encoding="utf-8").splitlines()
+        for line in model_log.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     assert len(calls) >= 1
-
-    # Then: every model call uses the canonical model, never model A.
     for call in calls:
         assert call["model"] == CANONICAL_MODEL
-        assert call["model"] != generator_model
+        assert call["model"] != model_a
+        assert model_a not in call["model"]
 
-    # The result records the canonical model as the one used.
     assert field(result, "model") == CANONICAL_MODEL
+
+    file = field(result, "file")
+    assert file is not None
+    assert body(field(file, "content")) == TEST_BODY

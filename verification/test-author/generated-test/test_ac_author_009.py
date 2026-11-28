@@ -1,15 +1,11 @@
-# hotdocs-criterion: sha256:49d2a44618a43be310823f40b9f76051c8b5216c24af9f25ad3b19240ef81544
-import json
+# hotdocs-criterion: sha256:e374399d1ff8ad6ca424d5ccd60f36f2437c31e7d6809c0cfc703c69a01c5b56
 import re
 from pathlib import Path
 
 import test_author
 
 
-BEGIN_PREFIX = "-----BEGIN " + "FILE "
-END_PREFIX = "-----END " + "FILE "
-MARK_SUFFIX = "-----"
-NONCE_RE = re.compile(re.escape(BEGIN_PREFIX) + "([0-9a-f]{32})" + re.escape(MARK_SUFFIX))
+NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
 
 
 def field(value, name):
@@ -27,110 +23,75 @@ def make_bundle():
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
         "criterion_text": "Given a widget\nWhen made\nThen it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 - make_widget MUST return a widget.",
+        "requirement_text": "R-WIDGET-MAKER-001 widgets MUST be made.",
         "interface": "make_widget() -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
 
 
-def plant_probe_stand_in(repo_root, log_path):
+def plant_probe(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "import json",
-        "",
-        "LOG = " + repr(str(log_path)),
-        "",
-        "",
-        "class ProbeReport:",
-        "    def __init__(self):",
-        "        self.ok = True",
-        "        self.findings = []",
-        "        self.tests_run = 1",
-        "        self.tests_reached = 1",
-        "",
-        "    def to_dict(self):",
-        "        return {",
-        "            'ok': self.ok,",
-        "            'findings': list(self.findings),",
-        "            'tests_run': self.tests_run,",
-        "            'tests_reached': self.tests_reached,",
-        "        }",
-        "",
-        "",
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,",
-        "          interpreter=None, assets=None, drivers=None, **kwargs):",
-        "    with open(LOG, 'a', encoding='utf-8') as fh:",
-        "        fh.write(json.dumps({'test_source': test_source}) + '\\n')",
-        "    return ProbeReport()",
-        "",
-    ]
-    (probe_dir / "test_probe.py").write_text("\n".join(lines), encoding="utf-8")
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(repr(test_source) + '\\n')\n"
+        "    return _Report()\n"
+    )
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def read_log(path):
-    if not path.exists():
+def verification_files(repo_root):
+    root = repo_root / "verification"
+    if not root.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [p for p in root.rglob("*") if p.is_file()]
 
 
-def make_backend(reply_for_nonce, call_log):
-    def backend(prompt, model, **params):
-        nonce = NONCE_RE.findall(prompt)[-1]
-        with open(call_log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"nonce": nonce}) + "\n")
-        return {
-            "text": reply_for_nonce(nonce),
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
-
-    return backend
-
-
-def files_under(path):
-    if not path.exists():
-        return []
-    return [p for p in path.rglob("*") if p.is_file()]
-
-
-def test_extracts_exactly_between_markers_discarding_fence_and_narration(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo_extract"
+def test_extracts_only_text_between_markers(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
-    probe_log = tmp_path / "probe_extract.log"
-    call_log = tmp_path / "calls_extract.log"
-    plant_probe_stand_in(repo_root, probe_log)
+    log_path = tmp_path / "probe_calls.log"
+    plant_probe(repo_root, log_path)
 
-    code = (
-        "import os\n"
-        "\n"
-        "\n"
-        "def test_sep():\n"
-        "    assert os.sep\n"
-    )
-    narration_before = "Sure! Here is the complete test file you asked for."
+    code = "import os\n\n\ndef test_widget():\n    assert os.sep"
+    narration_before = "Here is the test file you asked for:"
     narration_after = "Let me know if you need anything else."
+    replies = []
 
-    def reply(nonce):
-        return (
+    def backend(prompt, model, **params):
+        nonce = re.findall(NONCE_RE, prompt)[-1]
+        text = (
             narration_before + "\n"
             + "```python\n"
-            + BEGIN_PREFIX + nonce + MARK_SUFFIX + "\n"
+            + "-----BEGIN FILE " + nonce + "-----\n"
             + code + "\n"
-            + END_PREFIX + nonce + MARK_SUFFIX + "\n"
+            + "-----END FILE " + nonce + "-----\n"
             + "```\n"
             + narration_after + "\n"
         )
+        replies.append(text)
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
     result = test_author.author_test(
-        make_bundle(), "mock", 0, repo_root=repo_root,
-        llm_backend=make_backend(reply, call_log),
+        make_bundle(), "mock", repo_root=repo_root, llm_backend=backend
     )
 
-    assert len(read_log(call_log)) >= 1
+    assert replies, "mock model was never called"
     assert field(result, "model_call_error") is None
     file = field(result, "file")
     assert file is not None
@@ -140,58 +101,44 @@ def test_extracts_exactly_between_markers_discarding_fence_and_narration(tmp_pat
     assert "```" not in content
     assert narration_before not in content
     assert narration_after not in content
-    assert BEGIN_PREFIX not in content
-    assert END_PREFIX not in content
+    assert "-----BEGIN FILE" not in content
+    assert "-----END FILE" not in content
 
-    probe_calls = read_log(probe_log)
-    assert len(probe_calls) >= 1
-    assert probe_calls[-1]["test_source"] == code
-
-    path = field(file, "path")
-    assert path == "verification/widget-maker/generated-test/test_ac_widget_maker_001.py"
-    written = repo_root / path
+    written = repo_root / field(file, "path")
     assert written.is_file()
     assert written.read_text(encoding="utf-8") == content
 
 
-def test_reply_without_markers_is_distinct_failure_and_writes_nothing(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo_nomarkers"
+def test_reply_without_markers_is_rejected(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
-    probe_log = tmp_path / "probe_nomarkers.log"
-    call_log = tmp_path / "calls_nomarkers.log"
-    plant_probe_stand_in(repo_root, probe_log)
+    log_path = tmp_path / "probe_calls.log"
+    plant_probe(repo_root, log_path)
 
-    no_marker_reply = (
-        "Here is the test:\n"
-        "```python\n"
-        "import os\n"
-        "\n"
-        "\n"
-        "def test_sep():\n"
-        "    assert os.sep\n"
-        "```\n"
-        "Hope that helps.\n"
-    )
+    reply = "Sure! ```python\nimport os\n\ndef test_widget():\n    assert os.sep\n```\n"
+    calls = []
 
-    def reply(nonce):
-        return no_marker_reply
+    def backend(prompt, model, **params):
+        calls.append(prompt)
+        return {"text": reply, "model": model, "backend": "mock", "model_call_error": None}
 
     result = test_author.author_test(
-        make_bundle(), "mock", 0, repo_root=repo_root,
-        llm_backend=make_backend(reply, call_log),
+        make_bundle(), "mock", repo_root=repo_root, llm_backend=backend
     )
 
-    assert len(read_log(call_log)) >= 1
+    assert calls, "mock model was never called"
     assert field(result, "file") is None
-
     error = field(result, "model_call_error")
     assert error is not None
     assert field(error, "category") == "missing_file_markers"
-    assert field(error, "message") == (
+    expected_message = (
         "model reply held no matching BEGIN/END FILE markers; reply began: "
-        + repr(no_marker_reply[:200])
+        + repr(reply[:200])
     )
+    assert field(error, "message") == expected_message
 
-    assert files_under(repo_root / "verification") == []
-    assert files_under(repo_root / "verification" / "widget-maker" / "generated-test") == []
+    assert verification_files(repo_root) == []
+    assert not (repo_root / "verification" / "widget-maker" / "generated-test").exists() or not any(
+        (repo_root / "verification" / "widget-maker" / "generated-test").iterdir()
+    )

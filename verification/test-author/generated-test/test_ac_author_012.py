@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:e720fc445d0866afd1532008783aa9fa23165426d8db981a4bbfc2fa8cd9b538
+# hotdocs-criterion: sha256:d98306da224973948ce777d5af962f79597d78f5f38dcfa509c93a626b3f87af
 import re
 
 import test_author
@@ -13,13 +13,7 @@ LINE_NO_YAML = (
     "already installed: it writes and parses frontmatter as plain text."
 )
 
-GOOD_TEST = (
-    "import test_author\n"
-    "\n"
-    "\n"
-    "def test_placeholder():\n"
-    "    assert test_author is not None\n"
-)
+GOOD_TEST = "import widget_maker\n\n\ndef test_placeholder():\n    assert widget_maker is not None\n"
 
 
 def field(value, name):
@@ -34,8 +28,8 @@ def write_probe_stand_in(repo_root, log_path):
         "    def __init__(self):\n"
         "        self.ok = True\n"
         "        self.findings = []\n"
-        "        self.tests_run = 0\n"
-        "        self.tests_reached = 0\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
         "        return {\n"
@@ -59,15 +53,15 @@ def make_bundle():
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget, When made, Then it exists.",
-        "requirement_text": "R-WIDGET-MAKER-001 The maker MUST make widgets.",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make a widget.",
         "interface": "make_widget() -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
 
 
-def test_prompt_holds_fixture_frontmatter_rule_lines(tmp_path, monkeypatch):
+def test_prompt_holds_fixture_frontmatter_rules_block(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
@@ -99,6 +93,6 @@ def test_prompt_holds_fixture_frontmatter_rule_lines(tmp_path, monkeypatch):
     assert field(result, "model_call_error") is None
     assert len(prompts) >= 1
 
-    lines = prompts[0].splitlines()
-    assert LINE_RATIFIED in lines
-    assert LINE_NO_YAML in lines
+    first_lines = prompts[0].splitlines()
+    assert LINE_RATIFIED in first_lines
+    assert LINE_NO_YAML in first_lines

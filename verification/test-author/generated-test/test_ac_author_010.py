@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:bed89d37c37b501152b687a41c3a4acd8462ad63d834a587e304d74c6d6913f5
+# hotdocs-criterion: sha256:60b696789a4d539a1b28634529d8c760defb233a5cd51650603b7efc0f9f8354
 import re
 
 import test_author
@@ -6,11 +6,11 @@ import test_author
 
 NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
 
-GOOD_TEST = (
+VALID_TEST_FILE = (
     "import widget_maker\n"
     "\n"
     "\n"
-    "def test_something():\n"
+    "def test_widget():\n"
     "    assert widget_maker.make() is not None\n"
 )
 
@@ -19,7 +19,7 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_probe_stand_in(repo_root, log_path):
+def write_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
@@ -47,35 +47,13 @@ def _write_probe_stand_in(repo_root, log_path):
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def _make_bundle():
-    return {
-        "component_id": "comp-widget-maker",
-        "criterion_id": "AC-WIDGET-MAKER-001",
-        "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget, When made, Then it exists.",
-        "requirement_text": "R-WIDGET-MAKER-001 The maker MUST make widgets.",
-        "interface": "make() -> Widget",
-        "glossary": "",
-        "dependency_interfaces": {},
-    }
-
-
-def test_prompt_holds_dependency_resolution_block(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-
-    probe_log = tmp_path / "probe_calls.log"
-    _write_probe_stand_in(repo_root, probe_log)
-
-    prompts = []
-
-    def mock_backend(prompt, model, **params):
+def make_mock_backend(prompts):
+    def backend(prompt, model, **params):
         prompts.append(prompt)
         nonce = NONCE_RE.findall(prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + GOOD_TEST
+            + VALID_TEST_FILE
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -85,15 +63,38 @@ def test_prompt_holds_dependency_resolution_block(tmp_path, monkeypatch):
             "model_call_error": None,
         }
 
-    result = test_author.author_test(
-        _make_bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
+    return backend
+
+
+def test_prompt_holds_dependency_resolution_block(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+
+    probe_log = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, probe_log)
+
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget, When made, Then it exists.",
+        "requirement_text": "R-WIDGET-MAKER-001 - make MUST return a widget.",
+        "interface": "make() -> Widget",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
+    prompts = []
+    backend = make_mock_backend(prompts)
+
+    test_author.author_test(
+        bundle, "mock", repo_root=repo_root, llm_backend=backend
     )
 
-    assert field(result, "model_call_error") is None
     assert prompts, "the mock model was never called"
-
-    first_prompt = prompts[0]
-    lines = first_prompt.splitlines()
+    first = prompts[0]
+    lines = first.splitlines()
 
     assert (
         "The component under test itself needs no custom loader: a plain `import widget_maker`."

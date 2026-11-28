@@ -1,25 +1,32 @@
-# hotdocs-criterion: sha256:02be13d2fcc16bfafb2e6dde499822ca29199d5b49cb6809b5f47b650d16ca5e
-import json
+# hotdocs-criterion: sha256:0e7093c9f58385d0e1aaee52144906e652c4cb8eb6d8511494e6cddcc7c709b4
 import re
 from pathlib import Path
 
 import test_author
 
 
-EXPECTED_LINE = (
+TARGET_LINE = (
     "- A unit file (`constraints.md`, or anything under `requirements/`, "
     "`interface/` or `acceptance/`) carries no frontmatter at all."
 )
 
-REPLY_BODY = "def test_placeholder():\n    assert True\n"
+NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
+
+GOOD_TEST = (
+    "import test_author\n"
+    "\n"
+    "\n"
+    "def test_something():\n"
+    "    assert test_author.author_test is not None\n"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write_probe_stand_in(repo_root, calls_log):
-    probe_dir = repo_root / "gen" / "test-probe"
+def write_probe_stand_in(repo_root, log_path):
+    probe_dir = Path(repo_root) / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
         "class _Report:\n"
@@ -38,22 +45,50 @@ def write_probe_stand_in(repo_root, calls_log):
         "        }\n"
         "\n"
         "\n"
+        "GATE_VERSION = 'test-probe@1.5.0'\n"
+        "\n"
+        "\n"
         "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
-        "    with open(" + repr(str(calls_log)) + ", 'a', encoding='utf-8') as fh:\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
         "        fh.write('probe\\n')\n"
         "    return _Report()\n"
     )
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def make_mock_backend(prompts_log):
-    def backend(prompt, model, **params):
-        with open(prompts_log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(prompt) + "\n")
-        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+def make_bundle():
+    return {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": (
+            "Given a widget spec\n"
+            "When make_widget is called\n"
+            "Then a widget is returned"
+        ),
+        "requirement_text": "R-WIDGET-MAKER-001 - make_widget MUST return a widget.",
+        "interface": "make_widget(name: str) -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
+
+def test_prompt_holds_unit_file_frontmatter_rule_line(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+
+    probe_log = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, probe_log)
+
+    prompts = []
+
+    def mock_backend(prompt, model, **params):
+        prompts.append(prompt)
+        nonce = re.findall(NONCE_RE, prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + REPLY_BODY
+            + GOOD_TEST
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -63,40 +98,12 @@ def make_mock_backend(prompts_log):
             "model_call_error": None,
         }
 
-    return backend
-
-
-def test_ac_author_018_prompt_holds_unit_file_frontmatter_line(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    prompts_log = logs / "prompts.jsonl"
-    probe_log = logs / "probe_calls.log"
-
-    write_probe_stand_in(repo_root, probe_log)
-    monkeypatch.chdir(repo_root)
-
-    bundle = {
-        "component_id": "comp-widget-maker",
-        "criterion_id": "AC-WIDGET-MAKER-001",
-        "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make widgets.",
-        "interface": "make_widget(name: str) -> dict",
-        "glossary": "",
-        "dependency_interfaces": {},
-    }
-
     result = test_author.author_test(
-        bundle, "mock", repo_root=repo_root, llm_backend=make_mock_backend(prompts_log)
+        make_bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
     assert field(result, "model_call_error") is None
+    assert len(prompts) >= 1
 
-    assert prompts_log.is_file(), "the mock model was never called"
-    lines = [ln for ln in prompts_log.read_text(encoding="utf-8").splitlines() if ln]
-    assert lines, "no prompt was recorded"
-    first_prompt = json.loads(lines[0])
-
-    assert EXPECTED_LINE in first_prompt.splitlines()
+    first_prompt = prompts[0]
+    assert TARGET_LINE in first_prompt.splitlines()

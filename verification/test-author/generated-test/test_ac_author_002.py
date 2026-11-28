@@ -1,8 +1,17 @@
-# hotdocs-criterion: sha256:e2d4259242ad96d27388b2d76bcd935520efb0363c6b99aa691b16c310f564aa
+# hotdocs-criterion: sha256:82e99d197013932f485e1f0f1c9f84f17471acb15186a309febafbb5f9028d94
+"""AC-AUTHOR-002: a CriterionBundle for a component with existing
+gen/<component>/ content contains no field derived from that content.
+
+The test plants real-looking gen/<component>/ source carrying a unique
+marker under a fresh repo_root, then calls author_test with a mock model
+and a test-probe stand-in. The bundle as test-author hands it on (to the
+model's prompt and to test-probe) is inspected. Neither may hold anything
+derived from the planted gen/<component>/ content.
+"""
+
 import json
 import re
 import uuid
-from pathlib import Path
 
 import test_author
 
@@ -16,26 +25,14 @@ def body(content):
     return rest if first.startswith("# hotdocs-criterion:") else content
 
 
-NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
-
-REPLY_FILE = (
-    "import test_author_target_placeholder\n"
-    "\n"
-    "\n"
-    "def test_placeholder():\n"
-    "    assert test_author_target_placeholder.run() is not None\n"
-)
-
-
 def _write_probe_stand_in(repo_root, log_path):
-    probe_dir = repo_root / "gen" / "test-probe"
-    probe_dir.mkdir(parents=True, exist_ok=True)
+    target = repo_root / "gen" / "test-probe" / "test_probe.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
     source = (
         "import dataclasses\n"
         "import json\n"
-        "from collections.abc import Mapping\n"
         "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
         "\n"
         "class _Report:\n"
@@ -54,75 +51,109 @@ def _write_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "def _items(bundle):\n"
-        "    if isinstance(bundle, Mapping):\n"
-        "        return {str(k): bundle[k] for k in bundle.keys()}\n"
+        "def _as_dict(bundle):\n"
+        "    if isinstance(bundle, dict):\n"
+        "        return dict(bundle)\n"
         "    if dataclasses.is_dataclass(bundle):\n"
-        "        return {f.name: getattr(bundle, f.name) for f in dataclasses.fields(bundle)}\n"
+        "        return dataclasses.asdict(bundle)\n"
         "    try:\n"
-        "        return {str(k): bundle[k] for k in bundle.keys()}\n"
+        "        return {k: bundle[k] for k in bundle.keys()}\n"
         "    except Exception:\n"
-        "        return dict(getattr(bundle, '__dict__', {}))\n"
+        "        return dict(vars(bundle))\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None, drivers=None, **kwargs):\n"
-        "    items = _items(criterion_bundle)\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
         "    record = {\n"
-        "        'keys': sorted(items.keys()),\n"
-        "        'items': repr(items),\n"
-        "        'bundle_repr': repr(criterion_bundle),\n"
-        "        'module_name': repr(module_name),\n"
+        "        'bundle': _as_dict(criterion_bundle),\n"
+        "        'test_source': test_source,\n"
+        "        'module_name': module_name,\n"
         "    }\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps(record) + '\\n')\n"
+        "    with open(LOG, 'a', encoding='utf-8') as handle:\n"
+        "        handle.write(json.dumps(record, default=str) + '\\n')\n"
         "    return _Report()\n"
     )
-    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
+    target.write_text(source, encoding="utf-8")
 
 
-def _plant_target_gen_content(repo_root, sentinel):
+def _plant_gen_content(repo_root, marker):
     gen_dir = repo_root / "gen" / "widget-maker"
-    (gen_dir / "sub").mkdir(parents=True, exist_ok=True)
+    gen_dir.mkdir(parents=True, exist_ok=True)
     (gen_dir / "widget_maker.py").write_text(
-        "# implementation marker " + sentinel + "\n"
-        "SECRET_IMPL = " + repr(sentinel + "_CONST") + "\n"
+        "# " + marker + " implementation header\n"
+        "SECRET_CONSTANT = " + repr(marker) + "\n"
         "\n"
         "\n"
-        "def make_widget(name):\n"
-        "    return " + repr(sentinel + "_RETURN") + " + name\n",
+        "def make_widget_" + marker.lower() + "(name):\n"
+        "    return {'name': name, 'tag': " + repr(marker) + "}\n",
         encoding="utf-8",
     )
-    (gen_dir / "sub" / "extra.py").write_text(
-        "HELPER = " + repr(sentinel + "_HELPER") + "\n", encoding="utf-8"
+    nested = gen_dir / "internals"
+    nested.mkdir(parents=True, exist_ok=True)
+    (nested / ("helper_" + marker.lower() + ".py")).write_text(
+        "VALUE = " + repr(marker) + "\n", encoding="utf-8"
     )
     (gen_dir / ".provenance.json").write_text(
-        json.dumps({"note": sentinel + "_PROVENANCE"}), encoding="utf-8"
+        json.dumps({"note": marker}), encoding="utf-8"
     )
 
 
-def test_criterion_bundle_carries_no_gen_content(tmp_path, monkeypatch):
+def _read_jsonl(path):
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def test_bundle_carries_nothing_from_existing_gen_content(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    probe_log = logs / "probe_calls.jsonl"
+    prompt_log = logs / "prompts.jsonl"
 
-    sentinel = "HOTDOCS_GEN_SENTINEL_" + uuid.uuid4().hex
-    interface_marker = "INTERFACE_MARKER_" + uuid.uuid4().hex
-
-    _plant_target_gen_content(repo_root, sentinel)
-
-    probe_log = tmp_path / "probe_calls.log"
+    marker = "HOTDOCSGENSECRET" + uuid.uuid4().hex.upper()
+    _plant_gen_content(repo_root, marker)
     _write_probe_stand_in(repo_root, probe_log)
 
-    prompt_log = tmp_path / "prompts.log"
+    monkeypatch.chdir(repo_root)
+
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": (
+            "Given a name\nWhen make_widget is called\n"
+            "Then it returns a widget with that name"
+        ),
+        "requirement_text": (
+            "**R-WIDGET-MAKER-001** - make_widget MUST return a widget "
+            "named as given."
+        ),
+        "interface": "# Library\n\n```\nmake_widget(name: str) -> dict\n```\n",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+    bundle_before = json.dumps(bundle, sort_keys=True)
+
+    test_file = (
+        "import widget_maker\n"
+        "\n"
+        "\n"
+        "def test_make_widget():\n"
+        "    assert widget_maker.make_widget('a')['name'] == 'a'\n"
+    )
 
     def mock_backend(prompt, model, **params):
-        with open(prompt_log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt}) + "\n")
-        nonce = re.findall(NONCE_RE, prompt)[-1]
+        with open(prompt_log, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(prompt) + "\n")
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + REPLY_FILE
+            + test_file
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -132,78 +163,36 @@ def test_criterion_bundle_carries_no_gen_content(tmp_path, monkeypatch):
             "model_call_error": None,
         }
 
-    bundle = {
-        "component_id": "comp-widget-maker",
-        "criterion_id": "AC-WIDGET-MAKER-001",
-        "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget name\nWhen make_widget is called\nThen a widget is returned",
-        "requirement_text": "R-WIDGET-MAKER-001 — make_widget MUST return a widget.",
-        "interface": "# Library\n\nmake_widget(name: str) -> str\n\n" + interface_marker + "\n",
-        "glossary": "",
-        "dependency_interfaces": {},
-    }
-
     result = test_author.author_test(
         bundle, "mock", 0, repo_root=repo_root, llm_backend=mock_backend
     )
 
+    # The authoring actually ran end to end, so the inspection below is real.
     assert field(result, "model_call_error") is None
+    prompts = _read_jsonl(prompt_log)
+    assert prompts, "the mock model was never called"
+    probe_calls = _read_jsonl(probe_log)
+    assert probe_calls, "the test-probe stand-in was never called"
 
-    # The bundle as the model saw it: every prompt carries the interface but
-    # nothing from gen/widget-maker/.
-    assert prompt_log.is_file(), "the mock model was never called"
-    prompts = [
-        json.loads(line)["prompt"]
-        for line in prompt_log.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert prompts
+    # The bundle test-author hands on contains nothing from gen/<component>/.
+    for call in probe_calls:
+        handed_bundle = call["bundle"]
+        assert marker not in json.dumps(handed_bundle, default=str)
+        assert marker.lower() not in json.dumps(handed_bundle, default=str)
+        assert "hint_code" not in handed_bundle
+        assert handed_bundle.get("component_id") == "comp-widget-maker"
+
+    # Nothing derived from gen/<component>/ reaches the model either.
     for prompt in prompts:
-        assert interface_marker in prompt
-        assert sentinel not in prompt
+        assert marker not in prompt
+        assert marker.lower() not in prompt
+        assert "SECRET_CONSTANT" not in prompt
 
-    # The bundle as handed on to test-probe: no field derived from gen content.
-    assert probe_log.is_file(), "the test-probe stand-in was never called"
-    records = [
-        json.loads(line)
-        for line in probe_log.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert records
-    for record in records:
-        assert "hint_code" not in record["keys"]
-        assert sentinel not in record["items"]
-        assert sentinel not in record["bundle_repr"]
+    # The caller's bundle was not enriched with gen/<component>/ content.
+    assert json.dumps(bundle, sort_keys=True) == bundle_before
 
-    # Nothing the component returned or wrote is derived from gen content.
+    # The result itself carries nothing from gen/<component>/.
     file_value = field(result, "file")
     assert file_value is not None
-    content = file_value["content"]
-    assert sentinel not in content
-    assert body(content) == REPLY_FILE
-
-    written = repo_root / file_value["path"]
-    assert written.is_file()
-    assert sentinel not in written.read_text(encoding="utf-8")
-
-    for name in (
-        "component_id",
-        "criterion_id",
-        "model",
-        "seed",
-        "prompt_version",
-        "cache_hit",
-        "model_call_error",
-        "repair_attempts",
-        "probe_findings",
-    ):
-        assert sentinel not in repr(field(result, name))
-
-    for sub in ("verification", ".hotdocs"):
-        root = repo_root / sub
-        if not root.exists():
-            continue
-        for path in root.rglob("*"):
-            if path.is_file():
-                text = path.read_text(encoding="utf-8", errors="replace")
-                assert sentinel not in text, str(path)
+    assert marker not in file_value["content"]
+    assert body(file_value["content"]) == test_file

@@ -1,22 +1,13 @@
-# hotdocs-criterion: sha256:23e9d95853e0cd249f6da46a37c92b578d98e5984ad3dfb82a27abf992898d82
+# hotdocs-criterion: sha256:eaf1f575409b92324b1f99fd7fea1249ce32eccbbe7e5d5024f5c77f4d97cccf
 import re
 
 import test_author
 
 
-DEP_ID = "comp-zebra-quux"
-DEP_INTERFACE = "zq_lookup(x: int, y: str) -> ZqResult"
+SIGNATURE = "zq_lookup(x: int, y: str) -> ZqResult"
 RULE_LINE = "a fake MUST return every field, never a bare list, string or number in its place"
 
-NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
-
-REPLY_FILE = (
-    "import test_author\n"
-    "\n"
-    "\n"
-    "def test_placeholder():\n"
-    "    assert test_author is not None\n"
-)
+REPLY_FILE = "def test_placeholder():\n    assert 1 + 1 == 2\n"
 
 
 def field(value, name):
@@ -29,7 +20,7 @@ def make_bundle(dependency_interfaces):
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
         "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 - A widget MUST be made.",
+        "requirement_text": "R-WIDGET-MAKER-001 - The widget MUST be made.",
         "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": dependency_interfaces,
@@ -48,12 +39,8 @@ def plant_probe_stand_in(repo_root, log_path):
         "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
-        "        return {\n"
-        "            'ok': self.ok,\n"
-        "            'findings': list(self.findings),\n"
-        "            'tests_run': self.tests_run,\n"
-        "            'tests_reached': self.tests_reached,\n"
-        "        }\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
         "\n"
         "\n"
         "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
@@ -67,7 +54,7 @@ def plant_probe_stand_in(repo_root, log_path):
 def make_mock_backend(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = re.findall(NONCE_RE, prompt)[-1]
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
             + REPLY_FILE
@@ -83,10 +70,11 @@ def make_mock_backend(prompts):
     return backend
 
 
-def run_scenario(repo_root, monkeypatch, dependency_interfaces):
-    repo_root.mkdir(parents=True, exist_ok=True)
+def run_author(tmp_path, monkeypatch, dependency_interfaces):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     monkeypatch.chdir(repo_root)
-    log_path = repo_root / "probe_calls.log"
+    log_path = tmp_path / "probe_calls.log"
     plant_probe_stand_in(repo_root, log_path)
     prompts = []
     backend = make_mock_backend(prompts)
@@ -99,23 +87,22 @@ def run_scenario(repo_root, monkeypatch, dependency_interfaces):
     return result, prompts
 
 
-def test_dependency_interfaces_appear_in_prompt_with_fake_rule(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo_with_dep"
-    result, prompts = run_scenario(
-        repo_root, monkeypatch, {DEP_ID: DEP_INTERFACE}
+def test_prompt_includes_dependency_interface_and_fake_rule(tmp_path, monkeypatch):
+    result, prompts = run_author(
+        tmp_path, monkeypatch, {"comp-zebra-quux": SIGNATURE}
     )
-
     assert prompts, "the mock model was never called"
     first = prompts[0]
-    assert DEP_ID in first
-    assert DEP_INTERFACE in first
+    assert isinstance(first, str)
+    assert "comp-zebra-quux" in first
+    assert SIGNATURE in first
     assert RULE_LINE in first
 
 
 def test_empty_dependency_interfaces_adds_no_entry(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo_without_dep"
-    result, prompts = run_scenario(repo_root, monkeypatch, {})
-
+    result, prompts = run_author(tmp_path, monkeypatch, {})
     assert field(result, "model_call_error") is None
     assert prompts, "the mock model was never called"
-    assert DEP_ID not in prompts[0]
+    first = prompts[0]
+    assert isinstance(first, str)
+    assert "comp-zebra-quux" not in first
