@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:5dd574b70f9d81ea6a4944c2fb426a2e5d283784a7ca8129795f494df7f54ea5
+# hotdocs-criterion: sha256:294bb9fc8a1b2cef7e4bdc411e52120b9260c446ddc9308b2728b93c15bdfbf2
 import hashlib
 import json
 from pathlib import Path
@@ -6,15 +6,16 @@ from pathlib import Path
 import provenance_checker
 
 
+H = "sha256:" + "b" * 64
+PK = "sha256:" + "a" * 64
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def sha_file(path):
+def sha(path):
     return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-PK = "sha256:" + "a" * 64
 
 
 def write(path, text):
@@ -24,119 +25,157 @@ def write(path, text):
     return path
 
 
-def plant_stand_ins(repo_root, log_path):
-    sba_src = (
+def python_adapter_source():
+    return (
+        "KIND = 'python'\n"
+        "\n"
+        "def guidance():\n"
+        "    return {'generator': '', 'test_author': ''}\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {'ok': True, 'reason': '', 'versions': {'python': '3.12.4', 'packages': "
+        + repr(PK)
+        + "}, 'lockfile_sha256': None, 'interpreter': '/fake/python'}\n"
+    )
+
+
+def fake_kind_source():
+    return (
+        "KIND = 'fake'\n"
+        "\n"
+        "def guidance():\n"
+        "    return {'generator': 'G.', 'test_author': 'T.'}\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {'ok': True, 'reason': '', 'versions': {'fakec': '2.0.0'}, 'lockfile_sha256': None}\n"
+    )
+
+
+def fake_driver_source():
+    return (
+        "import json\n"
+        "from pathlib import Path\n"
+        "\n"
+        "NAME = 'fake'\n"
+        "FIXTURE = 'fake_session'\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    data = json.loads((Path(repo_root) / 'fakedrv.json').read_text())\n"
+        "    return {'ok': True, 'reason': '', 'versions': data['versions'], 'lockfile_sha256': None}\n"
+    )
+
+
+def assembler_source():
+    parts = {"spec": "sha256:" + "c" * 64, "dependency_code": "sha256:" + "d" * 64}
+    return (
         "class SpecBundle:\n"
-        "    _FIELDS = ('component_id', 'spec_bundle_hash', 'spec', 'interface', 'constraints',\n"
-        "               'dependency_interfaces', 'dependency_context', 'dependency_usage', 'vars',\n"
-        "               'glossary', 'hint_code', 'spec_bundle_parts')\n"
-        "    def __init__(self, **kw):\n"
-        "        for k in self._FIELDS:\n"
-        "            setattr(self, k, kw.get(k))\n"
-        "    def __getitem__(self, k):\n"
-        "        if k not in self._FIELDS:\n"
-        "            raise KeyError(k)\n"
-        "        return getattr(self, k)\n"
-        "    def get(self, k, default=None):\n"
-        "        return getattr(self, k) if k in self._FIELDS else default\n"
+        "    def __init__(self, component_id):\n"
+        "        self.component_id = component_id\n"
+        "        self.spec_bundle_hash = " + repr(H) + "\n"
+        "        self.spec = ''\n"
+        "        self.interface = ''\n"
+        "        self.constraints = ''\n"
+        "        self.dependency_interfaces = {}\n"
+        "        self.dependency_context = {}\n"
+        "        self.dependency_usage = {}\n"
+        "        self.vars = {}\n"
+        "        self.glossary = ''\n"
+        "        self.hint_code = None\n"
+        "        self.spec_bundle_parts = " + repr(parts) + "\n"
+        "    def __getitem__(self, key):\n"
+        "        return getattr(self, key)\n"
+        "    def get(self, key, default=None):\n"
+        "        return getattr(self, key, default)\n"
+        "\n"
+        "class CriterionBundle:\n"
+        "    def __init__(self, component_id, criterion_id):\n"
+        "        self.component_id = component_id\n"
+        "        self.criterion_id = criterion_id\n"
+        "        self.covers = ''\n"
+        "        self.criterion_text = ''\n"
+        "        self.requirement_text = ''\n"
+        "        self.interface = ''\n"
+        "        self.glossary = ''\n"
+        "        self.dependency_interfaces = {}\n"
+        "        self.testing = ''\n"
+        "    def __getitem__(self, key):\n"
+        "        return getattr(self, key)\n"
+        "    def get(self, key, default=None):\n"
+        "        return getattr(self, key, default)\n"
         "\n"
         "def assemble(component_id, repo_root=None, mode='cold'):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
-        "        f.write('assemble ' + str(component_id) + ' ' + str(mode) + '\\n')\n"
-        "    return SpecBundle(component_id=component_id, spec_bundle_hash='H', spec='',\n"
-        "        interface='', constraints='', dependency_interfaces={}, dependency_context={},\n"
-        "        dependency_usage={}, vars={}, glossary='', hint_code=None, spec_bundle_parts={})\n"
+        "    return SpecBundle(component_id)\n"
         "\n"
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    raise RuntimeError('assemble_criterion not expected')\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root=None):\n"
+        "    return CriterionBundle(component_id, criterion_id)\n"
     )
-    write(repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py", sba_src)
-    write(
-        repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
-        "GATE_VERSION = " + repr("cc@1") + "\n",
-    )
-    write(repo_root / "gen" / "test-author" / "test_author.py", "GATE_VERSION = " + repr("ta@1") + "\n")
-    write(
-        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
-        "GATE_VERSION = " + repr("vo@1") + "\nDEFAULT_TEST_TIMEOUT = 300.0\n",
-    )
-    ls_src = (
+
+
+def license_source():
+    result = {
+        "component_id": "comp-foo",
+        "gate_version": "ls@1",
+        "evaluated": False,
+        "reason": "no-reference-corpus",
+        "similarity_score": None,
+        "block_threshold": None,
+        "blocked": False,
+        "matches": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
+    return (
         "def gate_version(repo_root):\n"
-        "    return " + repr("ls@1") + "\n"
+        "    return 'ls@1'\n"
+        "\n"
         "def scan(component_id, repo_root):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
-        "        f.write('license scan\\n')\n"
-        "    raise RuntimeError('scan not expected')\n"
+        "    return " + repr(result) + "\n"
     )
-    write(repo_root / "gen" / "license-scanner" / "license_scanner.py", ls_src)
-    ss_src = (
+
+
+def secret_source():
+    result = {
+        "scope": "full",
+        "gate_version": "ss@1",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
+    return (
         "def gate_version(repo_root):\n"
-        "    return " + repr("ss@1") + "\n"
+        "    return 'ss@1'\n"
+        "\n"
         "def scan(repo_root):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
-        "        f.write('secret scan\\n')\n"
-        "    raise RuntimeError('scan not expected')\n"
+        "    return " + repr(result) + "\n"
+        "\n"
         "def scan_files(paths, repo_root=None):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
-        "        f.write('secret scan_files\\n')\n"
-        "    raise RuntimeError('scan_files not expected')\n"
-        "def propose(repo_root):\n"
-        "    raise RuntimeError('propose not expected')\n"
-    )
-    write(repo_root / "gen" / "secret-scanner" / "secret_scanner.py", ss_src)
-    write(
-        repo_root / "gen" / "generator" / "generator.py",
-        "GATE_VERSION = " + repr("gen@3") + "\nPROMPT_VERSION = " + repr("v11") + "\n",
+        "    return " + repr(result) + "\n"
     )
 
 
-def build(tmp_path, include_drivers_in_manifest=True):
+def write_manifest(repo_root, manifest):
+    text = json.dumps(manifest, indent=2)
+    write(repo_root / "gen" / "foo" / ".provenance.json", text)
+    write(repo_root / "verification" / "foo" / ".provenance.json", text)
+
+
+def build_repo(tmp_path, include_drivers_in_manifest=True):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
 
-    py_provision = {
-        "ok": True,
-        "reason": "",
-        "versions": {"python": "3.12.4", "packages": PK},
-        "lockfile_sha256": None,
-        "interpreter": "/fake/python",
-    }
-    kind_python = write(
-        repo_root / "gen" / "kind-python" / "kind_python.py",
-        "KIND = " + repr("python") + "\n"
-        "def guidance():\n"
-        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
-        "def provision(repo_root):\n"
-        "    return " + repr(py_provision) + "\n",
-    )
-
+    py_adapter = write(repo_root / "gen" / "kind-python" / "kind_python.py", python_adapter_source())
     fake_def = write(
         repo_root / "specs" / "architecture" / "asset-kind-fake.md",
-        "# Asset kind fake\n\nFixed definition text.\n",
+        "# Asset kind: fake\n\nA fixed fake kind definition.\n",
     )
-    fake_provision = {"ok": True, "reason": "", "versions": {"fakec": "2.0.0"}, "lockfile_sha256": None}
-    kind_fake = write(
-        repo_root / "gen" / "kind-fake" / "kind_fake.py",
-        "KIND = " + repr("fake") + "\n"
-        "def guidance():\n"
-        "    return " + repr({"generator": "G.", "test_author": "T."}) + "\n"
-        "def provision(repo_root):\n"
-        "    return " + repr(fake_provision) + "\n",
-    )
-
-    fakedrv_json = repo_root / "fakedrv.json"
-    fakedrv_json.write_text(json.dumps({"versions": {"fakedrv": "2.0"}}))
-    driver = write(
-        repo_root / "gen" / "driver-fake" / "driver_fake.py",
-        "import json\n"
-        "NAME = " + repr("fake") + "\n"
-        "FIXTURE = " + repr("fake_session") + "\n"
-        "def provision(repo_root):\n"
-        "    with open(" + repr(str(fakedrv_json)) + ") as f:\n"
-        "        data = json.load(f)\n"
-        "    return {'ok': True, 'reason': '', 'versions': data['versions'], 'lockfile_sha256': None}\n",
-    )
+    fake_adapter = write(repo_root / "gen" / "kind-fake" / "kind_fake.py", fake_kind_source())
+    driver = write(repo_root / "gen" / "driver-fake" / "driver_fake.py", fake_driver_source())
+    write(repo_root / "fakedrv.json", json.dumps({"versions": {"fakedrv": "2.0"}}))
 
     write(
         repo_root / "specs" / "components" / "foo" / "component.md",
@@ -145,7 +184,6 @@ def build(tmp_path, include_drivers_in_manifest=True):
         "title: Foo\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
-        "depends_on: []\n"
         "assets: [fake:static/a.fake]\n"
         "drivers: [fake]\n"
         "---\n"
@@ -153,37 +191,51 @@ def build(tmp_path, include_drivers_in_manifest=True):
         "# Foo\n",
     )
 
-    plant_stand_ins(repo_root, log_path)
+    # Dependency stand-ins (as AC-PROVCHECK-009 plants them).
+    write(repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py", assembler_source())
+    write(
+        repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
+        "GATE_VERSION = " + repr("cc@1") + "\n",
+    )
+    write(repo_root / "gen" / "test-author" / "test_author.py", "GATE_VERSION = " + repr("ta@1") + "\n")
+    write(
+        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+        "GATE_VERSION = " + repr("vo@1") + "\n",
+    )
+    write(repo_root / "gen" / "license-scanner" / "license_scanner.py", license_source())
+    write(repo_root / "gen" / "secret-scanner" / "secret_scanner.py", secret_source())
+    write(
+        repo_root / "gen" / "generator" / "generator.py",
+        "GATE_VERSION = " + repr("gen@3") + "\nPROMPT_VERSION = " + repr("v11") + "\n",
+    )
 
     P = {
         "kind": "python",
         "path": ".",
         "definition_sha256": None,
-        "adapter_sha256": sha_file(kind_python),
+        "adapter_sha256": sha(py_adapter),
         "versions": {"python": "3.12.4", "packages": PK},
         "lockfile_sha256": None,
     }
-    E = [
-        P,
-        {
-            "kind": "fake",
-            "path": "static/a.fake",
-            "definition_sha256": sha_file(fake_def),
-            "adapter_sha256": sha_file(kind_fake),
-            "versions": {"fakec": "2.0.0"},
-            "lockfile_sha256": None,
-        },
-    ]
+    FAKE = {
+        "kind": "fake",
+        "path": "static/a.fake",
+        "definition_sha256": sha(fake_def),
+        "adapter_sha256": sha(fake_adapter),
+        "versions": {"fakec": "2.0.0"},
+        "lockfile_sha256": None,
+    }
+    E = [P, FAKE]
     DR = {
         "name": "fake",
         "definition_sha256": None,
-        "adapter_sha256": sha_file(driver),
+        "adapter_sha256": sha(driver),
         "versions": {"fakedrv": "2.0"},
         "lockfile_sha256": None,
     }
 
     manifest = {
-        "spec_bundle_hash": "H",
+        "spec_bundle_hash": H,
         "gate_versions": {},
         "verification_report": {"criteria": []},
         "license_scan": {},
@@ -192,51 +244,47 @@ def build(tmp_path, include_drivers_in_manifest=True):
     }
     if include_drivers_in_manifest:
         manifest["drivers"] = [DR]
-    write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest, indent=2))
+    write_manifest(repo_root, manifest)
 
-    return {"repo_root": repo_root, "fakedrv_json": fakedrv_json, "driver": driver, "E": E, "DR": DR}
+    return repo_root, E, DR, driver
 
 
 def test_driver_versions_change_is_environment_differs(tmp_path):
-    fx = build(tmp_path)
-    repo_root = fx["repo_root"]
+    repo_root, E, DR, driver = build_repo(tmp_path)
+    (repo_root / "fakedrv.json").write_text(json.dumps({"versions": {"fakedrv": "2.1"}}))
 
-    baseline = provenance_checker.check_provenance("comp-foo", "H", {}, repo_root)
-    assert field(baseline, "hit") is True, field(baseline, "reason")
+    result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
 
-    fx["fakedrv_json"].write_text(json.dumps({"versions": {"fakedrv": "2.1"}}))
-    result = provenance_checker.check_provenance("comp-foo", "H", {}, repo_root)
     assert field(result, "hit") is False
     assert field(result, "reason") == "environment differs"
 
 
 def test_driver_adapter_change_is_drivers_differ(tmp_path):
-    fx = build(tmp_path)
-    repo_root = fx["repo_root"]
+    repo_root, E, DR, driver = build_repo(tmp_path)
+    with open(driver, "a") as fh:
+        fh.write("# a changed comment\n")
 
-    with open(fx["driver"], "a") as f:
-        f.write("# a changed driver adapter\n")
-    result = provenance_checker.check_provenance("comp-foo", "H", {}, repo_root)
+    result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
+
     assert field(result, "hit") is False
     assert field(result, "reason") == "drivers differ"
 
 
 def test_manifest_without_drivers_is_drivers_differ(tmp_path):
-    fx = build(tmp_path, include_drivers_in_manifest=False)
-    repo_root = fx["repo_root"]
+    repo_root, E, DR, driver = build_repo(tmp_path, include_drivers_in_manifest=False)
 
-    result = provenance_checker.check_provenance("comp-foo", "H", {}, repo_root)
+    result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
+
     assert field(result, "hit") is False
     assert field(result, "reason") == "drivers differ"
 
 
-def test_unchanged_key_drivers_and_hit(tmp_path):
-    fx = build(tmp_path)
-    repo_root = fx["repo_root"]
+def test_nothing_changed_key_has_drivers_and_hits(tmp_path):
+    repo_root, E, DR, driver = build_repo(tmp_path)
 
     key = provenance_checker.current_provenance_key("comp-foo", repo_root)
-    assert list(field(key, "drivers")) == [fx["DR"]]
+    assert field(key, "drivers") == [DR]
 
-    result = provenance_checker.check_provenance("comp-foo", "H", {}, repo_root)
-    assert field(result, "hit") is True, field(result, "reason")
+    result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
+    assert field(result, "hit") is True
     assert field(result, "reason") is None

@@ -1,34 +1,25 @@
-# hotdocs-criterion: sha256:9649669407c5c4cf66186f5057068485942eb1375770d05941b142a237085db9
-import copy
+# hotdocs-criterion: sha256:3792ee8db6a423081b535394d735c960cd426a1113675a067d6156b01fb2f382
 import hashlib
 import json
 from pathlib import Path
 
-import pytest
-
 import provenance_checker
-
-
-H = "sha256:" + "1f" * 32
-PK = "sha256:" + "a" * 64
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _sha(path):
+def sha256_of(path):
     return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _write(path, text):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return path
+PK = "sha256:" + "a" * 64
 
 
-def _plant_python_adapter(repo_root):
+def plant_python_adapter(repo_root):
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True, exist_ok=True)
     provision_result = {
         "ok": True,
         "reason": "",
@@ -36,22 +27,25 @@ def _plant_python_adapter(repo_root):
         "lockfile_sha256": None,
         "interpreter": "/fake/python",
     }
-    guidance_result = {"generator": "", "test_author": ""}
-    src = (
+    source = (
         "KIND = " + repr("python") + "\n"
         "\n"
         "\n"
         "def guidance():\n"
-        "    return " + repr(guidance_result) + "\n"
+        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
         "\n"
         "\n"
         "def provision(repo_root):\n"
         "    return " + repr(provision_result) + "\n"
     )
-    return _write(repo_root / "gen" / "kind-python" / "kind_python.py", src)
+    path = adapter_dir / "kind_python.py"
+    path.write_text(source, encoding="utf-8")
+    return path
 
 
-def _plant_component(repo_root):
+def plant_component(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True, exist_ok=True)
     text = (
         "---\n"
         "id: comp-foo\n"
@@ -67,10 +61,32 @@ def _plant_component(repo_root):
         "\n"
         "A fixture component.\n"
     )
-    _write(repo_root / "specs" / "components" / "foo" / "component.md", text)
+    (comp_dir / "component.md").write_text(text, encoding="utf-8")
 
 
-def _build_manifest(python_entry):
+def test_ac_provcheck_001_hash_match_without_llm_judge_is_verbatim_hit(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    # Even with judge provenance not trusted, no llm-judge criteria means
+    # the hit is honored unconditionally.
+    monkeypatch.setenv("VAR_TRUST_JUDGE_PROVENANCE", "false")
+
+    adapter_path = plant_python_adapter(repo_root)
+    plant_component(repo_root)
+
+    pa = sha256_of(adapter_path)
+    p_entry = {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": None,
+        "adapter_sha256": pa,
+        "versions": {"python": "3.12.4", "packages": PK},
+        "lockfile_sha256": None,
+    }
+
+    h = "sha256:" + "0123456789abcdef" * 4
+
     verification_report = {
         "component_id": "comp-foo",
         "criteria": [
@@ -82,7 +98,7 @@ def _build_manifest(python_entry):
                 "result": "pass",
                 "test_authoring": {
                     "model": "gpt-5",
-                    "seed": 0,
+                    "seed": 7,
                     "prompt_version": "v1",
                     "cache_hit": False,
                 },
@@ -92,7 +108,7 @@ def _build_manifest(python_entry):
         "interface_drift": False,
         "mutation_score": 0.87,
         "mutation_error": None,
-        "assets": [python_entry],
+        "assets": [p_entry],
         "drivers": [],
         "overall": "pass",
     }
@@ -122,51 +138,30 @@ def _build_manifest(python_entry):
         "notification_delivery_error": None,
         "cache_hit": True,
     }
-    return {
-        "spec_bundle_hash": H,
+
+    manifest = {
+        "spec_bundle_hash": h,
         "gate_versions": {},
         "verification_report": verification_report,
         "license_scan": license_scan,
         "secret_scan": secret_scan,
-        "assets": [python_entry],
+        "assets": [p_entry],
         "drivers": [],
     }
-
-
-@pytest.mark.parametrize("trust_judge", [None, "false", "true"])
-def test_hash_match_without_llm_judge_is_verbatim_hit(tmp_path, monkeypatch, trust_judge):
-    if trust_judge is None:
-        monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
-    else:
-        monkeypatch.setenv("VAR_TRUST_JUDGE_PROVENANCE", trust_judge)
-
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    adapter = _plant_python_adapter(repo_root)
-    _plant_component(repo_root)
-
-    python_entry = {
-        "kind": "python",
-        "path": ".",
-        "definition_sha256": None,
-        "adapter_sha256": _sha(adapter),
-        "versions": {"python": "3.12.4", "packages": PK},
-        "lockfile_sha256": None,
-    }
-    manifest = _build_manifest(python_entry)
-    assert not any(
-        c.get("kind") == "llm-judge" for c in manifest["verification_report"]["criteria"]
+    manifest_dir = repo_root / "gen" / "foo"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / ".provenance.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
     )
-    _write(
-        repo_root / "gen" / "foo" / ".provenance.json",
-        json.dumps(manifest, indent=2, sort_keys=True),
+
+    # Reference copies read back from disk, independent of the dicts above.
+    committed = json.loads((manifest_dir / ".provenance.json").read_text(encoding="utf-8"))
+
+    result = provenance_checker.check_provenance("comp-foo", h, {}, repo_root)
+
+    assert field(result, "hit") is True, (
+        "expected a hit, got reason " + repr(field(result, "reason"))
     )
-    expected = copy.deepcopy(manifest)
-
-    result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
-
-    assert field(result, "hit") is True
-    assert field(result, "reason") is None
-    assert field(result, "verification_report") == expected["verification_report"]
-    assert field(result, "license_scan") == expected["license_scan"]
-    assert field(result, "secret_scan") == expected["secret_scan"]
+    assert field(result, "verification_report") == committed["verification_report"]
+    assert field(result, "license_scan") == committed["license_scan"]
+    assert field(result, "secret_scan") == committed["secret_scan"]

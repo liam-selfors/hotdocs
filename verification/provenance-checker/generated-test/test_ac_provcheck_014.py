@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:1cab5a03167dc0dd76694641fcf877ad4b817c7af73c9cb0060058315e1fd85d
+# hotdocs-criterion: sha256:d2840510ef738d207e51477e15de876851364fa5b863972bdd945d69212cbf91
 import hashlib
 import json
 from pathlib import Path
@@ -8,8 +8,10 @@ import pytest
 import provenance_checker
 
 
+H = "sha256:" + "c" * 64
 PK = "sha256:" + "a" * 64
-MISSING = object()
+FAKE_REASON = "fake needs fakec >= 2"
+PYTHON_REASON = "python environment: requirements.lock does not pin pytest"
 
 
 def field(value, name):
@@ -23,370 +25,353 @@ def sha(path):
 def write(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
-def log_lines(path):
-    path = Path(path)
-    if not path.exists():
-        return []
-    return [line for line in path.read_text().splitlines() if line.strip()]
-
-
-ADAPTER_STUBS = (
-    "\n"
-    "def layout_errors(asset_file):\n"
-    "    return []\n"
-    "\n"
-    "def surface(asset_file):\n"
-    "    return {'names': []}\n"
-    "\n"
-    "def asset_runner(asset_file):\n"
-    "    def run(entry_point, args):\n"
-    "        return None\n"
-    "    return run\n"
-    "\n"
-    "def strength_sites(asset_file):\n"
-    "    return []\n"
-    "\n"
-    "def apply_site(asset_file, site):\n"
-    "    return None\n"
-)
-
-
-def python_adapter_source(log, ok=True, reason=""):
+def adapter_source(kind, guidance, versions, cfg_path, log_path, python):
+    ok_result = (
+        "{'ok': True, 'reason': '', 'versions': "
+        + repr(versions)
+        + ", 'lockfile_sha256': None"
+    )
+    fail_result = "{'ok': False, 'reason': cfg['reason'], 'versions': {}, 'lockfile_sha256': None"
+    if python:
+        ok_result += ", 'interpreter': '/fake/python'"
+        fail_result += ", 'interpreter': None"
+    ok_result += "}"
+    fail_result += "}"
     return (
-        "KIND = 'python'\n"
-        "LOG = " + repr(str(log)) + "\n"
-        "OK = " + repr(ok) + "\n"
-        "REASON = " + repr(reason) + "\n"
-        "PK = " + repr(PK) + "\n"
+        "import json\n"
+        "import os\n"
+        "\n"
+        "KIND = " + repr(kind) + "\n"
+        "_CFG = " + repr(str(cfg_path)) + "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "\n"
         "\n"
         "def guidance():\n"
-        "    return {'generator': '', 'test_author': ''}\n"
+        "    return " + repr(guidance) + "\n"
+        "\n"
         "\n"
         "def provision(repo_root):\n"
-        "    with open(LOG, 'a') as handle:\n"
-        "        handle.write('provision\\n')\n"
-        "    return {'ok': OK, 'reason': REASON,\n"
-        "            'versions': {'python': '3.12.4', 'packages': PK},\n"
-        "            'lockfile_sha256': None,\n"
-        "            'interpreter': '/fake/python' if OK else None}\n"
-        + ADAPTER_STUBS
+        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('provision\\n')\n"
+        "    cfg = {}\n"
+        "    if os.path.exists(_CFG):\n"
+        "        with open(_CFG, encoding='utf-8') as fh:\n"
+        "            cfg = json.load(fh)\n"
+        "    if cfg.get('ok', True) is False:\n"
+        "        return " + fail_result + "\n"
+        "    return " + ok_result + "\n"
+        "\n"
+        "\n"
+        "def layout_errors(asset_file):\n"
+        "    return []\n"
+        "\n"
+        "\n"
+        "def surface(asset_file):\n"
+        "    return {'names': []}\n"
+        "\n"
+        "\n"
+        "def asset_runner(asset_file):\n"
+        "    def run(entry, args):\n"
+        "        return None\n"
+        "    return run\n"
+        "\n"
+        "\n"
+        "def strength_sites(asset_file):\n"
+        "    return []\n"
+        "\n"
+        "\n"
+        "def apply_site(asset_file, site):\n"
+        "    return None\n"
     )
 
 
-def fake_adapter_source(log, ok=True, reason=""):
+def log_prelude(log_path):
     return (
-        "KIND = 'fake'\n"
-        "LOG = " + repr(str(log)) + "\n"
-        "OK = " + repr(ok) + "\n"
-        "REASON = " + repr(reason) + "\n"
+        "_CALLS = " + repr(str(log_path)) + "\n"
         "\n"
-        "def guidance():\n"
-        "    return {'generator': 'G.', 'test_author': 'T.'}\n"
         "\n"
-        "def provision(repo_root):\n"
-        "    with open(LOG, 'a') as handle:\n"
-        "        handle.write('provision\\n')\n"
-        "    return {'ok': OK, 'reason': REASON,\n"
-        "            'versions': {'fakec': '2.0.0'},\n"
-        "            'lockfile_sha256': None}\n"
-        + ADAPTER_STUBS
+        "def _record(name):\n"
+        "    with open(_CALLS, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(name + '\\n')\n"
+        "\n"
+        "\n"
     )
 
 
-def assembler_source(log):
+def stub(name):
     return (
-        "LOG = " + repr(str(log)) + "\n"
+        "def " + name + "(*args, **kwargs):\n"
+        "    _record(" + repr(name) + ")\n"
+        "    raise RuntimeError(" + repr(name + " stand-in must not be called") + ")\n"
         "\n"
-        "class SpecBundle:\n"
-        "    def __init__(self, component_id):\n"
+        "\n"
+    )
+
+
+def assembler_source(log_path):
+    return (
+        log_prelude(log_path)
+        + "class SpecBundle:\n"
+        "    _FIELDS = ('component_id', 'spec_bundle_hash', 'spec', 'interface', 'constraints',\n"
+        "               'dependency_interfaces', 'dependency_context', 'dependency_usage',\n"
+        "               'vars', 'glossary', 'hint_code', 'spec_bundle_parts')\n"
+        "\n"
+        "    def __init__(self, component_id, spec_bundle_hash, spec='', interface='',\n"
+        "                 constraints='', dependency_interfaces=None, dependency_context=None,\n"
+        "                 dependency_usage=None, vars=None, glossary='', hint_code=None,\n"
+        "                 spec_bundle_parts=None):\n"
         "        self.component_id = component_id\n"
-        "        self.spec_bundle_hash = 'sha256:abc'\n"
-        "        self.spec = ''\n"
-        "        self.interface = ''\n"
-        "        self.constraints = ''\n"
-        "        self.dependency_interfaces = {}\n"
-        "        self.dependency_context = {}\n"
-        "        self.dependency_usage = {}\n"
-        "        self.vars = {}\n"
-        "        self.glossary = ''\n"
-        "        self.hint_code = None\n"
-        "        self.spec_bundle_parts = {'spec': 'sha256:" + "1" * 64 + "',\n"
-        "                                  'dependency_code': 'sha256:" + "2" * 64 + "'}\n"
+        "        self.spec_bundle_hash = spec_bundle_hash\n"
+        "        self.spec = spec\n"
+        "        self.interface = interface\n"
+        "        self.constraints = constraints\n"
+        "        self.dependency_interfaces = dependency_interfaces or {}\n"
+        "        self.dependency_context = dependency_context or {}\n"
+        "        self.dependency_usage = dependency_usage or {}\n"
+        "        self.vars = vars or {}\n"
+        "        self.glossary = glossary\n"
+        "        self.hint_code = hint_code\n"
+        "        self.spec_bundle_parts = spec_bundle_parts or {}\n"
         "\n"
         "    def __getitem__(self, key):\n"
+        "        if key not in self._FIELDS:\n"
+        "            raise KeyError(key)\n"
         "        return getattr(self, key)\n"
         "\n"
         "    def get(self, key, default=None):\n"
-        "        return getattr(self, key, default)\n"
+        "        return getattr(self, key) if key in self._FIELDS else default\n"
+        "\n"
+        "    def keys(self):\n"
+        "        return list(self._FIELDS)\n"
+        "\n"
         "\n"
         "def assemble(component_id, repo_root, mode='cold'):\n"
-        "    with open(LOG, 'a') as handle:\n"
-        "        handle.write('assemble ' + str(component_id) + ' ' + str(mode) + '\\n')\n"
-        "    return SpecBundle(component_id)\n"
+        "    _record('assemble')\n"
+        "    return SpecBundle(\n"
+        "        component_id=component_id,\n"
+        "        spec_bundle_hash='sha256:abc',\n"
+        "        spec_bundle_parts={'spec': 'sha256:s', 'dependency_code': 'sha256:d'},\n"
+        "    )\n"
         "\n"
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    raise RuntimeError('not used')\n"
+        "\n"
+        + stub("assemble_criterion")
     )
 
 
-def license_source(log):
-    return (
-        "LOG = " + repr(str(log)) + "\n"
-        "\n"
-        "def gate_version(repo_root):\n"
-        "    return 'ls@1'\n"
-        "\n"
-        "def scan(component_id, repo_root):\n"
-        "    with open(LOG, 'a') as handle:\n"
-        "        handle.write('license scan\\n')\n"
-        "    return {'component_id': component_id, 'gate_version': 'ls@1',\n"
-        "            'evaluated': False, 'reason': 'no-reference-corpus',\n"
-        "            'similarity_score': None, 'block_threshold': None,\n"
-        "            'blocked': False, 'matches': [], 'notified': False,\n"
-        "            'notification_delivery_error': None, 'cache_hit': False}\n"
-    )
+def plant_standins(root, log_path):
+    write(root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+          assembler_source(log_path))
+    write(root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
+          log_prelude(log_path)
+          + "GATE_VERSION = 'cc@1'\n\n\n"
+          + stub("compile") + stub("compile_criterion"))
+    write(root / "gen" / "test-author" / "test_author.py",
+          log_prelude(log_path)
+          + "GATE_VERSION = 'ta@1'\n\n\n"
+          + stub("author_test"))
+    write(root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+          log_prelude(log_path)
+          + "GATE_VERSION = 'vo@1'\nDEFAULT_TEST_TIMEOUT = 300.0\n\n\n"
+          + stub("verify"))
+    write(root / "gen" / "license-scanner" / "license_scanner.py",
+          log_prelude(log_path)
+          + "def gate_version(repo_root):\n    return 'ls@1'\n\n\n"
+          + stub("scan"))
+    write(root / "gen" / "secret-scanner" / "secret_scanner.py",
+          log_prelude(log_path)
+          + "def gate_version(repo_root):\n    return 'ss@1'\n\n\n"
+          + stub("scan") + stub("scan_files") + stub("propose"))
+    write(root / "gen" / "generator" / "generator.py",
+          log_prelude(log_path)
+          + "GATE_VERSION = 'gen@3'\nPROMPT_VERSION = 'v11'\n\n\n"
+          + stub("generate") + stub("commit_cache") + stub("check_write_allowed")
+          + stub("render_prompt_sections") + stub("write_files") + stub("check_assets")
+          + stub("check_asset_environment"))
 
 
-def secret_source(log):
-    return (
-        "LOG = " + repr(str(log)) + "\n"
-        "\n"
-        "def gate_version(repo_root):\n"
-        "    return 'ss@1'\n"
-        "\n"
-        "def _result(scope):\n"
-        "    return {'scope': scope, 'gate_version': 'ss@1', 'flagged': False,\n"
-        "            'matches': [], 'allowed': [], 'unused_allowlist_entries': [],\n"
-        "            'notified': False, 'notification_delivery_error': None,\n"
-        "            'cache_hit': False}\n"
-        "\n"
-        "def scan(repo_root):\n"
-        "    with open(LOG, 'a') as handle:\n"
-        "        handle.write('secret scan\\n')\n"
-        "    return _result('full')\n"
-        "\n"
-        "def scan_files(paths, repo_root=None):\n"
-        "    with open(LOG, 'a') as handle:\n"
-        "        handle.write('secret scan_files\\n')\n"
-        "    return _result('precommit')\n"
-    )
+class Repo:
+    def __init__(self, tmp_path, assets_line="assets: [fake:static/a.fake]", extra_lines=()):
+        self.root = tmp_path / "repo"
+        self.side = tmp_path / "side"
+        self.root.mkdir(parents=True)
+        self.side.mkdir(parents=True)
+        self.python_log = self.side / "python_provision.log"
+        self.fake_log = self.side / "fake_provision.log"
+        self.python_cfg = self.side / "python_cfg.json"
+        self.fake_cfg = self.side / "fake_cfg.json"
+        self.calls_log = self.side / "standin_calls.log"
+
+        self.python_adapter = self.root / "gen" / "kind-python" / "kind_python.py"
+        write(self.python_adapter, adapter_source(
+            "python", {"generator": "", "test_author": ""},
+            {"python": "3.12.4", "packages": PK},
+            self.python_cfg, self.python_log, True))
+
+        self.fake_definition = self.root / "specs" / "architecture" / "asset-kind-fake.md"
+        write(self.fake_definition, "# Fake asset kind\n\nA fixed fake definition.\n")
+        self.fake_adapter = self.root / "gen" / "kind-fake" / "kind_fake.py"
+        write(self.fake_adapter, adapter_source(
+            "fake", {"generator": "G.", "test_author": "T."},
+            {"fakec": "2.0.0"},
+            self.fake_cfg, self.fake_log, False))
+
+        self.component_md = self.root / "specs" / "components" / "foo" / "component.md"
+        lines = ["---", "id: comp-foo", "title: Foo", "status: draft",
+                 "owners: [pipeline-team]", "depends_on: []"]
+        if assets_line:
+            lines.append(assets_line)
+        lines.extend(extra_lines)
+        lines.extend(["---", "", "# Foo", "", "## Purpose", "", "A fixture component.", ""])
+        write(self.component_md, "\n".join(lines))
+
+        plant_standins(self.root, self.calls_log)
+
+    def P(self):
+        return {"kind": "python", "path": ".", "definition_sha256": None,
+                "adapter_sha256": sha(self.python_adapter),
+                "versions": {"python": "3.12.4", "packages": PK},
+                "lockfile_sha256": None}
+
+    def E(self):
+        return [self.P(), {"kind": "fake", "path": "static/a.fake",
+                           "definition_sha256": sha(self.fake_definition),
+                           "adapter_sha256": sha(self.fake_adapter),
+                           "versions": {"fakec": "2.0.0"},
+                           "lockfile_sha256": None}]
+
+    def write_manifest(self, assets, spec_bundle_hash=H, omit_assets=False):
+        manifest = {
+            "spec_bundle_hash": spec_bundle_hash,
+            "gate_versions": {},
+            "verification_report": {"criteria": []},
+            "license_scan": {},
+            "secret_scan": {},
+        }
+        if not omit_assets:
+            manifest["assets"] = assets
+        write(self.root / "gen" / "foo" / ".provenance.json", json.dumps(manifest, indent=2))
+
+    def reset_logs(self):
+        for p in (self.python_log, self.fake_log):
+            if p.exists():
+                p.unlink()
+
+    def calls(self, log):
+        if not log.exists():
+            return 0
+        return len([l for l in log.read_text(encoding="utf-8").splitlines() if l.strip()])
+
+    def check(self):
+        return provenance_checker.check_provenance("comp-foo", H, {}, self.root)
+
+    def key(self):
+        return provenance_checker.current_provenance_key("comp-foo", self.root)
 
 
-def component_md(assets_line, extra_lines=()):
-    lines = [
-        "---",
-        "id: comp-foo",
-        "title: Foo",
-        "status: draft",
-        "owners: [pipeline-team]",
-        "depends_on: []",
-    ]
-    if assets_line is not None:
-        lines.append(assets_line)
-    lines.extend(extra_lines)
-    lines.append("---")
-    lines.append("")
-    lines.append("# Foo")
-    lines.append("")
-    lines.append("## Purpose")
-    lines.append("")
-    lines.append("Foo does foo things.")
-    lines.append("")
-    return "\n".join(lines)
+def test_current_provenance_key_assets_is_exactly_E(tmp_path):
+    repo = Repo(tmp_path)
+    key = repo.key()
+    assert field(key, "assets") == repo.E()
 
 
-def build(tmp_path, assets_line="assets: [fake:static/a.fake]", extra_lines=(),
-          python_ok=True, python_reason="", fake_ok=True, fake_reason=""):
-    repo = tmp_path / "repo"
-    logs = tmp_path / "logs"
-    repo.mkdir()
-    logs.mkdir()
-    ctx = {
-        "repo": repo,
-        "python_log": logs / "python.log",
-        "fake_log": logs / "fake.log",
-        "deps_log": logs / "deps.log",
-    }
-    ctx["python_adapter"] = repo / "gen" / "kind-python" / "kind_python.py"
-    ctx["fake_adapter"] = repo / "gen" / "kind-fake" / "kind_fake.py"
-    ctx["definition"] = repo / "specs" / "architecture" / "asset-kind-fake.md"
-    ctx["component_md"] = repo / "specs" / "components" / "foo" / "component.md"
-    ctx["manifest"] = repo / "gen" / "foo" / ".provenance.json"
-
-    write(ctx["python_adapter"], python_adapter_source(ctx["python_log"], python_ok, python_reason))
-    write(ctx["fake_adapter"], fake_adapter_source(ctx["fake_log"], fake_ok, fake_reason))
-    write(ctx["definition"], "# Asset kind fake\n\nA fixed definition text.\n")
-    write(ctx["component_md"], component_md(assets_line, extra_lines))
-
-    write(repo / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-          assembler_source(ctx["deps_log"]))
-    write(repo / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
-          "GATE_VERSION = " + repr("cc@1") + "\n")
-    write(repo / "gen" / "test-author" / "test_author.py",
-          "GATE_VERSION = " + repr("ta@1") + "\n")
-    write(repo / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
-          "GATE_VERSION = " + repr("vo@1") + "\n")
-    write(repo / "gen" / "license-scanner" / "license_scanner.py",
-          license_source(ctx["deps_log"]))
-    write(repo / "gen" / "secret-scanner" / "secret_scanner.py",
-          secret_source(ctx["deps_log"]))
-    write(repo / "gen" / "generator" / "generator.py",
-          "GATE_VERSION = " + repr("gen@3") + "\n" + "PROMPT_VERSION = " + repr("v11") + "\n")
-    return ctx
-
-
-def expected_p(ctx):
-    return {
-        "kind": "python",
-        "path": ".",
-        "definition_sha256": None,
-        "adapter_sha256": sha(ctx["python_adapter"]),
-        "versions": {"python": "3.12.4", "packages": PK},
-        "lockfile_sha256": None,
-    }
-
-
-def expected_e(ctx):
-    return [
-        expected_p(ctx),
-        {
-            "kind": "fake",
-            "path": "static/a.fake",
-            "definition_sha256": sha(ctx["definition"]),
-            "adapter_sha256": sha(ctx["fake_adapter"]),
-            "versions": {"fakec": "2.0.0"},
-            "lockfile_sha256": None,
-        },
-    ]
-
-
-def write_manifest(ctx, assets=MISSING, spec_bundle_hash="H"):
-    manifest = {
-        "spec_bundle_hash": spec_bundle_hash,
-        "gate_versions": {},
-        "verification_report": {"criteria": []},
-        "license_scan": {},
-        "secret_scan": {},
-        "drivers": [],
-    }
-    if assets is not MISSING:
-        manifest["assets"] = assets
-    write(ctx["manifest"], json.dumps(manifest))
-
-
-def check(ctx):
-    return provenance_checker.check_provenance("comp-foo", "H", {}, ctx["repo"])
-
-
-def test_current_key_assets_is_e(tmp_path):
-    ctx = build(tmp_path)
-    key = provenance_checker.current_provenance_key("comp-foo", ctx["repo"])
-    assert field(key, "assets") == expected_e(ctx)
-
-
-def test_manifest_with_e_is_hit(tmp_path):
-    ctx = build(tmp_path)
-    write_manifest(ctx, expected_e(ctx))
-    result = check(ctx)
+def test_manifest_with_E_is_a_hit(tmp_path):
+    repo = Repo(tmp_path)
+    repo.write_manifest(repo.E())
+    result = repo.check()
     assert field(result, "hit") is True
     assert field(result, "reason") is None
 
 
-def test_changed_definition_misses(tmp_path):
-    ctx = build(tmp_path)
-    write_manifest(ctx, expected_e(ctx))
-    write(ctx["definition"], "# Asset kind fake\n\nA changed definition text.\n")
-    result = check(ctx)
+def test_definition_changed_after_manifest_misses_with_assets_differ(tmp_path):
+    repo = Repo(tmp_path)
+    repo.write_manifest(repo.E())
+    with open(repo.fake_definition, "a", encoding="utf-8") as fh:
+        fh.write("A change made after the manifest was written.\n")
+    result = repo.check()
     assert field(result, "hit") is False
     assert field(result, "reason") == "assets differ"
 
 
-def test_changed_adapter_misses(tmp_path):
-    ctx = build(tmp_path)
-    write_manifest(ctx, expected_e(ctx))
-    with open(ctx["fake_adapter"], "a") as handle:
-        handle.write("# a comment line\n")
-    result = check(ctx)
+def test_adapter_comment_appended_after_manifest_misses_with_assets_differ(tmp_path):
+    repo = Repo(tmp_path)
+    repo.write_manifest(repo.E())
+    with open(repo.fake_adapter, "a", encoding="utf-8") as fh:
+        fh.write("# a comment appended after the manifest was written\n")
+    result = repo.check()
     assert field(result, "hit") is False
     assert field(result, "reason") == "assets differ"
 
 
-def test_fake_provision_failure_misses_with_its_reason(tmp_path):
-    ctx = build(tmp_path)
-    write_manifest(ctx, expected_e(ctx))
-    write(ctx["fake_adapter"],
-          fake_adapter_source(ctx["fake_log"], False, "fake needs fakec >= 2"))
-    result = check(ctx)
+def test_fake_provision_not_ok_misses_with_its_reason(tmp_path):
+    repo = Repo(tmp_path)
+    repo.write_manifest(repo.E())
+    write(repo.fake_cfg, json.dumps({"ok": False, "reason": FAKE_REASON}))
+    result = repo.check()
     assert field(result, "hit") is False
-    assert field(result, "reason") == "fake needs fakec >= 2"
+    assert field(result, "reason") == FAKE_REASON
 
 
-def test_unknown_kind_misses(tmp_path):
-    ctx = build(tmp_path)
-    write_manifest(ctx, expected_e(ctx))
-    write(ctx["component_md"], component_md("assets: [nokind:static/b.x]"))
-    result = check(ctx)
+def test_unknown_asset_kind_misses(tmp_path):
+    repo = Repo(tmp_path, assets_line="assets: [nokind:static/b.x]")
+    repo.write_manifest(repo.E())
+    result = repo.check()
     assert field(result, "hit") is False
     assert field(result, "reason") == "unknown asset kind: nokind"
 
 
-def test_python_provision_failure_misses_before_fake(tmp_path):
-    reason = "python environment: requirements.lock does not pin pytest"
-    ctx = build(tmp_path, python_ok=False, python_reason=reason)
-    write_manifest(ctx, expected_e(ctx))
-    result = check(ctx)
+def test_python_provision_not_ok_misses_and_fake_not_provisioned(tmp_path):
+    repo = Repo(tmp_path)
+    repo.write_manifest(repo.E())
+    write(repo.python_cfg, json.dumps({"ok": False, "reason": PYTHON_REASON}))
+    repo.reset_logs()
+    result = repo.check()
     assert field(result, "hit") is False
-    assert field(result, "reason") == reason
-    assert log_lines(ctx["fake_log"]) == []
+    assert field(result, "reason") == PYTHON_REASON
+    assert repo.calls(repo.fake_log) == 0
 
 
-def test_removed_component_md_has_only_python_asset(tmp_path):
-    ctx = build(tmp_path)
-    ctx["component_md"].unlink()
-    key = provenance_checker.current_provenance_key("comp-foo", ctx["repo"])
-    p = expected_p(ctx)
-    assert field(key, "assets") == [p]
-    write_manifest(ctx, [p])
-    result = check(ctx)
+def test_component_md_removed_assets_is_only_python(tmp_path):
+    repo = Repo(tmp_path)
+    repo.component_md.unlink()
+    key = repo.key()
+    assert field(key, "assets") == [repo.P()]
+    repo.write_manifest([repo.P()])
+    result = repo.check()
     assert field(result, "hit") is True
     assert field(result, "reason") is None
 
 
-def test_sealed_component_has_no_assets_and_no_provision(tmp_path):
-    ctx = build(tmp_path, extra_lines=("sealed: true", "source_path: legacy/foo/"))
-    key = provenance_checker.current_provenance_key("comp-foo", ctx["repo"])
+def test_sealed_component_assets_empty_and_no_provision(tmp_path):
+    repo = Repo(tmp_path, extra_lines=("sealed: true", "source_path: legacy/foo/"))
+    write(repo.root / "legacy" / "foo" / "foo.py", "X = 1\n")
+    repo.reset_logs()
+    key = repo.key()
     assert field(key, "assets") == []
-    assert log_lines(ctx["python_log"]) == []
-    assert log_lines(ctx["fake_log"]) == []
+    assert repo.calls(repo.python_log) == 0
+    assert repo.calls(repo.fake_log) == 0
 
 
-@pytest.mark.parametrize("assets", [MISSING, None], ids=["no-field", "null"])
-def test_manifest_without_assets_misses(tmp_path, assets):
-    ctx = build(tmp_path)
-    write_manifest(ctx, assets)
-    result = check(ctx)
+@pytest.mark.parametrize("remove_component_md", [False, True])
+@pytest.mark.parametrize("shape", ["absent", "null"])
+def test_manifest_without_assets_misses_with_assets_differ(tmp_path, shape, remove_component_md):
+    repo = Repo(tmp_path)
+    if remove_component_md:
+        repo.component_md.unlink()
+    repo.write_manifest(None, omit_assets=(shape == "absent"))
+    result = repo.check()
     assert field(result, "hit") is False
     assert field(result, "reason") == "assets differ"
 
 
-@pytest.mark.parametrize("assets", [MISSING, None], ids=["no-field", "null"])
-def test_manifest_without_assets_misses_with_component_md_removed(tmp_path, assets):
-    ctx = build(tmp_path)
-    ctx["component_md"].unlink()
-    write_manifest(ctx, assets)
-    result = check(ctx)
-    assert field(result, "hit") is False
-    assert field(result, "reason") == "assets differ"
-
-
-def test_other_spec_bundle_hash_misses_without_provision(tmp_path):
-    ctx = build(tmp_path)
-    write_manifest(ctx, expected_e(ctx), spec_bundle_hash="OTHER")
-    result = check(ctx)
+def test_spec_bundle_hash_differs_and_no_provision(tmp_path):
+    repo = Repo(tmp_path)
+    repo.write_manifest(repo.E(), spec_bundle_hash="OTHER")
+    repo.reset_logs()
+    result = repo.check()
     assert field(result, "hit") is False
     assert field(result, "reason") == "spec_bundle_hash differs"
-    assert log_lines(ctx["python_log"]) == []
-    assert log_lines(ctx["fake_log"]) == []
+    assert repo.calls(repo.python_log) == 0
+    assert repo.calls(repo.fake_log) == 0
