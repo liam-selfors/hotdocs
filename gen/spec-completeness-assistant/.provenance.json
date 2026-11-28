@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:99cf8c9030f673c21ebe1900dabd19bcf7fe0cdf334da1eb972bc77e786060dd",
+  "spec_bundle_hash": "sha256:9e97b3687ca81c9548585ddeba2dfd129f27958a0b77ba53097fb6e90eabaf76",
   "spec_bundle_parts": {
-    "spec": "sha256:8777b8eef9023e96bf7d1e6eff77d2810b53c2cdc51949ac17b91f2072e2702c",
-    "dependency_code": "sha256:a6b08fbb4051a6b30a2c2bf01dac2b8b50184a4ef54435cf98bc67afb57987ea"
+    "spec": "sha256:57f3b7c1195c54913c0c92c8cecbc1629cfbf1f653e91b680c81d2c75ed5f73b",
+    "dependency_code": "sha256:ebaccf8100cd9b7327a31b268ed8801a6f43b1c0a07b663739834326ac08f973"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T16:48:19Z",
+  "generated_at": "2026-11-28T03:16:20Z",
   "verification_run_id": "spec-completeness-assistant-attempt-1",
   "verification_report": {
     "component_id": "comp-spec-completeness-assistant",
@@ -36,133 +36,67 @@
         "id": "AC-ASSIST-001",
         "covers": "R-ASSIST-001",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-002",
         "covers": "R-ASSIST-002",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-003",
         "covers": "R-ASSIST-003",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-004",
         "covers": "R-ASSIST-004",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-005",
         "covers": "R-ASSIST-005",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-006",
         "covers": "R-ASSIST-006",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-007",
         "covers": "R-ASSIST-007",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-008",
         "covers": "R-ASSIST-008",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-009",
         "covers": "R-ASSIST-009",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-010",
         "covers": "R-ASSIST-010",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-ASSIST-011",
         "covers": "R-ASSIST-011",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -179,7 +113,7 @@
       "R-ASSIST-011": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9122807017543859,
+    "mutation_score": 0.9,
     "mutation_error": null,
     "assets": [
       {
@@ -320,11 +254,31 @@
         "type": "Base64 High Entropy String"
       },
       {
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "type": "Hex High Entropy String"
+      },
+      {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
         "type": "Hex High Entropy String"
       },
       {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_005.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_008.py",
         "type": "Hex High Entropy String"
       },
       {
@@ -401,6 +355,14 @@
       },
       {
         "file": "verification/secret-scanner/generated-test/test_ac_secret_016.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
         "type": "AWS Access Key"
       },
       {
