@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:66b20f18f5ea21b637c5b151b2ec50d67bd5c32cd8c2aa4b52157509905ae114",
+  "spec_bundle_hash": "sha256:415889796e14ca78aef0e5dba6c2d68ea02138a82ceeeae76e71ea013882c47b",
   "spec_bundle_parts": {
-    "spec": "sha256:224aa3ed7ce08fa3e023e45e48153d0e0d6805720105f69c0f25d456a79fd776",
-    "dependency_code": "sha256:b7ab55fad10b38f714198f17ee4611f38b4f1736b929d3dd464fe4dc76165691"
+    "spec": "sha256:d91104d214cfbf5b2a6c02dcb67173ab7ff88fdcdd2f7c48f0b79506ea71b647",
+    "dependency_code": "sha256:844913d7aea9e3bb73bb364abc1efdee617acda47dcb7d94d76198735e6c446a"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T21:59:57Z",
+  "generated_at": "2026-11-28T10:35:57Z",
   "verification_run_id": "ui-style-attempt-1",
   "verification_report": {
     "component_id": "comp-ui-style",
@@ -126,8 +126,8 @@
     "drivers": [
       {
         "name": "browser",
-        "definition_sha256": "sha256:e916ab0760fff5042671fff8f71dfaa4c33abd82fd44b6833d62eae545481f0f",
-        "adapter_sha256": "sha256:51af085eba0f707dd97abd07546f27033fe1543df7ef27d388907d9a7644c331",
+        "definition_sha256": "sha256:243e77a5fe2b72d7da3ceb3ad733e76d8bcbe031192bd44c201f641bf6ed1889",
+        "adapter_sha256": "sha256:a80a0a427c73980ccc5cb033734c2f1b9b7fd38b1d24e4fac98e2f7f4dc1316b",
         "versions": {
           "playwright": "1.64.1",
           "chromium": "156.0.8078.4"
@@ -260,11 +260,31 @@
         "type": "Base64 High Entropy String"
       },
       {
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "type": "Hex High Entropy String"
+      },
+      {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
         "type": "Hex High Entropy String"
       },
       {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_005.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_008.py",
         "type": "Hex High Entropy String"
       },
       {
@@ -345,6 +365,14 @@
       },
       {
         "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
         "type": "Hex High Entropy String"
       }
     ],
@@ -376,8 +404,8 @@
   "drivers": [
     {
       "name": "browser",
-      "definition_sha256": "sha256:e916ab0760fff5042671fff8f71dfaa4c33abd82fd44b6833d62eae545481f0f",
-      "adapter_sha256": "sha256:51af085eba0f707dd97abd07546f27033fe1543df7ef27d388907d9a7644c331",
+      "definition_sha256": "sha256:243e77a5fe2b72d7da3ceb3ad733e76d8bcbe031192bd44c201f641bf6ed1889",
+      "adapter_sha256": "sha256:a80a0a427c73980ccc5cb033734c2f1b9b7fd38b1d24e4fac98e2f7f4dc1316b",
       "versions": {
         "playwright": "1.64.1",
         "chromium": "156.0.8078.4"
