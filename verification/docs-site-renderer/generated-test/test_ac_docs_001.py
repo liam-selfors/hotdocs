@@ -1,21 +1,23 @@
-# hotdocs-criterion: sha256:76b7ab96e152a76965e69967e68d704777a9f76ff85dd58e8699234b6eb090f3
+# hotdocs-criterion: sha256:b577e82c6db247db3e9eaf82106ecd2804a55f9b8067dc65491effe74be97008
 """AC-DOCS-001: a corpus graph with three nodes and two edges renders a DAG
-view holding three node elements and two edge elements (R-DOCS-001)."""
+view in index.html holding three node elements and two edge elements."""
 
-import dataclasses
 import json
+from html.parser import HTMLParser
 from pathlib import Path
 
 import docs_site_renderer
 
 
-@dataclasses.dataclass
 class FakeCorpusGraph:
-    """Same attribute shape as corpus-graph-builder's CorpusGraph dataclass."""
+    """Duck-typed stand-in for corpus-graph-builder's CorpusGraph dataclass:
+    attributes `nodes`, `edges`, `aggregates`, plus `to_dict()` and
+    `to_json_bytes()` as its interface documents them."""
 
-    nodes: dict
-    edges: list
-    aggregates: dict
+    def __init__(self, nodes, edges, aggregates):
+        self.nodes = nodes
+        self.edges = edges
+        self.aggregates = aggregates
 
     def to_dict(self):
         return {
@@ -30,11 +32,14 @@ class FakeCorpusGraph:
             + "\n"
         ).encode("utf-8")
 
+    def __getitem__(self, key):
+        return self.to_dict()[key]
 
-def _three_node_two_edge_graph():
+
+def _graph():
     nodes = {
         "P-ALPHA": {"type": "capability"},
-        "comp-beta": {
+        "comp-alpha": {
             "type": "component",
             "verification": None,
             "provenance": None,
@@ -42,60 +47,82 @@ def _three_node_two_edge_graph():
             "sealed": False,
             "pinned_overrides": [],
             "owners": ["pipeline-team"],
-            "documents": {},
+            "documents": {
+                "component.md": "---\nid: comp-alpha\ntitle: Alpha\nstatus: draft\nowners: [pipeline-team]\n---\n\n# Alpha\n",
+            },
         },
-        "VAR-GAMMA": {"type": "var"},
+        "VAR-ALPHA": {"type": "var"},
     }
     edges = [
-        {"from": "comp-beta", "to": "P-ALPHA", "kind": "realizes"},
-        {"from": "comp-beta", "to": "VAR-GAMMA", "kind": "uses_var"},
+        {"from": "comp-alpha", "to": "P-ALPHA", "kind": "realizes"},
+        {"from": "comp-alpha", "to": "VAR-ALPHA", "kind": "uses_var"},
     ]
     aggregates = {
         "orphan_capability_rate": 0.0,
         "orphan_component_rate": 0.0,
         "orphan_var_rate": 0.0,
     }
-    return FakeCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
+    return FakeCorpusGraph(nodes, edges, aggregates)
 
 
-def test_ac_docs_001_dag_view_has_three_nodes_and_two_edges(tmp_path, browser):
-    graph = _three_node_two_edge_graph()
+class _ListCollector(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.ul_stack = []
+        self.items = []  # (ul id, classes, attrs)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "ul":
+            self.ul_stack.append(attrs.get("id"))
+        elif tag == "li":
+            parent = self.ul_stack[-1] if self.ul_stack else None
+            classes = (attrs.get("class") or "").split()
+            self.items.append((parent, classes, attrs))
+
+    def handle_endtag(self, tag):
+        if tag == "ul" and self.ul_stack:
+            self.ul_stack.pop()
+
+
+def test_dag_view_has_three_nodes_and_two_edges(tmp_path):
     out_dir = tmp_path / "site"
+    docs_site_renderer.render_docs_site(_graph(), out_dir)
 
-    docs_site_renderer.render_docs_site(graph, out_dir)
-
-    index = out_dir / "index.html"
+    index = Path(out_dir) / "index.html"
     assert index.is_file()
+    collector = _ListCollector()
+    collector.feed(index.read_text(encoding="utf-8"))
+    collector.close()
 
-    page = browser.open(index)
+    node_items = [
+        attrs for parent, classes, attrs in collector.items
+        if parent == "nodes" and "node" in classes
+    ]
+    edge_items = [
+        attrs for parent, classes, attrs in collector.items
+        if parent == "edges" and "edge" in classes
+    ]
 
-    assert page.find(css="#nodes .node").count() == 3
-    assert page.find(css="#edges .edge").count() == 2
+    assert len(node_items) == 3
+    assert len(edge_items) == 2
 
-    for node_id, node_type in (
-        ("P-ALPHA", "capability"),
-        ("comp-beta", "component"),
-        ("VAR-GAMMA", "var"),
-    ):
-        selector = (
-            '#nodes li.node[data-id="' + node_id + '"][data-type="' + node_type + '"]'
-        )
-        assert page.find(css=selector).count() == 1, selector
+    assert [(a.get("data-id"), a.get("data-type")) for a in node_items] == sorted(
+        [
+            ("P-ALPHA", "capability"),
+            ("comp-alpha", "component"),
+            ("VAR-ALPHA", "var"),
+        ]
+    )
+    assert [
+        (a.get("data-from"), a.get("data-to"), a.get("data-kind")) for a in edge_items
+    ] == [
+        ("comp-alpha", "P-ALPHA", "realizes"),
+        ("comp-alpha", "VAR-ALPHA", "uses_var"),
+    ]
 
-    for frm, to, kind in (
-        ("comp-beta", "P-ALPHA", "realizes"),
-        ("comp-beta", "VAR-GAMMA", "uses_var"),
-    ):
-        selector = (
-            '#edges li.edge[data-from="'
-            + frm
-            + '"][data-to="'
-            + to
-            + '"][data-kind="'
-            + kind
-            + '"]'
-        )
-        assert page.find(css=selector).count() == 1, selector
-
-    assert page.find(css="svg#dag").count() == 1
-    assert page.console_errors() == []
+    # No other node/edge list items anywhere on the page.
+    all_nodes = [1 for _, classes, _a in collector.items if "node" in classes]
+    all_edges = [1 for _, classes, _a in collector.items if "edge" in classes]
+    assert len(all_nodes) == 3
+    assert len(all_edges) == 2

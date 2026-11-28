@@ -1,5 +1,7 @@
-# hotdocs-criterion: sha256:22470018b0fc202812a58cb69b87387920a82e36b82f266e965fe8e59e67b323
+# hotdocs-criterion: sha256:260d5e1b19ee542921fd7c66fab3b806294a6dc749b680a5de4b2d813a41c953
+import dataclasses
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -19,24 +21,47 @@ def load_module(path, module_name):
     return module
 
 
-class _DuckCorpusGraph:
-    def __init__(self, nodes, edges, aggregates):
-        self.nodes = nodes
-        self.edges = edges
-        self.aggregates = aggregates
+@dataclasses.dataclass
+class _LocalCorpusGraph:
+    nodes: dict
+    edges: list
+    aggregates: dict
 
     def to_dict(self):
-        return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
+        return {
+            "nodes": self.nodes,
+            "edges": self.edges,
+            "aggregates": self.aggregates,
+        }
 
     def to_json_bytes(self):
-        import json
-
         return (
-            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True)
+            + "\n"
         ).encode("utf-8")
 
 
-def _component_node(slug_id, size_status):
+def _corpus_graph_class():
+    try:
+        gen = next(
+            p
+            for p in Path(docs_site_renderer.__file__).resolve().parents
+            if p.name == "gen"
+        )
+        base = gen / "corpus-graph-builder"
+        flat = base / "corpus_graph_builder.py"
+        pkg = base / "corpus_graph_builder" / "__init__.py"
+        path = flat if flat.is_file() else pkg
+        if not path.is_file():
+            return _LocalCorpusGraph
+        module = load_module(path, "corpus_graph_builder")
+        cls = getattr(module, "CorpusGraph", None)
+        return cls if cls is not None else _LocalCorpusGraph
+    except Exception:
+        return _LocalCorpusGraph
+
+
+def _component_node(slug, size_status):
     return {
         "type": "component",
         "verification": None,
@@ -46,16 +71,17 @@ def _component_node(slug_id, size_status):
         "pinned_overrides": [],
         "owners": ["pipeline-team"],
         "documents": {
-            "component.md": "# " + slug_id + "\n\nA test component.\n",
+            "component.md": "---\nid: comp-" + slug + "\ntitle: " + slug
+            + "\nstatus: draft\nowners: [pipeline-team]\n---\n\n# " + slug + "\n",
         },
     }
 
 
-def _make_graph():
+def _build_graph():
     nodes = {
         "P-ALPHA": {"type": "capability"},
-        "comp-alpha": _component_node("comp-alpha", "ok"),
-        "comp-beta": _component_node("comp-beta", "over"),
+        "comp-alpha": _component_node("alpha", "ok"),
+        "comp-beta": _component_node("beta", "over"),
     }
     edges = [
         {"from": "comp-alpha", "to": "P-ALPHA", "kind": "realizes"},
@@ -66,63 +92,38 @@ def _make_graph():
         "orphan_component_rate": 0.0,
         "orphan_var_rate": 0.0,
     }
-    cls = None
+    cls = _corpus_graph_class()
     try:
-        gen = next(
-            p for p in Path(docs_site_renderer.__file__).resolve().parents if p.name == "gen"
-        )
-        base = gen / "corpus-graph-builder"
-        flat = base / "corpus_graph_builder.py"
-        pkg = base / "corpus_graph_builder" / "__init__.py"
-        path = flat if flat.is_file() else pkg
-        if path.is_file():
-            mod = load_module(path, "corpus_graph_builder")
-            cls = getattr(mod, "CorpusGraph", None)
+        return cls(nodes=nodes, edges=edges, aggregates=aggregates)
     except Exception:
-        cls = None
-    if cls is not None:
-        try:
-            return cls(nodes=nodes, edges=edges, aggregates=aggregates)
-        except Exception:
-            pass
-    return _DuckCorpusGraph(nodes, edges, aggregates)
+        return _LocalCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
-_RGB = re.compile(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)")
-
-
-def _parse_rgb(value):
-    m = _RGB.search(value)
-    assert m is not None, "not an rgb() colour: " + repr(value)
-    return tuple(int(m.group(i)) for i in (1, 2, 3))
+def _rgb(value):
+    nums = re.findall(r"[-+]?\d*\.?\d+", value)
+    assert len(nums) >= 3, "not an rgb() colour: " + repr(value)
+    return tuple(float(n) for n in nums[:3])
 
 
 def _luminance(rgb):
     chans = []
     for v in rgb:
         c = v / 255
-        if c <= 0.04045:
-            c = c / 12.92
-        else:
-            c = ((c + 0.055) / 1.055) ** 2.4
+        c = c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
         chans.append(c)
     r, g, b = chans
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
 def _contrast(a, b):
-    la = _luminance(a)
-    lb = _luminance(b)
+    la = _luminance(_rgb(a))
+    lb = _luminance(_rgb(b))
     lighter, darker = max(la, lb), min(la, lb)
     return round((lighter + 0.05) / (darker + 0.05), 2)
 
 
-def _classes(element):
-    return (element.attribute("class") or "").split()
-
-
-def test_ac_docs_014_size_tone_and_contrast(browser, tmp_path):
-    graph = _make_graph()
+def test_ac_docs_014(browser, tmp_path):
+    graph = _build_graph()
     out_dir = tmp_path / "site"
     docs_site_renderer.render_docs_site(graph, out_dir)
 
@@ -132,32 +133,43 @@ def test_ac_docs_014_size_tone_and_contrast(browser, tmp_path):
     assert beta_path.is_file()
 
     backgrounds = {}
-    for scheme in ("light", "dark"):
-        border_colors = {}
-        for name, path, tone in (
-            ("comp-alpha", alpha_path, "tone-ok"),
-            ("comp-beta", beta_path, "tone-fail"),
-        ):
-            if scheme == "dark":
-                page = browser.open(path, color_scheme="dark")
-            else:
-                page = browser.open(path)
+    for scheme in (None, "dark"):
+        if scheme is None:
+            alpha = browser.open(alpha_path)
+        else:
+            alpha = browser.open(alpha_path, color_scheme="dark")
+        alpha_span = alpha.find(css="span.size")
+        assert alpha_span.count() == 1
+        alpha_classes = (alpha_span.attribute("class") or "").split()
+        assert "size" in alpha_classes
+        assert "tone-ok" in alpha_classes
+        alpha_border = alpha_span.style("border-left-color")
+        alpha_body = alpha.find(css="body")
+        alpha_color = alpha_body.style("color")
+        alpha_bg = alpha_body.style("background-color")
+        assert _contrast(alpha_color, alpha_bg) >= 4.5
+        assert alpha.console_errors() == []
 
-            size = page.find(css="span.size")
-            assert size.count() == 1, name + " " + scheme
-            assert tone in _classes(size), name + " " + scheme
-            border_colors[name] = size.style("border-left-color")
+        if scheme is None:
+            beta = browser.open(beta_path)
+        else:
+            beta = browser.open(beta_path, color_scheme="dark")
+        beta_span = beta.find(css="span.size")
+        assert beta_span.count() == 1
+        beta_classes = (beta_span.attribute("class") or "").split()
+        assert "size" in beta_classes
+        assert "tone-fail" in beta_classes
+        beta_border = beta_span.style("border-left-color")
+        beta_body = beta.find(css="body")
+        beta_color = beta_body.style("color")
+        beta_bg = beta_body.style("background-color")
+        assert _contrast(beta_color, beta_bg) >= 4.5
+        assert beta.console_errors() == []
 
-            body = page.find(css="body")
-            fg = _parse_rgb(body.style("color"))
-            bg_value = body.style("background-color")
-            bg = _parse_rgb(bg_value)
-            assert _contrast(fg, bg) >= 4.5, (name, scheme, fg, bg)
-            backgrounds[(name, scheme)] = bg_value
+        assert alpha_border != beta_border
 
-            assert page.console_errors() == [], name + " " + scheme
+        backgrounds[(scheme, "alpha")] = alpha_bg
+        backgrounds[(scheme, "beta")] = beta_bg
 
-        assert border_colors["comp-alpha"] != border_colors["comp-beta"], scheme
-
-    for name in ("comp-alpha", "comp-beta"):
-        assert backgrounds[(name, "light")] != backgrounds[(name, "dark")], name
+    assert backgrounds[(None, "alpha")] != backgrounds[("dark", "alpha")]
+    assert backgrounds[(None, "beta")] != backgrounds[("dark", "beta")]
