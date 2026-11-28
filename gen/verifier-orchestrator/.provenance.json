@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:0d9b8b09aff6e62bcb3e720d75a21767906119880c1e305f706fd5f5a9dc7e2e",
+  "spec_bundle_hash": "sha256:8a136aa7fbf2ac7ac08ce862873caa3783e87f021d760456050ebf627eea0654",
   "spec_bundle_parts": {
     "spec": "sha256:51dfb390b23f02246070c463cb7892b6de3b0a5117f78828246cddcd946543e6",
-    "dependency_code": "sha256:b0e3469ebea461c1627eb6fdff50116ac71febd016d02db7d3130cf32ba38488"
+    "dependency_code": "sha256:9432ded6b38e0c6f132a12b806b12c2818faacff7158b51540d854143569c24b"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-28T02:40:36Z",
+  "generated_at": "2026-11-28T05:36:25Z",
   "verification_run_id": "verifier-orchestrator-attempt-1",
   "verification_report": {
     "component_id": "comp-verifier-orchestrator",
@@ -240,7 +240,7 @@
     "matches": [],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": false
+    "cache_hit": true
   },
   "secret_scan": {
     "scope": "full",
