@@ -1,4 +1,9 @@
-"""Spec Reviewer: checks each acceptance criterion against what its test author sees."""
+"""Spec Reviewer: checks whether each acceptance criterion can be implemented
+from what its test author sees, and whether it expects unstated behavior.
+
+Advisory only: it never changes a file under ``specs/`` and writes proposals
+under ``<repo_root>/.hotdocs/proposals/`` only when asked.
+"""
 
 from __future__ import annotations
 
@@ -7,24 +12,248 @@ import importlib.util
 import json
 import re
 import sys
-from dataclasses import dataclass, field
+from collections.abc import Mapping
 from pathlib import Path
+
+GAP_KINDS = ("guess", "unstated_behavior")
+
+FRAMEWORK_SENTENCE = (
+    "The pipeline fixes the test framework (pytest), the test file's name and "
+    "location, and how the test reaches the component's code: never report any "
+    "of these as a gap."
+)
 
 USAGE = (
     "usage: hotdocs spec check <target>... [--model=<model>] [--write-proposals] "
     "[--strict] [--format=json|text] [--repo-root=<dir>]"
 )
 
-SCOPE_SENTENCE = (
-    "The pipeline fixes the test framework (pytest), the test file's name and "
-    "location, and how the test reaches the component's code: never report any "
-    "of these as a gap."
-)
-
-GAP_KINDS = ("guess", "unstated_behavior")
 UNPARSEABLE_MESSAGE = "reply was not the JSON object asked for"
-FINDING_FIELDS = ("rule_id", "severity", "file", "line", "message", "rationale")
-BUNDLE_FIELDS = (
+
+_TOKEN_RE = re.compile(r"`([^`]*)`")
+
+
+# ---------------------------------------------------------------------------
+# Report
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(eq=False)
+class ReviewReport(Mapping):
+    targets: list = dataclasses.field(default_factory=list)
+    criteria_checked: list = dataclasses.field(default_factory=list)
+    findings: list = dataclasses.field(default_factory=list)
+    gaps: list = dataclasses.field(default_factory=list)
+    writable: dict = dataclasses.field(default_factory=dict)
+    lint_findings: list = dataclasses.field(default_factory=list)
+    proposals: list = dataclasses.field(default_factory=list)
+    degraded: bool = False
+
+    def _names(self):
+        return [f.name for f in dataclasses.fields(self)]
+
+    def __getitem__(self, key):
+        if key not in self._names():
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def __iter__(self):
+        return iter(self._names())
+
+    def __len__(self):
+        return len(self._names())
+
+    def to_dict(self) -> dict:
+        return {
+            "targets": list(self.targets),
+            "criteria_checked": list(self.criteria_checked),
+            "findings": [dict(f) for f in self.findings],
+            "gaps": [dict(g) for g in self.gaps],
+            "writable": dict(self.writable),
+            "lint_findings": [dict(f) for f in self.lint_findings],
+            "proposals": list(self.proposals),
+            "degraded": self.degraded,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _get(obj, key, default=None):
+    if isinstance(obj, Mapping):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _tool_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if parent.name == "gen":
+            return parent.parent
+    return here.parent
+
+
+def _load(slug: str, module: str, repo_root):
+    base = Path(repo_root) / "gen" / slug if repo_root is not None else None
+    if base is None or not base.is_dir():
+        base = _tool_root() / "gen" / slug
+    path = base / f"{module}.py"
+    search = None
+    if not path.is_file():
+        path = base / module / "__init__.py"
+        search = [str(path.parent)]
+    spec = importlib.util.spec_from_file_location(
+        module, path, submodule_search_locations=search
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[module] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _json_object(text):
+    if not isinstance(text, str):
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end < start:
+        return None
+    try:
+        obj = json.loads(text[start : end + 1])
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _finding(criterion_id, kind, token, message):
+    return {
+        "criterion_id": criterion_id,
+        "kind": kind,
+        "token": token,
+        "message": message,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Target resolution (R-REVIEW-001)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_targets(targets, repo_root: Path):
+    components_dir = repo_root / "specs" / "components"
+    criteria: dict = {}
+    slugs: set = set()
+    for target in targets:
+        slug = target[len("comp-"):]
+        if target.startswith("comp-") and slug and (components_dir / slug).is_dir():
+            slugs.add(slug)
+            for path in sorted((components_dir / slug / "acceptance").glob("AC-*.md")):
+                criteria[path.stem] = target
+            continue
+        matches = sorted(components_dir.glob(f"*/acceptance/{target}.md"))
+        if not matches:
+            raise ValueError(f"unknown target id: {target}")
+        comp_slug = matches[0].parent.parent.name
+        slugs.add(comp_slug)
+        criteria[target] = f"comp-{comp_slug}"
+    return criteria, sorted(slugs)
+
+
+# ---------------------------------------------------------------------------
+# Asset interface check (R-REVIEW-008)
+# ---------------------------------------------------------------------------
+
+
+def _assets(component_md: Path):
+    if not component_md.is_file():
+        return []
+    lines = component_md.read_text(encoding="utf-8").splitlines()
+    marks = [i for i, line in enumerate(lines) if line.strip() == "---"][:2]
+    if len(marks) < 2:
+        return []
+    for line in lines[marks[0] + 1 : marks[1]]:
+        if line.startswith("assets:"):
+            start = line.find("[")
+            if start == -1:
+                return []
+            inner = line[start + 1 :].split("]", 1)[0]
+            assets = []
+            for item in inner.split(","):
+                item = item.strip()
+                if ":" not in item:
+                    continue
+                kind, path = item.split(":", 1)
+                assets.append((kind.strip(), path.strip()))
+            return assets
+    return []
+
+
+def _asset_findings(slugs, repo_root: Path):
+    findings = []
+    for slug in slugs:
+        comp_dir = repo_root / "specs" / "components" / slug
+        for _kind, path in _assets(comp_dir / "component.md"):
+            file_name = path.rsplit("/", 1)[-1]
+            if not (comp_dir / "interface" / "assets" / f"{file_name}.md").exists():
+                findings.append(
+                    _finding(
+                        f"comp-{slug}",
+                        "asset_interface_missing",
+                        path,
+                        f"`{path}` has no interface file "
+                        f"specs/components/{slug}/interface/assets/{file_name}.md",
+                    )
+                )
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Invisible references (R-REVIEW-003)
+# ---------------------------------------------------------------------------
+
+
+def _step_tokens(criterion_text: str):
+    tokens = []
+    in_block = False
+    step = None
+    for line in (criterion_text or "").splitlines():
+        stripped = line.strip()
+        if not in_block:
+            if stripped.startswith("```gherkin"):
+                in_block = True
+            continue
+        if stripped.startswith("```"):
+            break
+        words = line.split()
+        if words and words[0] in ("Given", "When", "Then"):
+            step = words[0]
+        if step not in ("When", "Then"):
+            continue
+        for match in _TOKEN_RE.finditer(line):
+            token = match.group(1).strip()
+            token = token.split("<", 1)[0]
+            if token and token not in tokens:
+                tokens.append(token)
+    return tokens
+
+
+def _visible_text(bundle) -> str:
+    deps = _get(bundle, "dependency_interfaces") or {}
+    return (
+        (_get(bundle, "requirement_text") or "")
+        + (_get(bundle, "interface") or "")
+        + (_get(bundle, "glossary") or "")
+        + "".join(str(v) for v in deps.values())
+    )
+
+
+# ---------------------------------------------------------------------------
+# Model review (R-REVIEW-004)
+# ---------------------------------------------------------------------------
+
+_BUNDLE_FIELDS = (
     "component_id",
     "criterion_id",
     "covers",
@@ -36,236 +265,125 @@ BUNDLE_FIELDS = (
     "testing",
 )
 
-_SPAN_RE = re.compile(r"`([^`]*)`")
+
+def _review_prompt(bundle) -> str:
+    criterion_id = _get(bundle, "criterion_id")
+    parts = [
+        f"You are the author of the executable test for acceptance criterion "
+        f"{criterion_id}. Below is everything you will see when writing it.",
+        "Say whether the test can be written from this alone. List each fact you "
+        "would have to guess (kind \"guess\") and each behavior the criterion "
+        "checks that no requirement or interface text states (kind "
+        "\"unstated_behavior\"), with the spec text that would close the gap and "
+        "the spec file it belongs in.",
+        FRAMEWORK_SENTENCE,
+        "Reply with exactly one JSON object:",
+        '{"writable": <bool>, "gaps": [{"kind": "guess" | "unstated_behavior", '
+        '"missing": "<text>", "proposed_text": "<text>", "target_file": "<path>"}]}',
+    ]
+    for name in _BUNDLE_FIELDS:
+        value = _get(bundle, name)
+        if name == "dependency_interfaces":
+            value = "\n\n".join(
+                f"### {dep}\n{text}" for dep, text in (value or {}).items()
+            )
+        parts.append(f"## {name}\n{value if value is not None else ''}")
+    return "\n\n".join(parts)
 
 
-@dataclass
-class ReviewReport:
-    targets: list = field(default_factory=list)
-    criteria_checked: list = field(default_factory=list)
-    findings: list = field(default_factory=list)
-    gaps: list = field(default_factory=list)
-    writable: dict = field(default_factory=dict)
-    lint_findings: list = field(default_factory=list)
-    proposals: list = field(default_factory=list)
-    degraded: bool = False
-
-    def __getitem__(self, key):
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        return getattr(self, key, default)
-
-    def keys(self):
-        return [f.name for f in dataclasses.fields(self)]
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self.keys()]
-
-    def __contains__(self, key):
-        return key in self.keys()
-
-    def to_dict(self) -> dict:
-        return dataclasses.asdict(self)
+def _review(complete, bundle, criterion_id, model, llm_backend):
+    """Return (writable, gaps, finding_or_None)."""
+    response = complete(_review_prompt(bundle), model, backend=llm_backend)
+    error = _get(response, "model_call_error")
+    if error:
+        return None, [], _finding(
+            criterion_id, "model_unparseable", "", _get(error, "message")
+        )
+    obj = _json_object(_get(response, "text"))
+    if obj is None or not isinstance(obj.get("writable"), bool):
+        return None, [], _finding(
+            criterion_id, "model_unparseable", "", UNPARSEABLE_MESSAGE
+        )
+    gaps = []
+    for gap in obj.get("gaps") or []:
+        if isinstance(gap, dict) and gap.get("kind") in GAP_KINDS:
+            gaps.append(
+                {
+                    "criterion_id": criterion_id,
+                    "kind": gap.get("kind"),
+                    "missing": gap.get("missing", ""),
+                    "proposed_text": gap.get("proposed_text", ""),
+                    "target_file": gap.get("target_file", ""),
+                }
+            )
+    return obj["writable"], gaps, None
 
 
-# ---------------------------------------------------------------- helpers
+# ---------------------------------------------------------------------------
+# Glossary judge (R-REVIEW-006)
+# ---------------------------------------------------------------------------
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def _make_judge(model, llm_backend, repo_root):
+    complete = _load("llm-endpoint", "llm_endpoint", repo_root).complete
 
-
-def _tool_root() -> Path:
-    return next(p.parent for p in Path(__file__).resolve().parents if p.name == "gen")
-
-
-def _load(repo_root: Path, slug: str, module: str):
-    base = Path(repo_root) / "gen" / slug
-    if not base.is_dir():
-        base = _tool_root() / "gen" / slug
-    spec = importlib.util.spec_from_file_location(module, base / f"{module}.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[module] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _json_object(text):
-    text = text or ""
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end < start:
-        return None
-    try:
-        obj = json.loads(text[start : end + 1])
-    except ValueError:
-        return None
-    if not isinstance(obj, dict):
-        return None
-    return obj
-
-
-def _error_message(err) -> str:
-    return f"{_get(err, 'category')}: {_get(err, 'message')}"
-
-
-# ---------------------------------------------------------------- judge
-
-
-def _make_judge(complete, model, llm_backend):
     def judge(term, local_text, glossary_text):
-        prompt = (
-            "You judge whether a component's local definition of a glossary term "
-            "conflicts with the canonical glossary.\n\n"
-            f"Term: {term}\n\n"
-            f"Local definition:\n{local_text}\n\n"
-            f"Glossary:\n{glossary_text}\n\n"
-            'Reply with one JSON object: {"conflicts": <bool>, "rationale": "<text>"}'
+        prompt = "\n\n".join(
+            [
+                "Does the component's local definition of a term conflict with "
+                "the glossary's definition of it?",
+                f"Term: {term}",
+                f"Local definition:\n{local_text}",
+                f"Glossary definition:\n{glossary_text}",
+                'Reply with exactly one JSON object: '
+                '{"conflicts": <bool>, "rationale": "<text>"}',
+            ]
         )
         response = complete(prompt, model, backend=llm_backend)
         if _get(response, "model_call_error"):
             return None
         obj = _json_object(_get(response, "text"))
-        if obj is None:
+        if (
+            obj is None
+            or not isinstance(obj.get("conflicts"), bool)
+            or not isinstance(obj.get("rationale"), str)
+        ):
             return None
-        conflicts = obj.get("conflicts")
-        rationale = obj.get("rationale")
-        if not isinstance(conflicts, bool) or not isinstance(rationale, str):
-            return None
-        return (conflicts, rationale)
+        return (obj["conflicts"], obj["rationale"])
 
     return judge
 
 
 def glossary_judge(model: str, llm_backend=None):
-    llm_endpoint = _load(_tool_root(), "llm-endpoint", "llm_endpoint")
-    return _make_judge(llm_endpoint.complete, model, llm_backend)
+    return _make_judge(model, llm_backend, None)
 
 
-# ---------------------------------------------------------------- checks
+# ---------------------------------------------------------------------------
+# Lint findings
+# ---------------------------------------------------------------------------
+
+_FINDING_FIELDS = ("rule_id", "severity", "file", "line", "message", "rationale")
 
 
-def _resolve_targets(targets, repo_root: Path):
-    comps_dir = repo_root / "specs" / "components"
-    criteria = {}
-    slugs = set()
-    for target in targets:
-        if target.startswith("comp-") and (comps_dir / target[5:]).is_dir():
-            slug = target[5:]
-            slugs.add(slug)
-            for path in (comps_dir / slug / "acceptance").glob("AC-*.md"):
-                criteria[path.stem] = slug
-        else:
-            hits = sorted(comps_dir.glob(f"*/acceptance/{target}.md"))
-            if not hits:
-                raise ValueError(f"unknown target id: {target}")
-            slug = hits[0].parent.parent.name
-            slugs.add(slug)
-            criteria[target] = slug
-    return criteria, sorted(slugs)
+def _lint_finding_dict(finding) -> dict:
+    return {name: _get(finding, name) for name in _FINDING_FIELDS}
 
 
-def _assets(component_md: Path):
-    if not component_md.exists():
-        return []
-    lines = component_md.read_text(encoding="utf-8").splitlines()
-    marks = [i for i, line in enumerate(lines) if line.strip() == "---"][:2]
-    if len(marks) < 2:
-        return []
-    line = next(
-        (l for l in lines[marks[0] + 1 : marks[1]] if l.startswith("assets:")), None
-    )
-    if line is None or "[" not in line:
-        return []
-    inner = line[line.index("[") + 1 :].split("]")[0]
-    assets = []
-    for item in inner.split(","):
-        item = item.strip()
-        if ":" not in item:
-            continue
-        kind, path = item.split(":", 1)
-        assets.append((kind.strip(), path.strip()))
-    return assets
+# ---------------------------------------------------------------------------
+# Proposals (R-REVIEW-005)
+# ---------------------------------------------------------------------------
 
 
-def _asset_findings(slugs, repo_root: Path):
-    findings = []
-    for slug in slugs:
-        comp_dir = repo_root / "specs" / "components" / slug
-        for _kind, path in _assets(comp_dir / "component.md"):
-            name = path.rsplit("/", 1)[-1]
-            rel = f"specs/components/{slug}/interface/assets/{name}.md"
-            if not (repo_root / rel).exists():
-                findings.append(
-                    {
-                        "criterion_id": f"comp-{slug}",
-                        "kind": "asset_interface_missing",
-                        "token": path,
-                        "message": f"`{path}` has no interface file {rel}",
-                    }
-                )
-    return findings
-
-
-def _step_tokens(criterion_text: str):
-    tokens = []
-    in_block = False
-    step = None
-    for line in (criterion_text or "").splitlines():
-        stripped = line.strip()
-        if not in_block:
-            if stripped == "```gherkin":
-                in_block = True
-                step = None
-            continue
-        if stripped == "```":
-            in_block = False
-            continue
-        words = stripped.split()
-        if words and words[0] in ("Given", "When", "Then"):
-            step = words[0]
-        if step not in ("When", "Then"):
-            continue
-        for span in _SPAN_RE.findall(line):
-            token = span.strip().split("<", 1)[0]
-            if token and token not in tokens:
-                tokens.append(token)
-    return tokens
-
-
-def _criterion_prompt(bundle) -> str:
-    parts = [
-        "You are the author of the pytest test for one acceptance criterion. "
-        "Below is everything you will see when you write that test. Report every "
-        "fact you would have to guess, and every behavior the criterion checks "
-        "that no requirement or interface text states.",
-        SCOPE_SENTENCE,
-    ]
-    for name in BUNDLE_FIELDS:
-        value = _get(bundle, name, "")
-        if isinstance(value, dict):
-            value = "\n\n".join(f"### {k}\n{v}" for k, v in value.items())
-        parts.append(f"## {name}\n{value}")
-    parts.append(
-        "Reply with one JSON object:\n"
-        '{"writable": <bool>,\n'
-        ' "gaps": [{"kind": "guess" | "unstated_behavior", "missing": "<text>",\n'
-        '           "proposed_text": "<text>", "target_file": "<path>"}]}'
-    )
-    return "\n\n".join(parts)
-
-
-def _write_proposals(gaps, criteria, repo_root: Path):
+def _write_proposals(gaps, repo_root: Path):
+    by_criterion: dict = {}
+    for gap in gaps:
+        by_criterion.setdefault(gap["criterion_id"], []).append(gap)
     written = []
-    for cid in criteria:
-        own = [g for g in gaps if g["criterion_id"] == cid]
-        if not own:
-            continue
-        lines = [f"# Proposals for {cid}"]
-        for gap in own:
+    out_dir = repo_root / ".hotdocs" / "proposals"
+    for criterion_id, items in by_criterion.items():
+        out_dir.mkdir(parents=True, exist_ok=True)
+        lines = [f"# Proposals for {criterion_id}"]
+        for gap in items:
             lines += [
                 "",
                 f"- kind: {gap['kind']}",
@@ -273,12 +391,16 @@ def _write_proposals(gaps, criteria, repo_root: Path):
                 f"  target_file: {gap['target_file']}",
                 f"  proposed_text: {gap['proposed_text']}",
             ]
-        rel = f".hotdocs/proposals/{cid}.md"
-        path = repo_root / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        written.append(rel)
+        (out_dir / f"{criterion_id}.md").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8"
+        )
+        written.append(f".hotdocs/proposals/{criterion_id}.md")
     return written
+
+
+# ---------------------------------------------------------------------------
+# check
+# ---------------------------------------------------------------------------
 
 
 def check(
@@ -290,87 +412,82 @@ def check(
     write_proposals: bool = False,
 ) -> ReviewReport:
     repo_root = Path(repo_root)
-    criteria_map, slugs = _resolve_targets(targets, repo_root)
-    criteria = sorted(criteria_map)
-    report = ReviewReport(targets=list(targets), degraded=model is None)
+    criteria, slugs = _resolve_targets(targets, repo_root)
 
-    report.findings = _asset_findings(slugs, repo_root)
+    findings = _asset_findings(slugs, repo_root)
 
-    complete = None
-    judge = None
-    if model:
-        complete = _load(repo_root, "llm-endpoint", "llm_endpoint").complete
-        judge = _make_judge(complete, model, llm_backend)
-
-    spec_linter = _load(repo_root, "spec-linter", "spec_linter")
-    paths = [repo_root / "specs" / "components" / slug for slug in slugs]
-    lint_report = spec_linter.lint(paths, repo_root, judge=judge)
-    report.lint_findings = [
-        {name: _get(f, name) for name in FINDING_FIELDS}
-        for f in _get(lint_report, "findings")
+    linter = _load("spec-linter", "spec_linter", repo_root)
+    judge = _make_judge(model, llm_backend, repo_root) if model else None
+    lint_report = linter.lint(
+        [repo_root / "specs" / "components" / slug for slug in slugs],
+        repo_root,
+        judge=judge,
+    )
+    lint_findings = [
+        _lint_finding_dict(f) for f in (_get(lint_report, "findings") or [])
     ]
-    if any(f["severity"] == "fail" for f in report.lint_findings):
+    report = ReviewReport(
+        targets=list(targets),
+        findings=findings,
+        lint_findings=lint_findings,
+        degraded=model is None,
+    )
+    if any(f["severity"] == "fail" for f in lint_findings):
         return report
 
-    assembler = _load(repo_root, "spec-bundle-assembler", "spec_bundle_assembler")
-    report.criteria_checked = criteria
-    for cid in criteria:
-        bundle = assembler.assemble_criterion(f"comp-{criteria_map[cid]}", cid, repo_root)
-        visible = "".join(
-            [
-                _get(bundle, "requirement_text", ""),
-                _get(bundle, "interface", ""),
-                _get(bundle, "glossary", ""),
-                *_get(bundle, "dependency_interfaces", {}).values(),
-            ]
-        )
-        for token in _step_tokens(_get(bundle, "criterion_text", "")):
+    assembler = _load("spec-bundle-assembler", "spec_bundle_assembler", repo_root)
+    complete = (
+        _load("llm-endpoint", "llm_endpoint", repo_root).complete if model else None
+    )
+
+    for criterion_id in sorted(criteria):
+        report.criteria_checked.append(criterion_id)
+        report.writable[criterion_id] = None
+        try:
+            bundle = assembler.assemble_criterion(
+                criteria[criterion_id], criterion_id, repo_root
+            )
+        except Exception as exc:  # R-REVIEW-009
+            findings.append(
+                _finding(
+                    criterion_id,
+                    "bundle_unavailable",
+                    "",
+                    f"{criterion_id}: its bundle cannot be built: {exc}",
+                )
+            )
+            continue
+
+        visible = _visible_text(bundle)
+        for token in _step_tokens(_get(bundle, "criterion_text")):
             if token not in visible:
-                report.findings.append(
-                    {
-                        "criterion_id": cid,
-                        "kind": "invisible_reference",
-                        "token": token,
-                        "message": f"`{token}` appears in {cid} but not in what its test author sees",
-                    }
+                findings.append(
+                    _finding(
+                        criterion_id,
+                        "invisible_reference",
+                        token,
+                        f"`{token}` appears in {criterion_id} but not in what "
+                        f"its test author sees",
+                    )
                 )
 
-        report.writable[cid] = None
-        if not model:
-            continue
-        response = complete(_criterion_prompt(bundle), model, backend=llm_backend)
-        error = _get(response, "model_call_error")
-        obj = None if error else _json_object(_get(response, "text"))
-        if obj is None or not isinstance(obj.get("writable"), bool):
-            report.findings.append(
-                {
-                    "criterion_id": cid,
-                    "kind": "model_unparseable",
-                    "token": "",
-                    "message": _error_message(error) if error else UNPARSEABLE_MESSAGE,
-                }
+        if model:
+            writable, gaps, finding = _review(
+                complete, bundle, criterion_id, model, llm_backend
             )
-            continue
-        report.writable[cid] = obj["writable"]
-        for gap in obj.get("gaps", []):
-            if gap.get("kind") not in GAP_KINDS:
-                continue
-            report.gaps.append(
-                {
-                    "criterion_id": cid,
-                    "kind": gap["kind"],
-                    "missing": gap.get("missing", ""),
-                    "proposed_text": gap.get("proposed_text", ""),
-                    "target_file": gap.get("target_file", ""),
-                }
-            )
+            report.writable[criterion_id] = writable
+            report.gaps.extend(gaps)
+            if finding is not None:
+                findings.append(finding)
 
     if write_proposals and report.gaps:
-        report.proposals = _write_proposals(report.gaps, criteria, repo_root)
+        report.proposals = _write_proposals(report.gaps, repo_root)
     return report
 
 
-# ---------------------------------------------------------------- CLI
+# ---------------------------------------------------------------------------
+# CLI (R-REVIEW-007)
+# ---------------------------------------------------------------------------
 
 
 class _UsageError(Exception):
@@ -379,39 +496,40 @@ class _UsageError(Exception):
 
 def _parse(argv):
     opts = {
-        "targets": [],
         "model": None,
         "write_proposals": False,
         "strict": False,
         "format": "text",
-        "repo_root": ".",
+        "repo_root": None,
     }
-    value_flags = {"--model": "model", "--format": "format", "--repo-root": "repo_root"}
+    targets = []
+    valued = {"--model": "model", "--format": "format", "--repo-root": "repo_root"}
     i = 0
     while i < len(argv):
         token = argv[i]
         i += 1
-        if token == "--write-proposals":
+        if not token.startswith("-"):
+            targets.append(token)
+            continue
+        name, eq, value = token.partition("=")
+        if name in valued:
+            if not eq:
+                if i >= len(argv):
+                    raise _UsageError(f"{name} needs a value")
+                value = argv[i]
+                i += 1
+            opts[valued[name]] = value
+        elif token == "--write-proposals":
             opts["write_proposals"] = True
         elif token == "--strict":
             opts["strict"] = True
-        elif token.split("=", 1)[0] in value_flags:
-            name, has_eq, value = token.partition("=")
-            if not has_eq:
-                if i >= len(argv):
-                    raise _UsageError(f"{name} requires a value")
-                value = argv[i]
-                i += 1
-            opts[value_flags[name]] = value
-        elif token.startswith("-"):
-            raise _UsageError(f"unknown argument: {token}")
         else:
-            opts["targets"].append(token)
+            raise _UsageError(f"unknown argument: {token}")
     if opts["format"] not in ("json", "text"):
-        raise _UsageError(f"--format must be json or text, not {opts['format']}")
-    if not opts["targets"]:
+        raise _UsageError(f"invalid --format value: {opts['format']}")
+    if not targets:
         raise _UsageError("at least one <target> is required")
-    return opts
+    return targets, opts
 
 
 def _usage_error(cause) -> int:
@@ -424,15 +542,17 @@ def main(argv: list | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     try:
-        opts = _parse(list(argv))
+        targets, opts = _parse(list(argv))
+    except _UsageError as exc:
+        return _usage_error(exc)
+    repo_root = Path(opts["repo_root"]) if opts["repo_root"] is not None else Path.cwd()
+    try:
         report = check(
-            opts["targets"],
-            Path(opts["repo_root"]),
+            targets,
+            repo_root,
             opts["model"],
             write_proposals=opts["write_proposals"],
         )
-    except _UsageError as exc:
-        return _usage_error(exc)
     except ValueError as exc:
         return _usage_error(exc)
 
@@ -451,6 +571,12 @@ def main(argv: list | None = None) -> int:
 
     if any(f["severity"] == "fail" for f in report.lint_findings):
         return 1
+    if any(f["kind"] == "bundle_unavailable" for f in report.findings):
+        return 1
     if opts["strict"] and (report.findings or report.gaps):
         return 1
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

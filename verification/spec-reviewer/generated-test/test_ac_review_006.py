@@ -1,8 +1,8 @@
-# hotdocs-criterion: sha256:52dd2933f0a4e8cc603916eff959e281e70c0c26b553bf8e030f1e59418c5783
+# hotdocs-criterion: sha256:38ed90c60ce8c139c3afb0b7777179cc9071b9e6d2cccda348698b67369d44b6
 import spec_reviewer
 
 
-def make_backend(text=None, error=None):
+def make_backend(reply_text=None, error=None):
     calls = []
 
     def backend(prompt, model, **params):
@@ -15,7 +15,7 @@ def make_backend(text=None, error=None):
                 "model_call_error": error,
             }
         return {
-            "text": text,
+            "text": reply_text,
             "model": model,
             "backend": "mock",
             "model_call_error": None,
@@ -24,17 +24,18 @@ def make_backend(text=None, error=None):
     return backend, calls
 
 
-def test_judge_parses_reply_and_makes_one_call_with_all_inputs():
-    backend, calls = make_backend(
-        text='ok {"conflicts": true, "rationale": "narrower"}'
-    )
+def test_glossary_judge_parses_reply_and_calls_once_with_all_texts():
+    backend, calls = make_backend('ok {"conflicts": true, "rationale": "narrower"}')
     judge = spec_reviewer.glossary_judge("mock", backend)
     assert callable(judge)
 
     result = judge("Foo", "local meaning", "glossary meaning")
 
     assert result is not None
+    assert isinstance(result, (tuple, list))
     assert tuple(result) == (True, "narrower")
+    assert result[0] is True
+
     assert len(calls) == 1
     prompt = calls[0]["prompt"]
     assert isinstance(prompt, str)
@@ -43,23 +44,23 @@ def test_judge_parses_reply_and_makes_one_call_with_all_inputs():
     assert "glossary meaning" in prompt
 
 
-def test_judge_returns_none_for_reply_without_json():
-    backend, calls = make_backend(text="no json")
+def test_glossary_judge_returns_none_for_no_json_reply():
+    backend, calls = make_backend("no json")
     judge = spec_reviewer.glossary_judge("mock", backend)
     assert judge("Foo", "local meaning", "glossary meaning") is None
     assert len(calls) == 1
 
 
-def test_judge_returns_none_for_non_bool_conflicts():
-    backend, calls = make_backend(text='{"conflicts": "yes", "rationale": "r"}')
+def test_glossary_judge_returns_none_for_non_bool_conflicts():
+    backend, calls = make_backend('{"conflicts": "yes", "rationale": "r"}')
     judge = spec_reviewer.glossary_judge("mock", backend)
     assert judge("Foo", "local meaning", "glossary meaning") is None
     assert len(calls) == 1
 
 
-def test_judge_returns_none_for_model_call_error():
+def test_glossary_judge_returns_none_for_model_call_error():
     backend, calls = make_backend(
-        error={"category": "timeout", "message": "timeout"}
+        error={"category": "timeout", "message": "the call timed out"}
     )
     judge = spec_reviewer.glossary_judge("mock", backend)
     assert judge("Foo", "local meaning", "glossary meaning") is None

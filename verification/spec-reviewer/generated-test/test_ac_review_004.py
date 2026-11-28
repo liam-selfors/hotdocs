@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:ec8fff6a58541de0d9f6e7535812068d7d5b6016d47c952740d6c6ae46b85484
+# hotdocs-criterion: sha256:a14e075b0e93e3a0b3280f7bb8a9ffcced7281976671056f5ef510c498be9096
 import importlib.util
 import sys
 from pathlib import Path
@@ -12,7 +12,7 @@ SENTENCE = (
     "report any of these as a gap."
 )
 
-REPLY_001 = (
+GAP_REPLY = (
     'Here: {"writable": false, "gaps": [{"kind": "unstated_behavior", '
     '"missing": "negative x", "proposed_text": "MUST raise ValueError", '
     '"target_file": "R-FOO-001.md"}, {"kind": "other", "missing": "m", '
@@ -22,6 +22,14 @@ REPLY_001 = (
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def write(path, text):
@@ -57,7 +65,7 @@ def build_corpus(repo_root):
     )
     write(
         comp / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002\n\n**R-FOO-002** — `foo(0)` MUST return `0`.\n",
+        "# R-FOO-002\n\n**R-FOO-002** — `foo(x)` MUST return an `int`.\n",
     )
     write(
         comp / "acceptance" / "AC-FOO-001.md",
@@ -80,9 +88,9 @@ def build_corpus(repo_root):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given x = 0\n"
+        "Given x = 3\n"
         "When foo(x) is called\n"
-        "Then it returns 0\n"
+        "Then it returns an int\n"
         "```\n",
     )
     write(
@@ -93,20 +101,15 @@ def build_corpus(repo_root):
 
 
 def assert_lint_clean(repo_root):
-    gen = next(
-        p for p in Path(spec_reviewer.__file__).resolve().parents if p.name == "gen"
-    )
+    gen = next(p for p in Path(spec_reviewer.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
-    path = (
-        base / "spec_linter.py"
-        if (base / "spec_linter.py").is_file()
-        else base / "spec_linter" / "__init__.py"
-    )
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    spec_linter = load_module(path, "spec_linter")
     assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+
+def is_judge_prompt(prompt):
+    return '"conflicts"' in prompt
 
 
 def test_ac_review_004(tmp_path):
@@ -120,54 +123,40 @@ def test_ac_review_004(tmp_path):
     def backend(prompt, model, **params):
         prompts.append(prompt)
         if "AC-FOO-001" in prompt:
-            text = REPLY_001
+            text = GAP_REPLY
         else:
             text = "not json"
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
-    report = spec_reviewer.check(
-        ["comp-foo"], repo_root, model="mock", llm_backend=backend
-    )
+    report = spec_reviewer.check(["comp-foo"], repo_root, model="mock", llm_backend=backend)
 
-    # Prompts not for the lint judge: the criterion prompts, which ask for
-    # the "writable" JSON object (the judge asks only for "conflicts").
-    criterion_prompts = [p for p in prompts if "writable" in p]
-    assert len(criterion_prompts) == 2
+    criterion_prompts = [p for p in prompts if not is_judge_prompt(p)]
+    assert len(criterion_prompts) == 2, criterion_prompts
 
-    p001 = [p for p in criterion_prompts if "AC-FOO-001" in p]
-    p002 = [p for p in criterion_prompts if "AC-FOO-002" in p]
-    assert len(p001) == 1
-    assert len(p002) == 1
-    assert "AC-FOO-002" not in p001[0]
-    assert "AC-FOO-001" not in p002[0]
+    foo1 = [p for p in criterion_prompts if "AC-FOO-001" in p]
+    assert len(foo1) == 1
+    assert "AC-FOO-002" not in foo1[0]
+    foo2 = [p for p in criterion_prompts if "AC-FOO-002" in p]
+    assert len(foo2) == 1
+    assert "AC-FOO-001" not in foo2[0]
 
-    for p in criterion_prompts:
-        assert any(SENTENCE in line for line in p.splitlines()), (
-            "required sentence missing or not on one line"
-        )
+    for prompt in criterion_prompts:
+        assert any(SENTENCE in line for line in prompt.splitlines()), prompt
 
-    writable = field(report, "writable")
-    assert dict(writable) == {"AC-FOO-001": False, "AC-FOO-002": None}
-    assert writable["AC-FOO-001"] is False
-    assert writable["AC-FOO-002"] is None
+    assert dict(field(report, "writable")) == {"AC-FOO-001": False, "AC-FOO-002": None}
 
     gaps = list(field(report, "gaps"))
-    assert len(gaps) == 1
+    assert len(gaps) == 1, gaps
     gap = gaps[0]
-    assert field(gap, "criterion_id") == "AC-FOO-001"
     assert field(gap, "kind") == "unstated_behavior"
+    assert field(gap, "criterion_id") == "AC-FOO-001"
     assert field(gap, "missing") == "negative x"
     assert field(gap, "proposed_text") == "MUST raise ValueError"
     assert field(gap, "target_file") == "R-FOO-001.md"
 
     findings = list(field(report, "findings"))
     unparseable = [f for f in findings if field(f, "kind") == "model_unparseable"]
-    assert len(unparseable) == 1
+    assert len(unparseable) == 1, findings
     assert field(unparseable[0], "criterion_id") == "AC-FOO-002"
 
     assert field(report, "degraded") is False

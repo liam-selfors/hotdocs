@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:f803a149e28dc3a27bf5796a83f1c4dd4d0853a7f189475c709485a547d5c0b7
+# hotdocs-criterion: sha256:7d7c6f07302a38f717162df79e4189ebc5365a61372f913dc956a323a0cac48e
 import importlib.util
 import sys
 from pathlib import Path
@@ -10,29 +10,21 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root):
+def build_corpus(repo_root):
     specs = repo_root / "specs"
-    _write(
+    write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
-        "- **Foo** \u2014 a test term.\n",
+        "- **Foo** — a test term.\n",
     )
     comp = specs / "components" / "foo"
-    _write(
+    write(
         comp / "component.md",
         "---\n"
         "id: comp-foo\n"
@@ -50,14 +42,14 @@ def _build_corpus(repo_root):
         "\n"
         "Foo doubles a number.\n",
     )
-    _write(
+    write(
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`, so it returns `4`"
-        " for an input of two, and it accepts `--opt=<v>`.\n",
+        "**R-FOO-001** — `foo(x)` MUST return `2 * x`, so `foo(2)` returns `4`;"
+        " it accepts `--opt=<v>`.\n",
     )
-    _write(
+    write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
@@ -71,7 +63,7 @@ def _build_corpus(repo_root):
         "  and `--fast` again\n"
         "```\n",
     )
-    _write(
+    write(
         comp / "interface" / "library.md",
         "# Library\n"
         "\n"
@@ -79,7 +71,7 @@ def _build_corpus(repo_root):
         "foo(x: int) -> int\n"
         "```\n",
     )
-    _write(
+    write(
         comp / "constraints.md",
         "# Constraints\n"
         "\n"
@@ -87,7 +79,7 @@ def _build_corpus(repo_root):
     )
 
 
-def _assert_lint_clean(repo_root):
+def assert_lint_clean(repo_root):
     gen = next(p for p in Path(spec_reviewer.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
     path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
@@ -101,8 +93,8 @@ def _assert_lint_clean(repo_root):
 def test_ac_review_003_invisible_reference_only_for_when_then_tokens(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
-    _assert_lint_clean(repo_root)
+    build_corpus(repo_root)
+    assert_lint_clean(repo_root)
 
     report = spec_reviewer.check(["AC-FOO-001"], repo_root)
 
