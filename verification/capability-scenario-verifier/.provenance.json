@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:9b7e8092798827d16ef1bfcd07fadf95aa88fa734ffc8751b0f53f9db41a6023",
+  "spec_bundle_hash": "sha256:761481158dba7f79e4eb5b8b66033b1e7b9803d316558c256810e35f81aab917",
   "spec_bundle_parts": {
     "spec": "sha256:db5178921c8f362f7945545101363bcc88f3afab653fa124f7e3c866eb6df4c2",
-    "dependency_code": "sha256:32578d5801490ee6a6f518601b6b3d5ed200078c26879659fb00ab49d1a5eb42"
+    "dependency_code": "sha256:d04a7bdd41d918f05933a4a8b3238e8a2130cdb2db330284178222a36fef5a8d"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-28T04:37:16Z",
+  "generated_at": "2026-11-28T07:31:03Z",
   "verification_run_id": "capability-scenario-verifier-attempt-1",
   "verification_report": {
     "component_id": "comp-capability-scenario-verifier",
