@@ -1,20 +1,17 @@
-"""Run environment: provisions asset kinds and test drivers, writes the pytest plugin."""
-
-from __future__ import annotations
+"""Provisions asset kinds and test drivers for a component's or capability's tests."""
 
 import hashlib
 import importlib.util
 import json
-import os
 import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-PLUGIN_MODULE = "hotdocs_run_plugins"
+PLUGIN_NAME = "hotdocs_run_plugins"
 
-PLUGIN_SOURCE = '''"""pytest plugin written by run-environment: asset_runner and driver fixtures."""
+PLUGIN_SOURCE = '''"""pytest plugin giving every run asset_runner and each declared driver's fixture."""
 
 import importlib.util
 import json
@@ -27,7 +24,7 @@ import pytest
 
 
 def _load(adapter):
-    name = Path(adapter).stem
+    name = "hotdocs_adapter_" + Path(adapter).stem
     spec = importlib.util.spec_from_file_location(name, adapter)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
@@ -42,25 +39,32 @@ def asset_runner():
     def run(path):
         for entry in entries:
             if entry["path"] == path:
-                module = _load(entry["adapter"])
-                return module.asset_runner(Path(entry["file"]))
+                return _load(entry["adapter"]).asset_runner(Path(entry["file"]))
         declared = ", ".join(entry["path"] for entry in entries) or "none"
         raise KeyError(
-            "asset_runner: %r is not a declared asset (declared: %s)" % (path, declared)
+            "asset_runner: " + repr(path)
+            + " is not a declared asset (declared: " + declared + ")"
         )
 
     return run
 
 
 def _copy_screenshots(request, tmp_path):
-    target = os.environ.get("HOTDOCS_SCREENSHOTS")
-    if not target:
+    root = os.environ.get("HOTDOCS_SCREENSHOTS")
+    if not root:
         return
-    dest = Path(target) / Path(str(request.path)).stem
-    for png in sorted((tmp_path / "screenshots").glob("*.png")):
+    try:
+        stem = Path(str(request.path)).stem
+        target = Path(root) / stem
+        if target.exists():
+            shutil.rmtree(target)
+        target.mkdir(parents=True, exist_ok=True)
+        pngs = sorted((tmp_path / "screenshots").glob("*.png"))
+    except Exception:
+        return
+    for png in pngs:
         try:
-            dest.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(png), str(dest / png.name))
+            shutil.copy2(png, target / png.name)
         except Exception:
             pass
 
@@ -75,66 +79,60 @@ def _make_driver_fixture(entry):
             session.close()
             _copy_screenshots(request, tmp_path)
 
+    driver_fixture.__name__ = entry["fixture"]
     return pytest.fixture(name=entry["fixture"])(driver_fixture)
 
 
 for _entry in json.loads(os.environ.get("HOTDOCS_DRIVERS", "[]")):
-    globals()["hotdocs_driver_" + _entry["fixture"].replace("-", "_")] = _make_driver_fixture(_entry)
+    globals()["_hotdocs_driver_" + _entry["fixture"]] = _make_driver_fixture(_entry)
 '''
 
 
-def _get(obj, key, default=None):
+def _get(obj, key):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(key)
+    return getattr(obj, key, None)
 
 
-def _sha256(path):
-    if path is None or not Path(path).is_file():
-        return None
-    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def _tool_root() -> Path:
-    return next(p.parent for p in Path(__file__).resolve().parents if p.name == "gen")
-
-
-def _find_adapter(repo_root: Path, prefix: str, name: str):
-    rel = Path("gen") / f"{prefix}-{name}" / f"{prefix}_{name.replace('-', '_')}.py"
-    for base in (repo_root, _tool_root()):
-        candidate = base / rel
-        if candidate.is_file():
-            return candidate
+def _tool_root():
+    for parent in Path(__file__).resolve().parents:
+        if parent.name == "gen":
+            return parent.parent
     return None
 
 
-def _load(path: Path):
-    name = path.stem
+def _sha256(path):
+    if not path.is_file():
+        return None
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _find_adapter(repo_root, prefix, name):
+    module = name.replace("-", "_")
+    rel = Path("gen") / f"{prefix}-{name}" / f"{prefix}_{module}.py"
+    candidate = repo_root / rel
+    if candidate.is_file():
+        return candidate
+    tool_root = _tool_root()
+    if tool_root is not None and (tool_root / rel).is_file():
+        return (tool_root / rel).absolute()
+    return None
+
+
+def _load_module(path, name):
     previous = sys.dont_write_bytecode
     sys.dont_write_bytecode = True
     try:
-        spec = importlib.util.spec_from_file_location(name, path)
+        spec = importlib.util.spec_from_file_location(name, str(path))
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
         spec.loader.exec_module(module)
+        return module
     finally:
         sys.dont_write_bytecode = previous
-    return module
 
 
-def _provision(label: str, adapter: Path, repo_root: Path):
-    """Return (module, report, failure_message)."""
-    try:
-        module = _load(adapter)
-        report = module.provision(repo_root)
-    except Exception as exc:
-        return None, None, f"{label} adapter failed: {type(exc).__name__}: {exc}"
-    if not _get(report, "ok"):
-        return module, report, _get(report, "reason")
-    return module, report, None
-
-
-def _frontmatter(path: Path) -> list:
+def _frontmatter_lines(path):
     if not path.is_file():
         return []
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -148,53 +146,75 @@ def _frontmatter(path: Path) -> list:
     return out
 
 
-def _list_line(lines: list, key: str) -> list:
+def _list_line(lines, key):
     for line in lines:
         if line.startswith(key + ":"):
-            inner = line[line.index("[") + 1 : line.index("]")]
-            return [item.strip() for item in inner.split(",") if item.strip()]
+            text = line.partition("[")[2].partition("]")[0]
+            return [item.strip() for item in text.split(",") if item.strip()]
     return []
+
+
+def _failure_text(name, exc):
+    return f"{name} adapter failed: {type(exc).__name__}: {exc}"
 
 
 @dataclass
 class RunEnvironment:
     ok: bool
-    failure_message: str | None
-    interpreter: str | None
+    failure_message: object
+    interpreter: object
     assets: list
     drivers: list
-    plugin_dir: str | None
-    _asset_adapters: list = field(default_factory=list, repr=False, compare=False)
-    _driver_env: list = field(default_factory=list, repr=False, compare=False)
-    _gen_dir: Path | None = field(default=None, repr=False, compare=False)
-    _screenshots_dir: str | None = field(default=None, repr=False, compare=False)
+    plugin_dir: object
+    _asset_specs: list = field(default_factory=list, repr=False)
+    _driver_specs: list = field(default_factory=list, repr=False)
+    _repo_root: object = field(default=None, repr=False)
+    _slug: object = field(default=None, repr=False)
 
-    def pytest_args(self) -> list:
-        return ["-p", PLUGIN_MODULE]
+    def pytest_args(self):
+        return ["-p", PLUGIN_NAME]
 
-    def driver_fixtures(self) -> list:
-        return [entry["fixture"] for entry in self._driver_env]
+    def driver_fixtures(self):
+        return [fixture for _, fixture, _ in self._driver_specs]
 
-    def env_for(self, code_dir) -> dict:
-        base = Path(os.path.abspath(code_dir))
+    def env_for(self, code_dir):
+        code_dir = Path(code_dir)
+        repo_root = Path(self._repo_root).absolute()
+        assets = [
+            {
+                "path": path,
+                "file": str((code_dir / path).absolute()),
+                "adapter": str(adapter),
+            }
+            for path, adapter in self._asset_specs
+        ]
+        drivers = [
+            {
+                "name": name,
+                "fixture": fixture,
+                "adapter": str(adapter),
+                "repo_root": str(repo_root),
+            }
+            for name, fixture, adapter in self._driver_specs
+        ]
         env = {
-            "HOTDOCS_ASSETS": json.dumps(
-                [
-                    {"path": path, "file": str(base / path), "adapter": os.path.abspath(adapter)}
-                    for path, adapter in self._asset_adapters
-                ]
-            ),
-            "HOTDOCS_DRIVERS": json.dumps(self._driver_env),
+            "HOTDOCS_ASSETS": json.dumps(assets),
+            "HOTDOCS_DRIVERS": json.dumps(drivers),
         }
-        if self._gen_dir is not None and Path(code_dir).resolve() == self._gen_dir.resolve():
-            env["HOTDOCS_SCREENSHOTS"] = self._screenshots_dir
+        if self._slug is not None and code_dir.resolve() == (
+            repo_root / "gen" / self._slug
+        ).resolve():
+            env["HOTDOCS_SCREENSHOTS"] = str(
+                repo_root / ".hotdocs" / "screenshots" / self._slug
+            )
         return env
 
-    def close(self) -> None:
-        if self.plugin_dir is not None and os.path.isdir(self.plugin_dir):
-            shutil.rmtree(self.plugin_dir)
+    def close(self):
+        if self.plugin_dir is not None:
+            shutil.rmtree(self.plugin_dir, ignore_errors=True)
+            self.plugin_dir = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self):
         return {
             "ok": self.ok,
             "failure_message": self.failure_message,
@@ -205,117 +225,138 @@ class RunEnvironment:
         }
 
 
-def _build(repo_root: Path, declared_assets: list, declared_drivers: list) -> RunEnvironment:
+def _prepare(repo_root, declared_assets, driver_names, slug):
+    repo_root = Path(repo_root).absolute()
     arch = repo_root / "specs" / "architecture"
-    kinds = ["python"]
-    for kind, _ in declared_assets:
-        if kind not in kinds:
-            kinds.append(kind)
 
-    failure = None
-    interpreter = None
-    kind_info = {}
-    for kind in kinds:
-        adapter = _find_adapter(repo_root, "kind", kind)
-        info = {"adapter": adapter, "versions": {}, "lockfile_sha256": None}
-        kind_info[kind] = info
-        if failure is not None:
-            continue
-        if adapter is None:
-            failure = f"unknown asset kind: {kind}"
-            continue
-        _, report, failure = _provision(kind, adapter, repo_root)
-        if report is not None:
-            info["versions"] = _get(report, "versions", {})
-            info["lockfile_sha256"] = _get(report, "lockfile_sha256")
-            if kind == "python":
-                interpreter = _get(report, "interpreter")
+    kinds = ["python"] + list(dict.fromkeys(kind for kind, _ in declared_assets))
+    kind_adapters = {kind: _find_adapter(repo_root, "kind", kind) for kind in kinds}
 
     def asset_entry(kind, path):
-        info = kind_info[kind]
+        adapter = kind_adapters[kind]
         return {
             "kind": kind,
             "path": path,
             "definition_sha256": _sha256(arch / f"asset-kind-{kind}.md"),
-            "adapter_sha256": _sha256(info["adapter"]),
-            "versions": info["versions"],
-            "lockfile_sha256": info["lockfile_sha256"],
-        }
-
-    assets = [asset_entry("python", ".")]
-    assets += [asset_entry(kind, path) for kind, path in declared_assets]
-
-    drivers = []
-    driver_env = []
-    for name in sorted(declared_drivers):
-        adapter = _find_adapter(repo_root, "driver", name)
-        entry = {
-            "name": name,
-            "definition_sha256": _sha256(arch / f"test-driver-{name}.md"),
-            "adapter_sha256": _sha256(adapter),
+            "adapter_sha256": None if adapter is None else _sha256(adapter),
             "versions": {},
             "lockfile_sha256": None,
         }
-        drivers.append(entry)
-        if failure is not None:
-            continue
+
+    assets = [asset_entry("python", ".")] + [
+        asset_entry(kind, path) for kind, path in declared_assets
+    ]
+
+    names = sorted(dict.fromkeys(driver_names))
+    driver_adapters = {name: _find_adapter(repo_root, "driver", name) for name in names}
+    drivers = [
+        {
+            "name": name,
+            "definition_sha256": _sha256(arch / f"test-driver-{name}.md"),
+            "adapter_sha256": None
+            if driver_adapters[name] is None
+            else _sha256(driver_adapters[name]),
+            "versions": {},
+            "lockfile_sha256": None,
+        }
+        for name in names
+    ]
+
+    failure = None
+    interpreter = None
+    for kind in kinds:
+        adapter = kind_adapters[kind]
         if adapter is None:
-            failure = f"unknown test driver: {name}"
-            continue
-        module, report, failure = _provision(name, adapter, repo_root)
-        if report is not None:
-            entry["versions"] = _get(report, "versions", {})
+            failure = f"unknown asset kind: {kind}"
+            break
+        try:
+            module = _load_module(adapter, "kind_" + kind.replace("-", "_"))
+            report = module.provision(repo_root)
+        except Exception as exc:
+            failure = _failure_text(kind, exc)
+            break
+        if not _get(report, "ok"):
+            failure = _get(report, "reason")
+            break
+        for entry in assets:
+            if entry["kind"] == kind:
+                entry["versions"] = _get(report, "versions")
+                entry["lockfile_sha256"] = _get(report, "lockfile_sha256")
+        if kind == "python":
+            interpreter = _get(report, "interpreter")
+
+    driver_specs = []
+    if failure is None:
+        for entry in drivers:
+            name = entry["name"]
+            adapter = driver_adapters[name]
+            if adapter is None:
+                failure = f"unknown test driver: {name}"
+                break
+            try:
+                module = _load_module(adapter, "driver_" + name.replace("-", "_"))
+                fixture = module.FIXTURE
+                report = module.provision(repo_root)
+            except Exception as exc:
+                failure = _failure_text(name, exc)
+                break
+            if not _get(report, "ok"):
+                failure = _get(report, "reason")
+                break
+            entry["versions"] = _get(report, "versions")
             entry["lockfile_sha256"] = _get(report, "lockfile_sha256")
-        if failure is None:
-            driver_env.append(
-                {
-                    "name": name,
-                    "fixture": module.FIXTURE,
-                    "adapter": os.path.abspath(adapter),
-                    "repo_root": os.path.abspath(repo_root),
-                }
-            )
+            driver_specs.append((name, fixture, adapter))
 
-    ok = failure is None
-    plugin_dir = None
-    if ok:
-        plugin_dir = tempfile.mkdtemp()
-        (Path(plugin_dir) / f"{PLUGIN_MODULE}.py").write_text(PLUGIN_SOURCE, encoding="utf-8")
-    else:
-        interpreter = None
+    asset_specs = [(path, kind_adapters[kind]) for kind, path in declared_assets]
 
+    if failure is not None:
+        return RunEnvironment(
+            ok=False,
+            failure_message=failure,
+            interpreter=None,
+            assets=assets,
+            drivers=drivers,
+            plugin_dir=None,
+            _asset_specs=asset_specs,
+            _driver_specs=driver_specs,
+            _repo_root=repo_root,
+            _slug=slug,
+        )
+
+    plugin_dir = tempfile.mkdtemp()
+    (Path(plugin_dir) / f"{PLUGIN_NAME}.py").write_text(PLUGIN_SOURCE, encoding="utf-8")
     return RunEnvironment(
-        ok=ok,
-        failure_message=failure,
+        ok=True,
+        failure_message=None,
         interpreter=interpreter,
         assets=assets,
         drivers=drivers,
         plugin_dir=plugin_dir,
-        _asset_adapters=[(path, kind_info[kind]["adapter"]) for kind, path in declared_assets],
-        _driver_env=driver_env,
+        _asset_specs=asset_specs,
+        _driver_specs=driver_specs,
+        _repo_root=repo_root,
+        _slug=slug,
     )
 
 
-def prepare(component_id: str, repo_root: Path) -> RunEnvironment:
+def prepare(component_id, repo_root):
     repo_root = Path(repo_root)
-    slug = component_id.removeprefix("comp-")
-    screenshots = Path(os.path.abspath(repo_root)) / ".hotdocs" / "screenshots" / slug
-    if screenshots.exists():
-        shutil.rmtree(screenshots)
-    lines = _frontmatter(repo_root / "specs" / "components" / slug / "component.md")
-    declared_assets = [tuple(item.split(":", 1)) for item in _list_line(lines, "assets")]
-    env = _build(repo_root, declared_assets, _list_line(lines, "drivers"))
-    env._gen_dir = repo_root / "gen" / slug
-    env._screenshots_dir = str(screenshots)
-    return env
+    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+    lines = _frontmatter_lines(repo_root / "specs" / "components" / slug / "component.md")
+    declared_assets = []
+    for item in _list_line(lines, "assets"):
+        kind, _, path = item.partition(":")
+        declared_assets.append((kind, path))
+    return _prepare(repo_root, declared_assets, _list_line(lines, "drivers"), slug)
 
 
-def prepare_capability(capability_id: str, repo_root: Path) -> RunEnvironment:
+def prepare_capability(capability_id, repo_root):
     repo_root = Path(repo_root)
-    lines = []
+    driver_names = []
     for path in sorted((repo_root / "specs" / "product").glob("*.md")):
-        candidate = _frontmatter(path)
-        if any(line.startswith("id:") and line[3:].strip() == capability_id for line in candidate):
-            lines = candidate
+        lines = _frontmatter_lines(path)
+        ids = [line.partition(":")[2].strip() for line in lines if line.startswith("id:")]
+        if capability_id in ids:
+            driver_names = _list_line(lines, "drivers")
             break
-    return _build(repo_root, [], _list_line(lines, "drivers"))
+    return _prepare(repo_root, [], driver_names, None)

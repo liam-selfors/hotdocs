@@ -1,7 +1,7 @@
 {
-  "spec_bundle_hash": "sha256:785d422005663cdfb00df1bd02e0aea0bf81eafb50da8d6d54da9d5e8282e982",
+  "spec_bundle_hash": "sha256:4ecfd2cd5a036b6ca23cd1ee31137c8cfdc3390ff658342923bcd711662085ba",
   "spec_bundle_parts": {
-    "spec": "sha256:785d422005663cdfb00df1bd02e0aea0bf81eafb50da8d6d54da9d5e8282e982",
+    "spec": "sha256:4ecfd2cd5a036b6ca23cd1ee31137c8cfdc3390ff658342923bcd711662085ba",
     "dependency_code": "sha256:c92a94e1a5dc05f61ea3cafa3ab0d83b65ff7fc7322ac17584e5be5273d1b7b3"
   },
   "model_pin": "claude-opus-5-5",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-28T07:26:16Z",
+  "generated_at": "2026-11-28T12:00:36Z",
   "verification_run_id": "run-environment-attempt-1",
   "verification_report": {
     "component_id": "comp-run-environment",
@@ -54,13 +54,7 @@
         "id": "AC-RUNENV-004",
         "covers": "R-RUNENV-004",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-RUNENV-005",
@@ -97,7 +91,7 @@
       "R-RUNENV-007": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8181818181818182,
+    "mutation_score": 0.8727272727272727,
     "mutation_error": null,
     "assets": [
       {
