@@ -1,23 +1,29 @@
-# hotdocs-criterion: sha256:2cde0f4f7e0bd43a63df1ab1e2eb658d75558ea2f6b8a6650b86b752923dd3f7
+# hotdocs-criterion: sha256:b746c794ed30b9be8b3a42099c7787c522aca73001639020f1fbc90bf9c5aa49
 """CS-ZERO-EDIT-001 (covers P-ZERO-EDIT).
 
 Given a ratified, non-sealed component spec bundle with complete,
-agent-checkable acceptance criteria, when a spec change goes through the
-pipeline, then the resulting gen/<component>/ passes every gate with zero
-commits to gen/<component>/ authored by a human between the spec merge and
-the pipeline's own merge commit.
+agent-checkable acceptance criteria, when a spec change is merged and the
+pipeline then runs (generation -> verification -> gates -> merge), the
+resulting gen/<component>/ passes every gate with zero commits to
+gen/<component>/ authored by a human between the spec merge commit and the
+pipeline's own merge commit.
 
-The test plays the human only up to the spec merge commit.  From then on
-only the pipeline (``component_gate_runner.run_component_gates`` driving the
-real ``generation-loop`` and real ``generator``, with an injected mock model)
-touches the working tree; the test then makes the pipeline's merge commit and
-checks the git history of gen/<component>/.
+The pipeline is driven through `component_gate_runner.run_component_gates`.
+The model is a mock `llm_backend`. Dependencies whose own behaviour is not
+what this capability is about, or whose internals this bundle does not fully
+describe, are replaced by flat-module fakes written under the temporary
+`repo_root`: the two scanners, the run environment, the `python` asset
+adapter and the verifier. The fake verifier really runs the criterion's
+test against the generated code, so its verdict reflects the code itself.
 """
 
+import importlib.util
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -25,559 +31,514 @@ import pytest
 import component_gate_runner
 
 
+SLUG = "shout"
+COMPONENT_ID = "comp-shout"
+CAPABILITY_ID = "P-SHOUT"
+MODEL = "claude-sonnet-5"
+
 HUMAN_NAME = "Spec Author"
-HUMAN_EMAIL = "human@example.invalid"
+HUMAN_EMAIL = "spec-author@example.invalid"
 PIPELINE_NAME = "hotdocs-pipeline"
-PIPELINE_EMAIL = "pipeline@example.invalid"
+PIPELINE_EMAIL = "pipeline@hotdocs.invalid"
 
-COMPONENT_ID = "comp-widget"
-SLUG = "widget"
-MODEL = "mock-model"
+GENERATED_CODE = 'def shout(text):\n    return text.upper() + "!"\n'
 
-WIDGET_SOURCE = "def add(a, b):\n    return a + b\n"
+CRITERION_TEST_SOURCE = (
+    "import shout\n"
+    "\n"
+    "\n"
+    "def test_ac_shout_001():\n"
+    "    assert shout.shout(" + repr("hi") + ") == " + repr("HI!") + "\n"
+)
 
+
+# --------------------------------------------------------------------------
+# helpers
+# --------------------------------------------------------------------------
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def opt_field(value, name):
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def write(path, text):
-    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
+def git_env(name, email):
+    env = dict(os.environ)
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_AUTHOR_NAME"] = name
+    env["GIT_AUTHOR_EMAIL"] = email
+    env["GIT_COMMITTER_NAME"] = name
+    env["GIT_COMMITTER_EMAIL"] = email
+    return env
+
+
+def git(repo, *args, name=HUMAN_NAME, email=HUMAN_EMAIL):
+    proc = subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.devnull, *args],
+        cwd=str(repo),
+        env=git_env(name, email),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, "git " + " ".join(args) + " failed:\n" + proc.stdout + proc.stderr
+    return proc.stdout
+
+
 # --------------------------------------------------------------------------
-# Synthetic spec corpus
+# fixture corpus
 # --------------------------------------------------------------------------
 
-def build_corpus(repo_root):
-    comp = repo_root / "specs" / "components" / SLUG
+def build_corpus(repo):
     write(
-        comp / "component.md",
+        repo / "specs" / "glossary.md",
+        "# Glossary\n\n- **Shout** — a piece of text upper-cased and followed by one `!`.\n",
+    )
+    write(
+        repo / "specs" / "components" / SLUG / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-shout\n"
+        "title: Shout\n"
         "status: ratified\n"
-        "owners: [pipeline-team]\n"
         "last_ratified_commit: 0000000\n"
+        "owners: [demo-team]\n"
         "depends_on: []\n"
+        "realizes: [P-SHOUT]\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Shout\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Adds two integers.\n",
+        "Turns a piece of text into a shout.\n",
     )
     write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n`add(a, b)` MUST return the sum `a + b`.\n",
+        repo / "specs" / "components" / SLUG / "requirements" / "R-SHOUT-001.md",
+        "# R-SHOUT-001\n\n`shout(text)` MUST return `text` upper-cased, followed by `!`.\n",
     )
     write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
+        repo / "specs" / "components" / SLUG / "acceptance" / "AC-SHOUT-001.md",
+        "# AC-SHOUT-001\n"
         "\n"
-        "Covers: R-WIDGET-001\n"
+        "Covers: R-SHOUT-001\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given the integers 2 and 3\n"
-        "When add is called with them\n"
-        "Then the result is 5\n"
+        "Given the text \"hi\"\n"
+        "When shout is called with it\n"
+        "Then the result is \"HI!\"\n"
         "```\n",
     )
     write(
-        comp / "interface" / "library.md",
-        "# Library\n\nOne module file, `widget.py`.\n\n```\nadd(a: int, b: int) -> int\n```\n",
+        repo / "specs" / "components" / SLUG / "interface" / "library.md",
+        "# Library\n\nOne module file, `shout.py`.\n\n```\nshout(text: str) -> str\n```\n",
     )
-    write(comp / "constraints.md", "# Constraints\n\nPure function, no I/O.\n")
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** - adds numbers.\n")
+    write(
+        repo / "specs" / "components" / SLUG / "constraints.md",
+        "# Constraints\n\nStandard library only.\n",
+    )
+    write(
+        repo / "specs" / "product" / "P-SHOUT.md",
+        "---\n"
+        "id: P-SHOUT\n"
+        "title: Shouting\n"
+        "status: ratified\n"
+        "last_ratified_commit: 0000000\n"
+        "owners: [demo-team]\n"
+        "---\n"
+        "\n"
+        "# Shouting\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Text can be turned into a shout.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "In scope: shouting a single string.\n"
+        "\n"
+        "## Capability scenario\n"
+        "\n"
+        "### CS-SHOUT-001\n"
+        "Covers: P-SHOUT\n"
+        "Kind: llm-judge\n"
+        "\n"
+        "```gherkin\n"
+        "Given a piece of text\n"
+        "When it is shouted\n"
+        "Then the result reads as a shout\n"
+        "```\n",
+    )
+    write(repo / ".gitignore", ".hotdocs/\n__pycache__/\n*.pyc\n.pytest_cache/\n")
 
 
 # --------------------------------------------------------------------------
-# Fake dependencies (flat-module shape under <repo_root>/gen/<slug>/)
+# fakes, written as flat modules under <repo_root>/gen/<slug>/
 # --------------------------------------------------------------------------
 
-FAKE_ASSEMBLER = (
-    "import hashlib\n"
-    "from collections.abc import Mapping\n"
-    "from pathlib import Path\n"
-    "\n"
-    "\n"
-    "class SpecBundle(Mapping):\n"
-    "    _FIELDS = ('component_id', 'spec_bundle_hash', 'spec', 'interface', 'constraints',\n"
-    "               'dependency_interfaces', 'dependency_context', 'dependency_usage',\n"
-    "               'vars', 'glossary', 'hint_code', 'spec_bundle_parts')\n"
-    "\n"
-    "    def __init__(self, **kwargs):\n"
-    "        for name in self._FIELDS:\n"
-    "            setattr(self, name, kwargs.get(name))\n"
-    "\n"
-    "    def __getitem__(self, key):\n"
-    "        if key not in self._FIELDS:\n"
-    "            raise KeyError(key)\n"
-    "        return getattr(self, key)\n"
-    "\n"
-    "    def __iter__(self):\n"
-    "        return iter(self._FIELDS)\n"
-    "\n"
-    "    def __len__(self):\n"
-    "        return len(self._FIELDS)\n"
-    "\n"
-    "\n"
-    "def _read(path):\n"
-    "    path = Path(path)\n"
-    "    return path.read_text(encoding='utf-8').strip() if path.is_file() else ''\n"
-    "\n"
-    "\n"
-    "def assemble(component_id, repo_root, mode='cold'):\n"
-    "    slug = component_id[5:] if component_id.startswith('comp-') else component_id\n"
-    "    comp = Path(repo_root) / 'specs' / 'components' / slug\n"
-    "    spec_parts = [_read(comp / 'component.md')]\n"
-    "    for p in sorted((comp / 'requirements').glob('*.md')):\n"
-    "        spec_parts.append(_read(p))\n"
-    "    spec = '\\n\\n'.join(x for x in spec_parts if x)\n"
-    "    interface = '\\n\\n'.join(x for x in (_read(p) for p in sorted((comp / 'interface').rglob('*.md'))) if x)\n"
-    "    constraints = _read(comp / 'constraints.md')\n"
-    "    glossary = _read(Path(repo_root) / 'specs' / 'glossary.md')\n"
-    "    spec_hash = 'sha256:' + hashlib.sha256((spec + interface + constraints).encode('utf-8')).hexdigest()\n"
-    "    dep_hash = 'sha256:' + hashlib.sha256(b'').hexdigest()\n"
-    "    total = 'sha256:' + hashlib.sha256((spec_hash + dep_hash).encode('utf-8')).hexdigest()\n"
-    "    hint = None\n"
-    "    if mode == 'hint':\n"
-    "        hint = {}\n"
-    "    return SpecBundle(component_id=component_id, spec_bundle_hash=total, spec=spec,\n"
-    "                      interface=interface, constraints=constraints,\n"
-    "                      dependency_interfaces={}, dependency_context={}, dependency_usage={},\n"
-    "                      vars={}, glossary=glossary, hint_code=hint,\n"
-    "                      spec_bundle_parts={'spec': spec_hash, 'dependency_code': dep_hash})\n"
-    "\n"
-    "\n"
-    "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-    "    bundle = assemble(component_id, repo_root)\n"
-    "    return {'component_id': component_id, 'criterion_id': criterion_id,\n"
-    "            'covers': 'R-WIDGET-001', 'criterion_text': '',\n"
-    "            'requirement_text': '', 'interface': bundle['interface'],\n"
-    "            'glossary': bundle['glossary'], 'dependency_interfaces': {}, 'testing': ''}\n"
-)
+def write_fakes(repo, log_path):
+    log = repr(str(log_path))
 
-
-def fake_provenance_checker(log_path):
-    return (
-        "import sys\n"
-        "LOG = " + repr(str(log_path)) + "\n"
-        "sys.path.insert(0, " + repr("") + ") if False else None\n"
-        "\n"
-        "\n"
-        "def _log(line):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write(line + '\\n')\n"
-        "\n"
-        "\n"
-        "class ProvenanceKey:\n"
-        "    def __init__(self, spec_bundle_hash, spec_bundle_parts, gate_versions, assets, drivers):\n"
-        "        self.spec_bundle_hash = spec_bundle_hash\n"
-        "        self.spec_bundle_parts = spec_bundle_parts\n"
-        "        self.gate_versions = gate_versions\n"
-        "        self.assets = assets\n"
-        "        self.drivers = drivers\n"
-        "\n"
-        "\n"
-        "def current_sealed_key(component_id, repo_root):\n"
-        "    _log('current_sealed_key ' + component_id)\n"
-        "    return None\n"
-        "\n"
-        "\n"
-        "def current_provenance_key(component_id, repo_root):\n"
-        "    _log('current_provenance_key ' + component_id)\n"
-        "    return ProvenanceKey(\n"
-        "        'sha256:' + 'ab' * 32,\n"
-        "        {'spec': 'sha256:' + 'cd' * 32, 'dependency_code': 'sha256:' + 'ef' * 32},\n"
-        "        {'compiler': 'criterion-compiler@1.0.0',\n"
-        "         'generated_test': 'generated_test@3.0.0',\n"
-        "         'verifier': 'verifier-orchestrator@4.0.0',\n"
-        "         'license_scanner': 'license_scanner@4.0.3+fake',\n"
-        "         'secret_scanner': 'secret_scanner@0.0.0',\n"
-        "         'generator': 'generator@3.2.0+v12'},\n"
-        "        [{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
-        "          'adapter_sha256': 'sha256:' + '00' * 32, 'versions': {'python': '3'},\n"
-        "          'lockfile_sha256': None}],\n"
-        "        [])\n"
-        "\n"
-        "\n"
-        "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root, spec_bundle_parts=None):\n"
-        "    _log('check_provenance ' + component_id)\n"
-        "    return {'hit': False, 'reason': 'no manifest', 'verification_report': None,\n"
-        "            'license_scan': None, 'secret_scan': None}\n"
-        "\n"
-        "\n"
-        "def check_sealed_provenance(component_id, repo_root):\n"
-        "    return {'hit': False, 'sealed': False, 'reason': 'not_sealed',\n"
-        "            'verification_report': None, 'license_scan': None, 'secret_scan': None,\n"
-        "            'owners': None, 'source_hash': None, 'written_at': None}\n"
-    )
-
-
-def fake_surface_checker(log_path):
-    return (
-        "from pathlib import Path\n"
-        "LOG = " + repr(str(log_path)) + "\n"
-        "GATE_VERSION = 'surface-checker@1.2.0'\n"
-        "\n"
-        "\n"
-        "def check_surface(component_id, repo_root, code_dir=None):\n"
-        "    slug = component_id[5:] if component_id.startswith('comp-') else component_id\n"
-        "    base = Path(code_dir) if code_dir is not None else Path(repo_root) / 'gen' / slug\n"
-        "    ok = (base / 'widget.py').is_file()\n"
-        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write('check_surface ' + component_id + ' ' + str(ok) + '\\n')\n"
-        "    findings = [] if ok else [{'kind': 'import_error', 'message': 'widget.py missing'}]\n"
-        "    return {'ok': ok, 'findings': findings}\n"
-    )
-
-
-def fake_verifier(log_path):
-    return (
-        "import importlib.util\n"
-        "import sys\n"
-        "from pathlib import Path\n"
-        "LOG = " + repr(str(log_path)) + "\n"
-        "GATE_VERSION = 'verifier-orchestrator@4.0.0'\n"
-        "DEFAULT_TEST_TIMEOUT = 300.0\n"
-        "\n"
-        "\n"
-        "def _check(path):\n"
-        "    if not path.is_file():\n"
-        "        return False\n"
-        "    previous = sys.dont_write_bytecode\n"
-        "    sys.dont_write_bytecode = True\n"
-        "    name = 'zero_edit_widget_under_test'\n"
-        "    try:\n"
-        "        spec = importlib.util.spec_from_file_location(name, path)\n"
-        "        module = importlib.util.module_from_spec(spec)\n"
-        "        sys.modules[name] = module\n"
-        "        spec.loader.exec_module(module)\n"
-        "        return module.add(2, 3) == 5 and module.add(-4, 4) == 0 and module.add(10, 7) == 17\n"
-        "    except Exception:\n"
-        "        return False\n"
-        "    finally:\n"
-        "        sys.modules.pop(name, None)\n"
-        "        sys.dont_write_bytecode = previous\n"
-        "\n"
-        "\n"
-        "def verify(component_id, repo_root, judge=None, test_author=None):\n"
-        "    slug = component_id[5:] if component_id.startswith('comp-') else component_id\n"
-        "    ok = _check(Path(repo_root) / 'gen' / slug / 'widget.py')\n"
-        "    result = 'pass' if ok else 'fail'\n"
-        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write('verify ' + component_id + ' ' + result + '\\n')\n"
-        "    criterion = {'id': 'AC-WIDGET-001', 'covers': 'R-WIDGET-001',\n"
-        "                 'kind': 'generated-test', 'result': result}\n"
-        "    if not ok:\n"
-        "        criterion['failure_detail'] = {'message': 'add(2, 3) equals 5 failed',\n"
-        "                                       'expected': 5, 'actual': None}\n"
-        "        criterion['failure_origin'] = 'implementation'\n"
-        "    return {'component_id': component_id, 'criteria': [criterion],\n"
-        "            'requirement_results': {'R-WIDGET-001': result},\n"
-        "            'interface_drift': False,\n"
-        "            'mutation_score': 1.0 if ok else None, 'mutation_error': None,\n"
-        "            'assets': [{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
-        "                        'adapter_sha256': 'sha256:' + '00' * 32,\n"
-        "                        'versions': {'python': '3'}, 'lockfile_sha256': None}],\n"
-        "            'drivers': [], 'overall': result}\n"
-    )
-
-
-def fake_license_scanner(log_path):
-    return (
-        "LOG = " + repr(str(log_path)) + "\n"
-        "\n"
+    write(
+        repo / "gen" / "license-scanner" / "license_scanner.py",
+        "LOG = " + log + "\n"
+        "GATE = 'license_scanner@0.0.0+fixture'\n"
         "\n"
         "def gate_version(repo_root):\n"
-        "    return 'license_scanner@4.0.3+fake'\n"
-        "\n"
+        "    return GATE\n"
         "\n"
         "def scan(component_id, repo_root):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write('license_scan ' + component_id + '\\n')\n"
-        "    return {'component_id': component_id, 'gate_version': 'license_scanner@4.0.3+fake',\n"
-        "            'similarity_score': 0.0, 'blocked': False, 'matches': []}\n"
+        "    with open(LOG, 'a') as fh:\n"
+        "        fh.write('license_scan ' + component_id + '\\n')\n"
+        "    return {'component_id': component_id, 'gate_version': GATE,\n"
+        "            'similarity_score': 0.0, 'blocked': False, 'matches': []}\n",
     )
 
-
-def fake_secret_scanner(log_path):
-    return (
-        "LOG = " + repr(str(log_path)) + "\n"
-        "\n"
+    write(
+        repo / "gen" / "secret-scanner" / "secret_scanner.py",
+        "LOG = " + log + "\n"
+        "GATE = 'secret_scanner@0.0.0+fixture'\n"
         "\n"
         "def gate_version(repo_root):\n"
-        "    return 'secret_scanner@0.0.0'\n"
-        "\n"
+        "    return GATE\n"
         "\n"
         "def scan(repo_root):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write('secret_scan\\n')\n"
-        "    return {'scope': 'repo', 'gate_version': 'secret_scanner@0.0.0',\n"
-        "            'flagged': False, 'matches': []}\n"
+        "    with open(LOG, 'a') as fh:\n"
+        "        fh.write('secret_scan\\n')\n"
+        "    return {'scope': 'repo', 'gate_version': GATE, 'flagged': False, 'matches': []}\n",
     )
 
-
-def fake_provenance_writer(log_path):
-    return (
-        "import json\n"
+    write(
+        repo / "gen" / "kind-python" / "kind_python.py",
+        "import hashlib\n"
+        "import platform\n"
+        "import sys\n"
         "from pathlib import Path\n"
-        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
+        "KIND = 'python'\n"
+        "GATE_VERSION = 'kind-python@1.0.0'\n"
         "\n"
-        "class MissingInputError(ValueError):\n"
+        "class AssetError(Exception):\n"
         "    pass\n"
         "\n"
+        "def _module_present(asset_file):\n"
+        "    d = Path(asset_file)\n"
+        "    module = d.name.replace('-', '_')\n"
+        "    return (d / (module + '.py')).is_file() or (d / module / '__init__.py').is_file()\n"
         "\n"
-        "class InvalidSealedInputError(ValueError):\n"
-        "    pass\n"
+        "def layout_errors(asset_file):\n"
+        "    d = Path(asset_file)\n"
+        "    if not d.is_dir():\n"
+        "        return ['not a directory']\n"
+        "    py = [p for p in d.rglob('*.py') if '__pycache__' not in p.parts]\n"
+        "    if not py:\n"
+        "        return ['no python files']\n"
+        "    return []\n"
         "\n"
+        "def surface(asset_file):\n"
+        "    return {'names': []}\n"
         "\n"
-        "def _f(value, name):\n"
-        "    if isinstance(value, dict):\n"
-        "        return value.get(name)\n"
-        "    return getattr(value, name, None)\n"
+        "def provision(repo_root):\n"
+        "    return {'ok': True, 'reason': '',\n"
+        "            'versions': {'python': platform.python_version(),\n"
+        "                         'packages': 'sha256:' + hashlib.sha256(b'fixture').hexdigest()},\n"
+        "            'lockfile_sha256': None, 'interpreter': sys.executable}\n"
         "\n"
+        "def asset_runner(asset_file):\n"
+        "    def run(name, args):\n"
+        "        raise AssetError('not supported by fixture')\n"
+        "    return run\n"
         "\n"
-        "def write_provenance(component_id, inputs, repo_root):\n"
-        "    slug = component_id[5:] if component_id.startswith('comp-') else component_id\n"
-        "    gen_result = _f(inputs, 'generation_result')\n"
-        "    report = _f(inputs, 'verification_report')\n"
-        "    files = _f(gen_result, 'files') or {}\n"
-        "    if files and report is None:\n"
-        "        raise MissingInputError('verification_report')\n"
-        "    manifest = {\n"
-        "        'spec_bundle_hash': _f(gen_result, 'spec_bundle_hash'),\n"
-        "        'model_pin': _f(gen_result, 'model'),\n"
-        "        'files': sorted(files),\n"
-        "        'overall': _f(report, 'overall') if report is not None else None,\n"
-        "        'provenance_hit': False,\n"
-        "    }\n"
-        "    text = json.dumps(manifest, sort_keys=True)\n"
-        "    for base in (Path(repo_root) / 'gen' / slug, Path(repo_root) / 'verification' / slug):\n"
-        "        base.mkdir(parents=True, exist_ok=True)\n"
-        "        (base / '.provenance.json').write_text(text, encoding='utf-8')\n"
-        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write('write_provenance ' + component_id + '\\n')\n"
+        "def strength_sites(asset_file):\n"
+        "    return []\n"
         "\n"
+        "def apply_site(asset_file, site):\n"
+        "    return None\n"
         "\n"
-        "def write_sealed_provenance(component_id, inputs, repo_root):\n"
-        "    raise InvalidSealedInputError('not sealed in this fixture')\n"
+        "def guidance():\n"
+        "    return {'generator': '', 'test_author': ''}\n",
     )
 
-
-def fake_provenance_tracker(log_path):
-    return (
+    write(
+        repo / "gen" / "run-environment" / "run_environment.py",
+        "import hashlib\n"
         "import json\n"
+        "import platform\n"
+        "import sys\n"
+        "\n"
+        "LOG = " + log + "\n"
+        "\n"
+        "def _assets():\n"
+        "    return [{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
+        "             'adapter_sha256': 'sha256:' + hashlib.sha256(b'kind-python-fixture').hexdigest(),\n"
+        "             'versions': {'python': platform.python_version()},\n"
+        "             'lockfile_sha256': None}]\n"
+        "\n"
+        "class RunEnvironment:\n"
+        "    def __init__(self, assets):\n"
+        "        self.ok = True\n"
+        "        self.failure_message = None\n"
+        "        self.interpreter = sys.executable\n"
+        "        self.assets = assets\n"
+        "        self.drivers = []\n"
+        "        self.plugin_dir = None\n"
+        "    def __getitem__(self, name):\n"
+        "        return getattr(self, name)\n"
+        "    def get(self, name, default=None):\n"
+        "        return getattr(self, name, default)\n"
+        "    def pytest_args(self):\n"
+        "        return []\n"
+        "    def driver_fixtures(self):\n"
+        "        return []\n"
+        "    def env_for(self, code_dir):\n"
+        "        assets = [dict(a, file=str(code_dir) + '/' + a['path']) for a in self.assets]\n"
+        "        return {'HOTDOCS_ASSETS': json.dumps(assets), 'HOTDOCS_DRIVERS': json.dumps([])}\n"
+        "    def close(self):\n"
+        "        self.plugin_dir = None\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'failure_message': self.failure_message,\n"
+        "                'interpreter': self.interpreter, 'assets': self.assets,\n"
+        "                'drivers': self.drivers, 'plugin_dir': self.plugin_dir}\n"
+        "\n"
+        "def prepare(component_id, repo_root):\n"
+        "    with open(LOG, 'a') as fh:\n"
+        "        fh.write('prepare ' + component_id + '\\n')\n"
+        "    return RunEnvironment(_assets())\n"
+        "\n"
+        "def prepare_capability(capability_id, repo_root):\n"
+        "    return RunEnvironment([])\n",
+    )
+
+    write(
+        repo / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+        "import hashlib\n"
+        "import os\n"
+        "import platform\n"
+        "import shutil\n"
+        "import subprocess\n"
+        "import sys\n"
+        "import tempfile\n"
         "from pathlib import Path\n"
-        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
+        "GATE_VERSION = 'verifier-orchestrator@4.0.0'\n"
+        "DEFAULT_TEST_TIMEOUT = 300.0\n"
+        "LOG = " + log + "\n"
+        "TEST_SOURCE = " + repr(CRITERION_TEST_SOURCE) + "\n"
         "\n"
-        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
-        "    base = Path(repo_root) / '.hotdocs' / 'attempts' / component_id\n"
-        "    base.mkdir(parents=True, exist_ok=True)\n"
-        "    n = len(list(base.iterdir())) + 1\n"
-        "    (base / (str(n) + '.json')).write_text(json.dumps({'spec_bundle_hash': spec_bundle_hash}),\n"
-        "                                           encoding='utf-8')\n"
-        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write('write_attempt_record ' + component_id + '\\n')\n"
+        "def verify(component_id, repo_root, judge=None, test_author=None):\n"
+        "    with open(LOG, 'a') as fh:\n"
+        "        fh.write('verify ' + component_id + '\\n')\n"
+        "    slug = component_id[len('comp-'):] if component_id.startswith('comp-') else component_id\n"
+        "    code_dir = Path(repo_root) / 'gen' / slug\n"
+        "    tmp = tempfile.mkdtemp()\n"
+        "    try:\n"
+        "        test_file = Path(tmp) / 'test_ac_shout_001.py'\n"
+        "        test_file.write_text(TEST_SOURCE, encoding='utf-8')\n"
+        "        env = dict(os.environ)\n"
+        "        env['PYTHONPATH'] = str(code_dir)\n"
+        "        env['PYTHONDONTWRITEBYTECODE'] = '1'\n"
+        "        proc = subprocess.run([sys.executable, '-m', 'pytest', '-q', '-p', 'no:cacheprovider',\n"
+        "                               str(test_file)], cwd=tmp, env=env, capture_output=True,\n"
+        "                              text=True, timeout=DEFAULT_TEST_TIMEOUT)\n"
+        "        passed = proc.returncode == 0\n"
+        "        output = proc.stdout + proc.stderr\n"
+        "    finally:\n"
+        "        shutil.rmtree(tmp, ignore_errors=True)\n"
+        "    entry = {'id': 'AC-SHOUT-001', 'covers': 'R-SHOUT-001', 'kind': 'generated-test',\n"
+        "             'result': 'pass' if passed else 'fail'}\n"
+        "    if not passed:\n"
+        "        entry['failure_detail'] = {'message': output[-2000:], 'expected': None, 'actual': None}\n"
+        "        entry['failure_origin'] = 'implementation'\n"
+        "    with open(LOG, 'a') as fh:\n"
+        "        fh.write('verify_result ' + entry['result'] + '\\n')\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'criteria': [entry],\n"
+        "        'requirement_results': {'R-SHOUT-001': entry['result']},\n"
+        "        'interface_drift': False,\n"
+        "        'mutation_score': 1.0,\n"
+        "        'mutation_error': None,\n"
+        "        'assets': [{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
+        "                    'adapter_sha256': 'sha256:' + hashlib.sha256(b'kind-python-fixture').hexdigest(),\n"
+        "                    'versions': {'python': platform.python_version()},\n"
+        "                    'lockfile_sha256': None}],\n"
+        "        'drivers': [],\n"
+        "        'overall': 'pass' if passed else 'fail',\n"
+        "    }\n",
     )
 
 
-FAKE_KIND_PYTHON = (
-    "import sys\n"
-    "from pathlib import Path\n"
-    "\n"
-    "KIND = 'python'\n"
-    "GATE_VERSION = 'kind-python@1.0.0'\n"
-    "\n"
-    "\n"
-    "class AssetError(Exception):\n"
-    "    pass\n"
-    "\n"
-    "\n"
-    "def layout_errors(asset_file):\n"
-    "    return []\n"
-    "\n"
-    "\n"
-    "def surface(asset_file):\n"
-    "    return {'names': []}\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {'ok': True, 'reason': '',\n"
-    "            'versions': {'python': sys.version.split()[0], 'packages': 'sha256:' + '00' * 32},\n"
-    "            'lockfile_sha256': None, 'interpreter': sys.executable}\n"
-    "\n"
-    "\n"
-    "def asset_runner(asset_file):\n"
-    "    def run(name, args):\n"
-    "        raise AssetError('not supported in this fixture')\n"
-    "    return run\n"
-    "\n"
-    "\n"
-    "def strength_sites(asset_file):\n"
-    "    return []\n"
-    "\n"
-    "\n"
-    "def apply_site(asset_file, site):\n"
-    "    return None\n"
-    "\n"
-    "\n"
-    "def guidance():\n"
-    "    return {'generator': '', 'test_author': ''}\n"
-)
-
-
-def build_fakes(repo_root, log_path):
-    gen = repo_root / "gen"
-    write(gen / "spec-bundle-assembler" / "spec_bundle_assembler.py", FAKE_ASSEMBLER)
-    write(gen / "provenance-checker" / "provenance_checker.py", fake_provenance_checker(log_path))
-    write(gen / "surface-checker" / "surface_checker.py", fake_surface_checker(log_path))
-    write(gen / "verifier-orchestrator" / "verifier_orchestrator.py", fake_verifier(log_path))
-    write(gen / "license-scanner" / "license_scanner.py", fake_license_scanner(log_path))
-    write(gen / "secret-scanner" / "secret_scanner.py", fake_secret_scanner(log_path))
-    write(gen / "provenance-writer" / "provenance_writer.py", fake_provenance_writer(log_path))
-    write(gen / "provenance-tracker" / "provenance_tracker.py", fake_provenance_tracker(log_path))
-    write(gen / "kind-python" / "kind_python.py", FAKE_KIND_PYTHON)
-
-
-# --------------------------------------------------------------------------
-# git helpers
-# --------------------------------------------------------------------------
-
-def git(repo_root, home, *args, author=None):
-    env = dict(os.environ)
-    env["HOME"] = str(home)
-    env["GIT_CONFIG_NOSYSTEM"] = "1"
-    env["GIT_CONFIG_GLOBAL"] = os.devnull
-    if author is not None:
-        name, email = author
-        env["GIT_AUTHOR_NAME"] = name
-        env["GIT_AUTHOR_EMAIL"] = email
-        env["GIT_COMMITTER_NAME"] = name
-        env["GIT_COMMITTER_EMAIL"] = email
-    cmd = ["git", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"] + list(args)
-    done = subprocess.run(cmd, cwd=str(repo_root), env=env, capture_output=True, text=True)
-    assert done.returncode == 0, done.stderr
-    return done.stdout
-
-
-# --------------------------------------------------------------------------
-# The test
-# --------------------------------------------------------------------------
-
-def test_spec_change_merges_with_zero_human_edits_to_gen(tmp_path, monkeypatch):
-    if shutil.which("git") is None:
-        pytest.skip("git is required to inspect commit authorship")
-
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    home = tmp_path / "home"
-    home.mkdir()
-    log_path = tmp_path / "fake-calls.log"
-    log_path.write_text("", encoding="utf-8")
-
-    monkeypatch.chdir(repo_root)
-
-    human = (HUMAN_NAME, HUMAN_EMAIL)
-    pipeline = (PIPELINE_NAME, PIPELINE_EMAIL)
-
-    git(repo_root, home, "init", "-q")
-
-    # Tooling the pipeline runs on (not gen/<component>/).
-    build_fakes(repo_root, log_path)
-    write(repo_root / ".gitignore", ".hotdocs/\n__pycache__/\n")
-    git(repo_root, home, "add", "-A")
-    git(repo_root, home, "commit", "-q", "-m", "tooling", author=human)
-
-    # The human's spec merge: a ratified, non-sealed component with
-    # complete, agent-checkable acceptance criteria.
-    build_corpus(repo_root)
-    git(repo_root, home, "add", "specs")
-    git(repo_root, home, "commit", "-q", "-m", "spec merge: comp-widget", author=human)
-    spec_merge = git(repo_root, home, "rev-parse", "HEAD").strip()
-
-    target_dir = repo_root / "gen" / SLUG
-    assert not target_dir.exists(), "no gen/<component>/ may exist before the pipeline runs"
-
-    model_calls = []
+def make_backend(log_path):
+    """Mock model: answers a generator prompt with the shout module."""
 
     def backend(prompt, model, **params):
-        model_calls.append(prompt)
-        match = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
-        assert match is not None, "generator prompt must state this call's nonce"
+        match = re.search(r"BEGIN FILE ([0-9a-f]{32})", prompt)
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("model_call " + ("generator" if match else "other") + "\n")
+        if not match:
+            return {
+                "text": None,
+                "model": model,
+                "backend": "mock",
+                "model_call_error": {"category": "network", "message": "unexpected prompt"},
+            }
         nonce = match.group(1)
-        text = (
-            "-----BEGIN FILE " + nonce + ": widget.py-----\n"
-            + WIDGET_SOURCE
+        reply = (
+            "-----BEGIN FILE " + nonce + ": shout.py-----\n"
+            + GENERATED_CODE
             + "-----END FILE " + nonce + "-----\n"
             + "-----END REPLY " + nonce + "-----\n"
         )
-        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+        return {"text": reply, "model": model, "backend": "mock", "model_call_error": None}
 
-    # The pipeline, and only the pipeline, acts from here on.
-    result = component_gate_runner.run_component_gates(
-        COMPONENT_ID, repo_root, MODEL, 0, backend
-    )
+    return backend
 
-    # Every gate passes.
-    assert field(result, "component_id") == COMPONENT_ID
-    assert field(result, "provenance_hit") is False
-    assert field(result, "blocked") is False, field(result, "block_reason")
+
+def assert_gates_pass(result):
+    assert field(result, "blocked") is False, "pipeline blocked: " + repr(result)
     assert field(result, "block_reason") is None
-    assert field(result, "model_call_error") is None
     verification = field(result, "verification")
     assert verification is not None
-    assert field(verification, "overall") == "pass"
+    assert field(verification, "overall") == "pass", repr(verification)
     for criterion in field(verification, "criteria"):
-        assert field(criterion, "result") == "pass"
-    assert field(field(result, "license_scan"), "blocked") is False
-    assert field(field(result, "secret_scan"), "flagged") is False
-    attempts = field(result, "attempts")
-    assert len(attempts) >= 1
-    assert field(attempts[-1], "outcome") == "passed"
+        assert field(criterion, "result") == "pass", repr(criterion)
+    license_scan = field(result, "license_scan")
+    assert opt_field(license_scan, "blocked") is not True, repr(license_scan)
+    secret_scan = field(result, "secret_scan")
+    assert opt_field(secret_scan, "flagged") is not True, repr(secret_scan)
 
-    # The code was produced by the pipeline from the model's reply.
-    assert len(model_calls) >= 1
-    produced = target_dir / "widget.py"
-    assert produced.is_file()
-    assert produced.read_text(encoding="utf-8") == WIDGET_SOURCE
 
-    log_lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert "verify " + COMPONENT_ID + " pass" in log_lines
-    assert "license_scan " + COMPONENT_ID in log_lines
-    assert "secret_scan" in log_lines
-    assert "write_provenance " + COMPONENT_ID in log_lines
+# --------------------------------------------------------------------------
+# the test
+# --------------------------------------------------------------------------
 
-    # The pipeline's own merge commit.
-    git(repo_root, home, "add", "-A", "gen", "verification")
-    git(repo_root, home, "commit", "-q", "-m", "pipeline merge: comp-widget", author=pipeline)
-    pipeline_merge = git(repo_root, home, "rev-parse", "HEAD").strip()
-    assert pipeline_merge != spec_merge
+def test_cs_zero_edit_001_pipeline_merge_has_no_human_commits_to_gen(tmp_path, monkeypatch):
+    if shutil.which("git") is None:
+        pytest.skip("git is required to observe commit authorship")
 
-    # Zero commits to gen/<component>/ authored by a human between the
-    # spec merge and the pipeline's merge commit.
-    history = git(
-        repo_root, home, "log", "--format=%H%x09%an%x09%ae",
-        spec_merge + ".." + pipeline_merge, "--", "gen/" + SLUG,
-    ).splitlines()
-    assert history, "the pipeline merge commit must carry gen/<component>/"
-    human_commits = [line for line in history if line.split("\t")[1:] != [PIPELINE_NAME, PIPELINE_EMAIL]]
-    assert human_commits == []
-    assert any(line.split("\t")[0] == pipeline_merge for line in history)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    log_path = tmp_path / "calls.log"
+    log_path.write_text("", encoding="utf-8")
+    monkeypatch.chdir(repo)
 
-    # And nothing in gen/<component>/ was touched before the spec merge.
-    before = git(repo_root, home, "log", "--format=%H", spec_merge, "--", "gen/" + SLUG).splitlines()
-    assert before == []
+    # --- Given: a ratified, non-sealed, lint-clean component spec bundle ---
+    build_corpus(repo)
+    write_fakes(repo, log_path)
 
-    # The committed tree is exactly what the pipeline produced.
-    committed = git(repo_root, home, "show", pipeline_merge + ":gen/" + SLUG + "/widget.py")
-    assert committed == WIDGET_SOURCE
+    gen_dir = next(
+        p for p in Path(component_gate_runner.__file__).resolve().parents if p.name == "gen"
+    )
+    base = gen_dir / "spec-linter"
+    linter_path = (
+        base / "spec_linter.py"
+        if (base / "spec_linter.py").is_file()
+        else base / "spec_linter" / "__init__.py"
+    )
+    spec_linter = load_module(linter_path, "spec_linter")
+    lint_result = spec_linter.lint(None, repo)
+    assert lint_result.hard_failures == 0, repr(lint_result)
+
+    component_md = (repo / "specs" / "components" / SLUG / "component.md").read_text()
+    assert "sealed: true" not in component_md
+    assert "status: ratified" in component_md
+
+    git(repo, "init", "-q")
+    git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "initial corpus")
+
+    # --- a spec change, merged by a human ---
+    git(repo, "checkout", "-q", "-b", "spec-change")
+    write(
+        repo / "specs" / "components" / SLUG / "requirements" / "R-SHOUT-001.md",
+        "# R-SHOUT-001\n\n`shout(text)` MUST return `text` upper-cased, followed by exactly one `!`.\n",
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "spec: tighten R-SHOUT-001")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "--no-ff", "-m", "Merge spec change", "spec-change")
+    spec_merge = git(repo, "rev-parse", "HEAD").strip()
+
+    lint_after = spec_linter.lint(None, repo)
+    assert lint_after.hard_failures == 0, repr(lint_after)
+
+    # --- When: the pipeline generates, verifies, gates and merges ---
+    git(repo, "checkout", "-q", "-b", "pipeline/" + SLUG, name=PIPELINE_NAME, email=PIPELINE_EMAIL)
+    backend = make_backend(log_path)
+    result = component_gate_runner.run_component_gates(
+        COMPONENT_ID, repo, MODEL, seed=0, llm_backend=backend
+    )
+
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    assert "model_call generator" in calls, calls
+    assert "verify " + COMPONENT_ID in calls, calls
+    assert "license_scan " + COMPONENT_ID in calls, calls
+    assert "secret_scan" in calls, calls
+
+    assert field(result, "provenance_hit") is False
+    assert_gates_pass(result)
+
+    generated = repo / "gen" / SLUG / "shout.py"
+    assert generated.is_file(), "pipeline wrote no gen/" + SLUG + "/shout.py"
+    assert generated.read_text(encoding="utf-8") == GENERATED_CODE
+
+    git(repo, "add", "-A", name=PIPELINE_NAME, email=PIPELINE_EMAIL)
+    git(repo, "commit", "-q", "-m", "pipeline: regenerate " + COMPONENT_ID,
+        name=PIPELINE_NAME, email=PIPELINE_EMAIL)
+    git(repo, "checkout", "-q", "main", name=PIPELINE_NAME, email=PIPELINE_EMAIL)
+    git(repo, "merge", "-q", "--no-ff", "-m", "pipeline merge " + COMPONENT_ID,
+        "pipeline/" + SLUG, name=PIPELINE_NAME, email=PIPELINE_EMAIL)
+    pipeline_merge = git(repo, "rev-parse", "HEAD").strip()
+
+    merge_author = git(repo, "log", "-1", "--format=%ae", pipeline_merge).strip()
+    assert merge_author == PIPELINE_EMAIL
+
+    # --- Then: zero human-authored commits to gen/<component>/ ---
+    log_lines = [
+        line
+        for line in git(
+            repo, "log", "--full-history", "--format=%H%x09%an%x09%ae",
+            spec_merge + ".." + pipeline_merge, "--", "gen/" + SLUG + "/",
+        ).splitlines()
+        if line.strip()
+    ]
+    assert log_lines, "no commit touched gen/" + SLUG + "/ between the two merges"
+    human = [line for line in log_lines if line.split("\t")[2] != PIPELINE_EMAIL]
+    assert human == [], "human-authored commits to gen/" + SLUG + "/: " + repr(human)
+
+    # gen/<component>/ at the pipeline merge is exactly what the pipeline wrote.
+    status = git(repo, "status", "--porcelain", "--", "gen/" + SLUG + "/")
+    assert status.strip() == "", status
+    committed = git(repo, "show", pipeline_merge + ":gen/" + SLUG + "/shout.py")
+    assert committed == GENERATED_CODE
+
+    # --- and the merged gen/<component>/ still passes every gate ---
+    rerun = component_gate_runner.run_component_gates(
+        COMPONENT_ID, repo, MODEL, seed=0, llm_backend=backend
+    )
+    assert_gates_pass(rerun)
+    diff = subprocess.run(
+        ["git", "diff", "--quiet", pipeline_merge, "--", "gen/" + SLUG + "/shout.py"],
+        cwd=str(repo), env=git_env(PIPELINE_NAME, PIPELINE_EMAIL),
+    )
+    assert diff.returncode == 0, "re-running the gates changed the merged code"
