@@ -110,8 +110,11 @@ page that cannot be captured is skipped, never an error; a second
   match).
 
 An action, and a read that needs one element, waits up to 5 seconds
-for exactly one match that is visible (and enabled, for an action),
-else raises `no element matches <selector>` or
+for exactly one match that is visible (and enabled, for an action);
+`attribute` and `style` wait instead for exactly one match attached to
+the page, visible or not, since an element with an empty box, such as a
+vertical or horizontal SVG line, is never visible (`D393`). Otherwise
+each raises `no element matches <selector>` or
 `<n> elements match <selector>`, `<selector>` being the call as
 written: `<kind>=<value>` with the value bare, then for a role with a
 name ` name="<name>"` quoted, such as `css=li`, `label=Query` or
