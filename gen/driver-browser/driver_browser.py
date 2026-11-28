@@ -1,6 +1,5 @@
-"""Adapter for the `browser` test driver: a headless Chromium driven by
-Playwright for Python, running in a helper process started from the
-driver's own environment, exchanging one JSON object per line."""
+"""Adapter for the `browser` test driver: a headless Chromium driven through
+Playwright for Python, running in a helper process of its own."""
 
 import json
 import os
@@ -8,20 +7,18 @@ import queue
 import subprocess
 import sys
 import threading
-from pathlib import Path, PurePath
+from pathlib import Path
 from urllib.parse import urlsplit
 
 NAME = "browser"
 FIXTURE = "browser"
 PLAYWRIGHT_VERSION = "1.64.1"
 
-_ENV = Path(".hotdocs", "env", "driver-browser")
-_HELPER = Path(__file__).with_name("driver_browser_helper.py")
-_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 _TIMEOUT = 30
+_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+_HELPER = Path(__file__).with_name("driver_browser_helper.py")
 
-_GUIDANCE = """
-Drive pages only through the `browser` fixture. Build the page with
+_GUIDANCE = """Drive pages only through the `browser` fixture. Build the page with
 the component's own code, writing into `tmp_path`, then open it:
 
     write_site(model, tmp_path)            # the component's function
@@ -44,188 +41,194 @@ or the interface; a criterion that needs one they do not state is a
 spec gap, not something to guess. Do not import Playwright, start a
 browser, or open any URL beyond a file in `tmp_path` or a loopback
 server the test started. Catch failures as
-`pytest.raises(Exception, match=...)` on the message.
-"""
+`pytest.raises(Exception, match=...)` on the message."""
 
 
 class BrowserError(Exception):
-    """Raised by every session, page and element method."""
-
-
-class _StepFailed(Exception):
     pass
 
 
-def _helper_env(home, env_dir):
-    return {
-        "PATH": os.environ.get("PATH", os.defpath),
-        "HOME": str(home),
-        "PLAYWRIGHT_BROWSERS_PATH": str(env_dir / "browsers"),
-    }
-
-
-def _run(command, env=None):
-    return subprocess.run(
-        [str(part) for part in command], capture_output=True, text=True, env=env
-    )
-
-
-def _check(command, env=None):
-    result = _run(command, env)
-    if result.returncode != 0:
-        lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
-        raise _StepFailed(([""] + lines)[-1])
-    return result
-
-
-def _playwright_version(result):
-    return result.stdout.strip().removeprefix("Version ")
-
-
-def provision(repo_root):
-    env_dir = Path(repo_root) / _ENV
-    python = env_dir / "bin" / "python"
-    try:
-        if not python.exists():
-            _check([sys.executable, "-m", "venv", env_dir])
-        version_command = [python, "-m", "playwright", "--version"]
-        playwright = _run(version_command)
-        if playwright.returncode != 0 or _playwright_version(playwright) != PLAYWRIGHT_VERSION:
-            _check([python, "-m", "pip", "install", f"playwright=={PLAYWRIGHT_VERSION}"])
-            playwright = _check(version_command)
-        chromium_command = [python, "-I", _HELPER, "--version"]
-        helper_env = _helper_env(env_dir, env_dir)
-        chromium = _run(chromium_command, helper_env)
-        if chromium.returncode != 0:
-            install_env = dict(os.environ)
-            install_env["PLAYWRIGHT_BROWSERS_PATH"] = str(env_dir / "browsers")
-            _check([python, "-m", "playwright", "install", "chromium"], install_env)
-            chromium = _check(chromium_command, helper_env)
-    except Exception as error:
-        return {
-            "ok": False,
-            "reason": f"browser environment: {error}",
-            "versions": {},
-            "lockfile_sha256": None,
-        }
-    return {
-        "ok": True,
-        "reason": None,
-        "versions": {
-            "playwright": _playwright_version(playwright),
-            "chromium": chromium.stdout.strip(),
-        },
-        "lockfile_sha256": None,
-    }
+def _env_dir(repo_root):
+    return Path(repo_root) / ".hotdocs" / "env" / "driver-browser"
 
 
 def guidance():
     return {"test_author": _GUIDANCE.strip()}
 
 
-def _pump(stream, replies):
-    for line in iter(stream.readline, ""):
-        replies.put(line)
-    replies.put(json.dumps({"error": "browser process exited"}))
+# ---------------------------------------------------------------- provision
+
+class _StepFailed(Exception):
+    pass
 
 
-def _selector(css, role, name, label, text, test_id):
-    given = [
-        (kind, value)
-        for kind, value in (
-            ("css", css),
-            ("role", role),
-            ("label", label),
-            ("text", text),
-            ("test_id", test_id),
-        )
-        if value is not None
-    ]
-    if len(given) != 1 or (name is not None and role is None):
+def _last_line(text):
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    return lines[-1] if lines else ""
+
+
+def _run(cmd, env):
+    return subprocess.run(
+        [str(c) for c in cmd], capture_output=True, text=True, env=env
+    )
+
+
+def _step(cmd, env):
+    proc = _run(cmd, env)
+    if proc.returncode != 0:
+        raise _StepFailed(_last_line(proc.stderr))
+    return proc.stdout
+
+
+def _playwright_version(python, env):
+    proc = _run([python, "-m", "playwright", "--version"], env)
+    if proc.returncode != 0:
+        return None
+    out = proc.stdout.strip()
+    if out.startswith("Version "):
+        out = out[len("Version "):]
+    return out.strip()
+
+
+def _chromium_version(python, env):
+    return _run([python, str(_HELPER), "--chromium-version"], env)
+
+
+def provision(repo_root):
+    try:
+        env_dir = _env_dir(repo_root)
+        python = env_dir / "bin" / "python"
+        env = dict(os.environ)
+        env["PLAYWRIGHT_BROWSERS_PATH"] = str(env_dir / "browsers")
+        if not python.exists():
+            _step([sys.executable, "-m", "venv", env_dir], env)
+        pw_version = _playwright_version(python, env)
+        if pw_version != PLAYWRIGHT_VERSION:
+            _step([python, "-m", "pip", "install",
+                   "playwright==" + PLAYWRIGHT_VERSION], env)
+            pw_version = _playwright_version(python, env)
+        chrom = _chromium_version(python, env)
+        if chrom.returncode != 0:
+            _step([python, "-m", "playwright", "install", "chromium"], env)
+            chrom = _chromium_version(python, env)
+            if chrom.returncode != 0:
+                raise _StepFailed(_last_line(chrom.stderr))
+        return {
+            "ok": True,
+            "reason": None,
+            "versions": {"playwright": pw_version,
+                         "chromium": chrom.stdout.strip()},
+            "lockfile_sha256": None,
+        }
+    except Exception as exc:  # provision never raises
+        return {
+            "ok": False,
+            "reason": "browser environment: " + str(exc),
+            "versions": {},
+            "lockfile_sha256": None,
+        }
+
+
+# ------------------------------------------------------------------ session
+
+def _describe(kind, value, name):
+    desc = f"{kind}={value}"
+    if kind == "role" and name is not None:
+        desc += f' name="{name}"'
+    return desc
+
+
+def _selector_step(css, role, name, label, text, test_id):
+    given = [(k, v) for k, v in (("css", css), ("role", role),
+                                 ("label", label), ("text", text),
+                                 ("test_id", test_id)) if v is not None]
+    if len(given) != 1:
         raise BrowserError("find takes exactly one selector")
     kind, value = given[0]
-    described = f"{kind}={value}"
-    if name is not None:
-        described += f' name="{name}"'
-    return {"kind": kind, "value": value, "name": name}, described
+    step = {"kind": kind, "value": value}
+    if kind == "role":
+        step["name"] = name
+    return step, _describe(kind, value, name if kind == "role" else None)
 
 
-class Session:
-    def __init__(self, repo_root, work_dir):
-        self._env_dir = Path(repo_root) / _ENV
-        self._work_dir = Path(work_dir).absolute()
-        self._proc = None
-        self._replies = None
+class Element:
+    def __init__(self, page, steps, desc):
+        self._page = page
+        self._steps = steps
+        self._desc = desc
 
-    def _start(self):
-        self._proc = subprocess.Popen(
-            [str(self._env_dir / "bin" / "python"), "-I", str(_HELPER), str(self._work_dir)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            text=True,
-            env=_helper_env(self._work_dir, self._env_dir),
-            cwd=str(self._work_dir),
-        )
-        self._replies = queue.Queue()
-        threading.Thread(
-            target=_pump, args=(self._proc.stdout, self._replies), daemon=True
-        ).start()
+    def _call(self, method, *params):
+        return self._page._session._call(
+            "element", page=self._page._id, steps=self._steps,
+            desc=self._desc, method=method, params=list(params))
 
-    def _call(self, op, **args):
-        self._proc.stdin.write(json.dumps({"op": op, "args": args}) + "\n")
-        self._proc.stdin.flush()
-        try:
-            line = self._replies.get(timeout=_TIMEOUT)
-        except queue.Empty:
-            proc, self._proc = self._proc, None
-            proc.kill()
-            proc.wait()
-            raise BrowserError("timed out after 30 seconds")
-        reply = json.loads(line)
-        if "error" in reply:
-            raise BrowserError(reply["error"])
-        return reply["value"]
+    # actions
+    def click(self, *, modifiers=()):
+        return self._call("click", list(modifiers))
 
-    def _target(self, target):
-        if isinstance(target, str) and urlsplit(target).scheme:
-            parts = urlsplit(target)
-            if parts.scheme == "http" and parts.hostname in _LOOPBACK:
-                return target, None
-            raise BrowserError(f"only file paths and loopback URLs can be opened: {target}")
-        if not isinstance(target, (str, PurePath)):
-            raise BrowserError(f"only file paths and loopback URLs can be opened: {target}")
-        path = self._work_dir / target
-        if not path.is_file():
-            raise BrowserError(f"no such file: {path}")
-        resolved = path.resolve()
-        return resolved.as_uri(), str(resolved.parent)
+    def dblclick(self):
+        return self._call("dblclick")
 
-    def open(self, target, *, width=1280, height=800, color_scheme="light"):
-        if color_scheme not in ("light", "dark"):
-            raise BrowserError(f"color_scheme is light or dark: {color_scheme}")
-        url, allowed_dir = self._target(target)
-        if self._proc is None:
-            self._start()
-        page_id = self._call(
-            "open",
-            url=url,
-            allowed_dir=allowed_dir,
-            width=width,
-            height=height,
-            color_scheme=color_scheme,
-        )
-        return Page(self, page_id)
+    def hover(self):
+        return self._call("hover")
 
-    def close(self):
-        proc, self._proc = self._proc, None
-        if proc is None:
-            return
-        proc.stdin.close()
-        try:
-            proc.wait(timeout=_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+    def fill(self, text):
+        return self._call("fill", text)
+
+    def press(self, key):
+        return self._call("press", key)
+
+    def select(self, value):
+        return self._call("select", value)
+
+    def check(self):
+        return self._call("check")
+
+    def uncheck(self):
+        return self._call("uncheck")
+
+    def wheel(self, dx, dy):
+        return self._call("wheel", dx, dy)
+
+    def drag_by(self, dx, dy):
+        return self._call("drag_by", dx, dy)
+
+    # reads needing one element
+    def text(self):
+        return self._call("text")
+
+    def value(self):
+        return self._call("value")
+
+    def attribute(self, name):
+        return self._call("attribute", name)
+
+    def checked(self):
+        return self._call("checked")
+
+    def box(self):
+        return self._call("box")
+
+    def style(self, property):
+        return self._call("style", property)
+
+    # reads over every match
+    def count(self):
+        return self._call("count")
+
+    def texts(self):
+        return self._call("texts")
+
+    def visible(self):
+        return self._call("visible")
+
+    def nth(self, i):
+        return Element(self._page, self._steps + [{"nth": i}], self._desc)
+
+    def find(self, css=None, *, role=None, name=None, label=None, text=None,
+             test_id=None):
+        step, desc = _selector_step(css, role, name, label, text, test_id)
+        return Element(self._page, self._steps + [step], desc)
 
 
 class Page:
@@ -233,18 +236,20 @@ class Page:
         self._session = session
         self._id = page_id
 
-    def _call(self, op, **args):
-        return self._session._call(op, page=self._id, **args)
+    def _call(self, method, *params):
+        return self._session._call("page", page=self._id, method=method,
+                                   params=list(params))
 
-    def find(self, css=None, *, role=None, name=None, label=None, text=None, test_id=None):
-        step, described = _selector(css, role, name, label, text, test_id)
-        return Element(self, [step], described)
+    def find(self, css=None, *, role=None, name=None, label=None, text=None,
+             test_id=None):
+        step, desc = _selector_step(css, role, name, label, text, test_id)
+        return Element(self, [step], desc)
 
     def press(self, key):
-        self._call("press", key=key)
+        return self._call("press", key)
 
     def set_size(self, width, height):
-        self._call("set_size", width=width, height=height)
+        return self._call("set_size", width, height)
 
     def url(self):
         return self._call("url")
@@ -262,90 +267,93 @@ class Page:
         return self._call("dialogs")
 
     def downloads(self):
-        return [Path(path) for path in self._call("downloads")]
+        return [Path(p) for p in self._call("downloads")]
 
     def screenshot(self, name):
-        return Path(self._call("screenshot", name=name))
+        return Path(self._call("screenshot", name))
 
 
-class Element:
-    def __init__(self, page, steps, selector):
-        self._page = page
-        self._steps = steps
-        self._selector = selector
+class Session:
+    def __init__(self, repo_root, work_dir):
+        self._repo_root = Path(repo_root)
+        self._work_dir = Path(work_dir)
+        self._proc = None
+        self._lines = None
 
-    def _do(self, method, *args):
-        return self._page._call(
-            "element",
-            steps=self._steps,
-            selector=self._selector,
-            method=method,
-            args=list(args),
-        )
+    def _start(self):
+        env_dir = _env_dir(self._repo_root)
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(self._work_dir),
+            "PLAYWRIGHT_BROWSERS_PATH": str(env_dir / "browsers"),
+        }
+        self._proc = subprocess.Popen(
+            [str(env_dir / "bin" / "python"), str(_HELPER),
+             str(self._work_dir)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+            env=env, cwd=str(self._work_dir))
+        self._lines = queue.Queue()
+        stdout, lines = self._proc.stdout, self._lines
 
-    def click(self, *, modifiers=()):
-        self._do("click", list(modifiers))
+        def read():
+            for line in stdout:
+                lines.put(line)
 
-    def dblclick(self):
-        self._do("dblclick")
+        threading.Thread(target=read, daemon=True).start()
 
-    def hover(self):
-        self._do("hover")
+    def _kill(self):
+        self._proc.kill()
+        self._proc.wait()
+        self._proc = None
 
-    def fill(self, text):
-        self._do("fill", text)
+    def _call(self, op, **args):
+        if self._proc is None:
+            self._start()
+        self._proc.stdin.write(json.dumps({"op": op, "args": args}) + "\n")
+        self._proc.stdin.flush()
+        try:
+            line = self._lines.get(timeout=_TIMEOUT)
+        except queue.Empty:
+            self._kill()
+            raise BrowserError("timed out after 30 seconds") from None
+        resp = json.loads(line)
+        if not resp["ok"]:
+            raise BrowserError(resp["error"])
+        return resp["value"]
 
-    def press(self, key):
-        self._do("press", key)
+    def open(self, target, *, width=1280, height=800, color_scheme="light"):
+        if color_scheme not in ("light", "dark"):
+            raise BrowserError(
+                f"color_scheme is light or dark: {color_scheme}")
+        if isinstance(target, str) and urlsplit(target).scheme:
+            parts = urlsplit(target)
+            if parts.scheme != "http" or parts.hostname not in _LOOPBACK:
+                raise BrowserError(
+                    "only file paths and loopback URLs can be opened: "
+                    f"{target}")
+            url, root = target, None
+        elif isinstance(target, (str, Path)):
+            path = Path(target)
+            if not path.is_absolute():
+                path = self._work_dir / path
+            if not path.is_file():
+                raise BrowserError(f"no such file: {path}")
+            url, root = path.as_uri(), str(path.parent)
+        else:
+            raise BrowserError(
+                f"only file paths and loopback URLs can be opened: {target}")
+        page_id = self._call("open", url=url, root=root, width=width,
+                             height=height, color_scheme=color_scheme)
+        return Page(self, page_id)
 
-    def select(self, value):
-        self._do("select", value)
-
-    def check(self):
-        self._do("check")
-
-    def uncheck(self):
-        self._do("uncheck")
-
-    def wheel(self, dx, dy):
-        self._do("wheel", dx, dy)
-
-    def drag_by(self, dx, dy):
-        self._do("drag_by", dx, dy)
-
-    def text(self):
-        return self._do("text")
-
-    def value(self):
-        return self._do("value")
-
-    def attribute(self, name):
-        return self._do("attribute", name)
-
-    def checked(self):
-        return self._do("checked")
-
-    def box(self):
-        return self._do("box")
-
-    def style(self, property):
-        return self._do("style", property)
-
-    def count(self):
-        return self._do("count")
-
-    def texts(self):
-        return self._do("texts")
-
-    def visible(self):
-        return self._do("visible")
-
-    def nth(self, i):
-        return Element(self._page, self._steps + [{"nth": i}], f"{self._selector} >> nth={i}")
-
-    def find(self, css=None, *, role=None, name=None, label=None, text=None, test_id=None):
-        step, described = _selector(css, role, name, label, text, test_id)
-        return Element(self._page, self._steps + [step], f"{self._selector} >> {described}")
+    def close(self):
+        if self._proc is None:
+            return
+        try:
+            self._call("close")
+        finally:
+            if self._proc is not None:
+                self._kill()
 
 
 def open_session(repo_root, work_dir):

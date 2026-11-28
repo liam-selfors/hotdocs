@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:1bfee92515c8f802c95961365b8000a83dd6a7c235c0c2dd92f2da60cd23f116
+# hotdocs-criterion: sha256:62d286151d9a2592f2a12e076ab79fd26f7f236c07981eec7e8ad1a6fd907407
 import re
 from pathlib import Path
 
@@ -10,20 +10,22 @@ import driver_browser
 REPO_ROOT = Path.home() / ".cache" / "hotdocs-test"
 
 
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
 @pytest.fixture(scope="session")
 def provisioned():
     result = driver_browser.provision(REPO_ROOT)
-    ok = result["ok"] if isinstance(result, dict) else getattr(result, "ok")
-    if not ok:
-        reason = result["reason"] if isinstance(result, dict) else getattr(result, "reason")
-        pytest.fail("browser provision failed: " + str(reason))
+    if not field(result, "ok"):
+        pytest.fail("provision failed: " + str(field(result, "reason")))
     return result
 
 
-PAGE = (
+PAGE_HTML = (
     "<!DOCTYPE html>\n"
     "<html lang=\"en\">\n"
-    "<head><meta charset=\"utf-8\"><title>Page</title></head>\n"
+    "<head><meta charset=\"utf-8\"><title>AC-DRV-008</title></head>\n"
     "<body>\n"
     "<label for=\"q\">Query</label><input id=\"q\">\n"
     "<span data-testid=\"badge\">New</span>\n"
@@ -33,10 +35,10 @@ PAGE = (
 )
 
 
-def test_open_relative_path_and_find_by_label_test_id_role(provisioned, tmp_path):
+def test_relative_open_and_selectors(provisioned, tmp_path):
     sub = tmp_path / "sub"
     sub.mkdir()
-    (sub / "page.html").write_text(PAGE, encoding="utf-8")
+    (sub / "page.html").write_text(PAGE_HTML, encoding="utf-8")
 
     session = driver_browser.open_session(REPO_ROOT, tmp_path)
     try:
@@ -49,11 +51,12 @@ def test_open_relative_path_and_find_by_label_test_id_role(provisioned, tmp_path
         session.close()
 
 
-def test_open_missing_file_raises_browser_error(provisioned, tmp_path):
+def test_open_missing_file_raises(provisioned, tmp_path):
     session = driver_browser.open_session(REPO_ROOT, tmp_path)
     try:
-        expected = "no such file: " + str(tmp_path / "missing.html")
-        with pytest.raises(driver_browser.BrowserError, match="^" + re.escape(expected) + "$"):
+        candidates = {str(tmp_path / "missing.html"), str((tmp_path / "missing.html").resolve())}
+        pattern = "^no such file: (" + "|".join(re.escape(c) for c in sorted(candidates)) + ")$"
+        with pytest.raises(driver_browser.BrowserError, match=pattern):
             session.open("missing.html")
     finally:
         session.close()

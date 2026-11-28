@@ -1,9 +1,8 @@
-# hotdocs-criterion: sha256:c0c3d9a2d250c3d3b18caab17a98cad6428e832d6dfd66c2645675fa84f19a15
+# hotdocs-criterion: sha256:49511d5626b41eb199bd7b0beb1feb93020ac6d6afd6322afac5e7bff47c14a6
+import base64
 import functools
 import http.server
-import struct
 import threading
-import zlib
 from pathlib import Path
 
 import pytest
@@ -12,6 +11,11 @@ import driver_browser
 
 
 ENV_ROOT = Path.home() / ".cache" / "hotdocs-test"
+
+# A valid 1x1 transparent PNG.
+PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+)
 
 
 def field(value, name):
@@ -26,35 +30,21 @@ def provisioned():
     return result
 
 
-def _png_bytes():
-    def chunk(kind, data):
-        body = kind + data
-        return (
-            struct.pack(">I", len(data))
-            + body
-            + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
-        )
-
-    header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
-    raw = b"\x00\xff\x00\x00"
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", header)
-        + chunk(b"IDAT", zlib.compress(raw))
-        + chunk(b"IEND", b"")
-    )
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass
 
 
-def test_remote_image_is_blocked_and_local_image_is_not(provisioned, tmp_path):
+def test_external_request_blocked_local_file_allowed(provisioned, tmp_path):
     site = tmp_path / "site"
     site.mkdir()
-    (site / "pic.png").write_bytes(_png_bytes())
+    (site / "pic.png").write_bytes(PNG_BYTES)
     html = (
         "<!DOCTYPE html>\n"
         "<html><head><meta charset=\"utf-8\"><title>Images</title></head>\n"
         "<body>\n"
-        "<img src=\"https://example.com/x.png\" alt=\"remote\">\n"
-        "<img src=\"pic.png\" alt=\"local\">\n"
+        "<img src=\"https://example.com/x.png\">\n"
+        "<img src=\"pic.png\">\n"
         "</body></html>\n"
     )
     (site / "index.html").write_text(html, encoding="utf-8")
@@ -67,23 +57,15 @@ def test_remote_image_is_blocked_and_local_image_is_not(provisioned, tmp_path):
         session.close()
 
 
-class _QuietHandler(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, format, *args):
-        pass
-
-
-def test_loopback_page_is_allowed_and_sees_fixed_locale_and_time_zone(
-    provisioned, tmp_path
-):
-    site = tmp_path / "served"
-    site.mkdir()
+def test_loopback_page_not_blocked_and_shows_fixed_locale_and_timezone(provisioned, tmp_path):
+    served = tmp_path / "served"
+    served.mkdir()
     html = (
         "<!DOCTYPE html>\n"
-        "<html><head><meta charset=\"utf-8\"><title>Locale</title>"
-        "<link rel=\"icon\" href=\"data:,\"></head>\n"
+        "<html><head><meta charset=\"utf-8\"><title>Locale</title></head>\n"
         "<body>\n"
-        "<p id=\"lang\"></p>\n"
-        "<p id=\"tz\"></p>\n"
+        "<div id=\"lang\"></div>\n"
+        "<div id=\"tz\"></div>\n"
         "<script>\n"
         "document.getElementById('lang').textContent = navigator.language;\n"
         "document.getElementById('tz').textContent = "
@@ -91,9 +73,9 @@ def test_loopback_page_is_allowed_and_sees_fixed_locale_and_time_zone(
         "</script>\n"
         "</body></html>\n"
     )
-    (site / "index.html").write_text(html, encoding="utf-8")
+    (served / "index.html").write_text(html, encoding="utf-8")
 
-    handler = functools.partial(_QuietHandler, directory=str(site))
+    handler = functools.partial(_QuietHandler, directory=str(served))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -110,4 +92,4 @@ def test_loopback_page_is_allowed_and_sees_fixed_locale_and_time_zone(
     finally:
         server.shutdown()
         server.server_close()
-        thread.join(timeout=10)
+        thread.join(timeout=5)

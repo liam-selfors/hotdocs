@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:614223445512dab35de76268dc9a9aed28aa67bb780b92a9a6b71d39448351c1
+# hotdocs-criterion: sha256:2e99368478bdf74bd2349f0addc1c19fd2c23f520ed87a7d717b646c3b4267e6
 import time
 from pathlib import Path
 
@@ -14,33 +14,29 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def test_ac_drv_001_provision_twice_is_idempotent_and_reports_versions():
+def test_ac_drv_001_provision_twice_is_idempotent_and_fast():
     SHARED_ROOT.mkdir(parents=True, exist_ok=True)
 
     first = driver_browser.provision(SHARED_ROOT)
-    if field(first, "ok") is not True:
-        pytest.fail("first provision failed: " + repr(field(first, "reason")))
+    if not field(first, "ok"):
+        pytest.fail("provision failed: " + str(field(first, "reason")))
 
-    started = time.monotonic()
+    start = time.monotonic()
     second = driver_browser.provision(SHARED_ROOT)
-    elapsed = time.monotonic() - started
-    if field(second, "ok") is not True:
-        pytest.fail("second provision failed: " + repr(field(second, "reason")))
+    elapsed = time.monotonic() - start
 
-    assert field(first, "ok") is True
-    assert field(second, "ok") is True
-
-    assert field(first, "lockfile_sha256") is None
-    assert field(second, "lockfile_sha256") is None
+    for report in (first, second):
+        assert field(report, "ok") is True, field(report, "reason")
+        assert field(report, "lockfile_sha256") is None
 
     first_versions = field(first, "versions")
     second_versions = field(second, "versions")
     assert first_versions == second_versions
 
-    for versions in (first_versions, second_versions):
-        assert versions["playwright"] == "1.64.1"
-        chromium = versions["chromium"]
-        assert isinstance(chromium, str)
-        assert chromium.strip() != ""
+    playwright_version = field(first_versions, "playwright")
+    chromium_version = field(first_versions, "chromium")
+    assert playwright_version == "1.64.1"
+    assert isinstance(chromium_version, str)
+    assert chromium_version.strip() != ""
 
     assert elapsed < 30, "second provision took " + repr(elapsed) + " seconds"

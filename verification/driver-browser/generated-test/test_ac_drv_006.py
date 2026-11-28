@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:fa093eadc8fa74a8359a48711827f54a4200d9f530b3485aaae97fecaeeb818e
+# hotdocs-criterion: sha256:42a5b60a13fd89bbb797dd84a15c52790425eb241dfdc1b4577c4810787ad554
 import re
 from pathlib import Path
 
@@ -7,7 +7,7 @@ import pytest
 import driver_browser
 
 
-ENV_ROOT = Path.home() / ".cache" / "hotdocs-test"
+REPO_ROOT = Path.home() / ".cache" / "hotdocs-test"
 
 
 def field(value, name):
@@ -16,7 +16,7 @@ def field(value, name):
 
 @pytest.fixture(scope="session")
 def provisioned():
-    result = driver_browser.provision(ENV_ROOT)
+    result = driver_browser.provision(REPO_ROOT)
     if not field(result, "ok"):
         pytest.fail("provision failed: " + str(field(result, "reason")))
     return result
@@ -30,7 +30,8 @@ PAGE = (
     "<input id=\"n\" value=\"7\">\n"
     "<a id=\"l\" href=\"x.html\" data-k=\"v\">Link</a>\n"
     "<input id=\"c\" type=\"checkbox\" checked>\n"
-    "<div id=\"box\" style=\"position:absolute;left:10px;top:20px;width:30px;height:40px\"></div>\n"
+    "<div id=\"box\" style=\"position:absolute;left:10px;top:20px;"
+    "width:30px;height:40px\"></div>\n"
     "<ul><li>one</li><li>two</li><li>three</li></ul>\n"
     "</body>\n"
     "</html>\n"
@@ -41,7 +42,7 @@ def test_ac_drv_006_element_reads(provisioned, tmp_path):
     page_path = tmp_path / "index.html"
     page_path.write_text(PAGE, encoding="utf-8")
 
-    session = driver_browser.open_session(ENV_ROOT, tmp_path)
+    session = driver_browser.open_session(REPO_ROOT, tmp_path)
     try:
         page = session.open(page_path, width=400, height=300)
 
@@ -67,7 +68,8 @@ def test_ac_drv_006_element_reads(provisioned, tmp_path):
         with pytest.raises(
             driver_browser.BrowserError,
             match=re.escape("3 elements match css=li"),
-        ):
+        ) as excinfo:
             page.find(css="li").text()
+        assert str(excinfo.value) == "3 elements match css=li"
     finally:
         session.close()

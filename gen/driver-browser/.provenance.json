@@ -1,7 +1,7 @@
 {
-  "spec_bundle_hash": "sha256:f71a4ba9f2899bdb327afbcfb6da96fc77892b8c926eee09957ff79bc75a8c25",
+  "spec_bundle_hash": "sha256:c985668fe15700f34d204c4a6b28960226ac8edfeaa589a7c23a87ada39c6750",
   "spec_bundle_parts": {
-    "spec": "sha256:f71a4ba9f2899bdb327afbcfb6da96fc77892b8c926eee09957ff79bc75a8c25",
+    "spec": "sha256:c985668fe15700f34d204c4a6b28960226ac8edfeaa589a7c23a87ada39c6750",
     "dependency_code": "sha256:c92a94e1a5dc05f61ea3cafa3ab0d83b65ff7fc7322ac17584e5be5273d1b7b3"
   },
   "model_pin": "claude-opus-5-5",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T21:56:37Z",
+  "generated_at": "2026-11-28T10:31:51Z",
   "verification_run_id": "driver-browser-attempt-1",
   "verification_report": {
     "component_id": "comp-driver-browser",
@@ -175,6 +175,18 @@
           "prompt_version": "v1",
           "cache_hit": false
         }
+      },
+      {
+        "id": "AC-DRV-013",
+        "covers": "R-DRV-002",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -184,7 +196,7 @@
       "R-DRV-004": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8409090909090909,
+    "mutation_score": 0.864,
     "mutation_error": null,
     "assets": [
       {
@@ -218,8 +230,15 @@
   "secret_scan": {
     "scope": "full",
     "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": false,
-    "matches": [],
+    "flagged": true,
+    "matches": [
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/driver-browser/generated-test/test_ac_drv_010.py",
+        "line": 15
+      }
+    ],
     "allowed": [
       {
         "rule_id": "AWS Access Key",
@@ -325,11 +344,31 @@
         "type": "Base64 High Entropy String"
       },
       {
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "type": "Hex High Entropy String"
+      },
+      {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
         "type": "Hex High Entropy String"
       },
       {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_005.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_008.py",
         "type": "Hex High Entropy String"
       },
       {
@@ -406,6 +445,14 @@
       },
       {
         "file": "verification/secret-scanner/generated-test/test_ac_secret_016.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
         "type": "AWS Access Key"
       },
       {

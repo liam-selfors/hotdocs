@@ -1,5 +1,5 @@
-# hotdocs-criterion: sha256:adf42090e195502127f0f17c20839ca03bbb8a5c8feb6fd57c9382b4597c65bf
-import time
+# hotdocs-criterion: sha256:687dea41f9fdd2682b39ac475826aefbcccc6f308960dfe66bfea2fd9d590f28
+import base64
 from pathlib import Path
 
 import pytest
@@ -24,16 +24,17 @@ def provisioned():
     result = driver_browser.provision(ENV_ROOT)
     if not field(result, "ok"):
         pytest.fail("provision failed: " + str(field(result, "reason")))
-    return ENV_ROOT
+    return result
 
 
 def _page_html():
     script = (
         "document.getElementById('export').addEventListener('click', function () {\n"
-        "  var blob = new Blob(['<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>'],"
-        " {type: 'image/svg+xml'});\n"
+        "  var svg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"></svg>';\n"
+        "  var blob = new Blob([svg], {type: 'image/svg+xml'});\n"
+        "  var url = URL.createObjectURL(blob);\n"
         "  var a = document.createElement('a');\n"
-        "  a.href = URL.createObjectURL(blob);\n"
+        "  a.href = url;\n"
         "  a.download = 'out.svg';\n"
         "  document.body.appendChild(a);\n"
         "  a.click();\n"
@@ -45,7 +46,7 @@ def _page_html():
         "<html lang=\"en\">\n"
         "<head><meta charset=\"utf-8\"><title>Export page</title></head>\n"
         "<body>\n"
-        "<img src=\"" + PNG_DATA_URL + "\" alt=\"pixel\">\n"
+        "<img alt=\"pixel\" src=\"" + PNG_DATA_URL + "\">\n"
         "<button id=\"export\" type=\"button\">Export</button>\n"
         "<script>\n" + script + "</script>\n"
         "</body>\n"
@@ -53,22 +54,14 @@ def _page_html():
     )
 
 
-def test_ac_drv_011_downloads_screenshots_and_no_blocked_requests(provisioned, tmp_path):
+def test_ac_drv_011_offline_page_download_and_screenshots(provisioned, tmp_path):
     page_path = tmp_path / "index.html"
     page_path.write_text(_page_html(), encoding="utf-8")
 
-    session = driver_browser.open_session(provisioned, tmp_path)
+    session = driver_browser.open_session(ENV_ROOT, tmp_path)
     try:
         page = session.open(page_path)
         page.find(role="button", name="Export").click()
-
-        # Give the download a moment to be saved, should it complete
-        # asynchronously after the click returns.
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            if page.downloads():
-                break
-            time.sleep(0.1)
 
         first = page.downloads()
         second = page.downloads()
@@ -80,14 +73,10 @@ def test_ac_drv_011_downloads_screenshots_and_no_blocked_requests(provisioned, t
 
         assert isinstance(first, list)
         assert isinstance(second, list)
-        assert len(first) == 1, first
-        assert len(second) == 1, second
+        assert len(first) == 1
+        assert len(second) == 1
         assert Path(first[0]) == Path(second[0])
-
-        downloaded = Path(first[0])
-        assert downloaded.name == "out.svg"
-        assert downloaded.parent.resolve() == (tmp_path / "downloads").resolve()
-        assert downloaded.is_file()
+        assert Path(first[0]).name == "out.svg"
 
         assert (tmp_path / "screenshots" / "a.png").is_file()
         assert (tmp_path / "screenshots" / "b.png").is_file()
