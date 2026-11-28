@@ -58,3 +58,32 @@ def test_unknown_argument_is_a_usage_error(words, tmp_path):
     first = proc.stderr.splitlines()[0] if proc.stderr else ""
     assert re.match(r"usage error: ", first), proc.stderr
     assert "Traceback" not in proc.stderr
+
+
+# Valid positionals through the real dispatcher: a wrong `strip` hands
+# `main` a verb word as an extra positional, which an unknown flag never
+# shows (each `main` rejects the flag first). Each route must get past its
+# argument count and fail only later, on the empty project (`D389`).
+POSITIONAL_ROUTES = [
+    ("author-test", ["comp-a", "AC-A-001", "--model=nomodel"], "expected <component-id> and <criterion-id>"),
+    ("generate", ["comp-a", "--model=nomodel"], "expected"),
+    ("verify-component", ["comp-a"], "expected"),
+    ("track feedback", ["comp-a"], "expected"),
+]
+
+
+@pytest.mark.parametrize("words,args,miscount", POSITIONAL_ROUTES)
+def test_positionals_reach_main_unshifted(words, args, miscount, tmp_path):
+    argv = words.split() + args
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import hotdocs_cli; "
+        "entry = getattr(hotdocs_cli, 'run', None) or hotdocs_cli.main; "
+        "sys.exit(entry(sys.argv[4:], tool_root=sys.argv[2], cwd=sys.argv[3]))"
+    )
+    env = {k: v for k, v in __import__("os").environ.items() if k != "ANTHROPIC_API_KEY"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code, str(REPO_ROOT / "gen" / "hotdocs-cli"), str(REPO_ROOT), str(tmp_path), *argv],
+        cwd=tmp_path, capture_output=True, text=True, timeout=120, env=env,
+    )
+    assert miscount not in proc.stderr, proc.stderr
+    assert "Traceback" not in proc.stderr
