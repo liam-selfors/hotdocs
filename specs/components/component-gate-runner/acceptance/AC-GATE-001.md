@@ -13,7 +13,9 @@ Then check_provenance received "sha256:k" and {"verifier": "v@1"}, no
   dependency after check_provenance was called, provenance_hit is true, blocked is
   false, and verification is the hit's verification_report
 
-Given the same, but the hit's verification_report.overall is "fail"
+Given the same, but the hit's verification_report.overall is "fail",
+  and run_attempts returns passed true, stop_reason "passed", one
+  attempt with outcome "passed", and a generation result with one file
 When run_component_gates is called
 Then run_attempts was called exactly once and provenance_hit is false
 ```
