@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:1e842bf5dda9192440dbe7f964cc7c0f503beab42e10b1c80e9687411d05b6c8",
+  "spec_bundle_hash": "sha256:dbdc5e34d51648b10fa7b2b6ac1a574070d8e1d08b1a521a57b70280e74f580d",
   "spec_bundle_parts": {
     "spec": "sha256:b8bbfdbf3cc8d6f288f6334bab5a329fa0c5fcf5adb88a66d96c8a86fff9df83",
-    "dependency_code": "sha256:b2d7840ce1054dded511c174dae21a0bd17fb938e7fff4c721cbfc23d85b8d8b"
+    "dependency_code": "sha256:0a26b078621161ed9c52136e4c00833661476250bf9e5491f1ae39cf331fd1fd"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-28T05:38:11Z",
+  "generated_at": "2026-11-28T09:15:28Z",
   "verification_run_id": "provenance-checker-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-checker",
