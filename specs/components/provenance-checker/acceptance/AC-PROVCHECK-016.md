@@ -22,6 +22,12 @@ Then reason is "spec_bundle_hash differs"
 Given that manifest
 When check_provenance("comp-foo", "H2", {"verifier": "v@1"}, repo_root,
   {"spec": "S", "dependency_code": "D2"}) is called
+Then reason is "dependency code differs", a verifier change being one
+  the committed code is re-verified for
+
+Given that manifest
+When check_provenance("comp-foo", "H2", {"generator": "g@2"}, repo_root,
+  {"spec": "S", "dependency_code": "D2"}) is called
 Then reason is "spec_bundle_hash differs"
 
 Given that manifest

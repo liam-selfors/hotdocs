@@ -17,8 +17,10 @@ matching `.provenance.json`'s own fields, copied verbatim — this
 component never recomputes or summarizes them.
 
 `reason` is `null` on a hit; on a miss, the first that applies, in this
-order: `no manifest`, `R-PROVCHECK-011`'s `dependency code differs` or
-else `spec_bundle_hash differs`, `gate_versions differ`,
+order: `no manifest`, `R-PROVCHECK-011`'s `dependency code differs`,
+`R-PROVCHECK-012`'s `hash formula differs` or else `spec_bundle_hash
+differs`, `R-PROVCHECK-013`'s `gates differ` or else `gate_versions
+differ`,
 then `R-PROVCHECK-009`'s `prepare` failure message, or
 `R-PROVCHECK-010`'s `environment differs` or else `assets differ` or
 `drivers differ`, then `llm-judge results not trusted`.
