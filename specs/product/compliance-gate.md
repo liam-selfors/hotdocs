@@ -35,5 +35,9 @@ Given generated code that matches a known-licensed-code fingerprint above the
 When the pipeline's license scan runs
 Then the merge is blocked, the result is written into the provenance
   manifest's license_scan field regardless of outcome, and the finding
-  appears in the review packet even if a subsequent retry resolves it
+  appears in the review packet built after that run, also when the run's
+  generation loop retried an earlier attempt that failed verification
+  before the candidate the scan blocked (a later, separate run whose scan
+  is clean replaces the manifest's license_scan, and its packet shows
+  that clean result)
 ```
