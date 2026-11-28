@@ -32,15 +32,12 @@ in `impacted`'s order, or `[]` when `precondition_error` is non-null.
 failed or unparseable model call leaves it `false`.
 
 `lint_findings` entries are exactly `spec-linter`'s own `Finding` shape
-(`interface/data/LintReport.md`'s `findings[]`, bundle-visible via
-`depends_on`) — passed through unchanged, never restated or
+(`interface/data/LintReport.md`'s `findings[]`) — passed through unchanged, never restated or
 summarized here: a finding that is a dict stays that dict, with no key
 added or removed. `halted` is `true` exactly when `R-ASSIST-001` stopped
 the run.
 
-`completeness_score`, `completeness_rationale`, and `redundancy_flags` are
-`null`/empty with `degraded: true` when no model was configured
-(R-ASSIST-007) — never silently omitted. Each `redundancy_flags` entry is
+Each `redundancy_flags` entry is
 `{new_requirement, overlaps_with, rationale}` (`R-ASSIST-005`):
 `new_requirement` and `overlaps_with` are both `R-id`s, and `rationale`
 is always present on a populated entry.

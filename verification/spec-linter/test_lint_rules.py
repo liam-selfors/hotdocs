@@ -233,12 +233,16 @@ def test_ac_lint_022_fires_on_two_crowded_dimensions(corpus_root):
     gen_dir = corpus_root / "gen" / "foo"
     gen_dir.mkdir(parents=True)
     (gen_dir / "big.py").write_text("\n".join(f"x{i} = {i}" for i in range(900)))
-    requirement = _comp(corpus_root) / "requirements" / "R-FOO-001.md"
-    requirement.write_text(requirement.read_text() + "\n\n" + " ".join(["word"] * 2100))
+    # D380: what the generator reads (here, a large interface document) is
+    # the word dimension; requirement words alone no longer crowd a cap.
+    library = _comp(corpus_root) / "interface" / "library.md"
+    library.parent.mkdir(parents=True, exist_ok=True)
+    existing = library.read_text() if library.exists() else "# Library\n"
+    library.write_text(existing + "\n\n" + " ".join(["word"] * 8100) + "\n")
     report = run_lint(corpus_root)
     assert has_finding(report, "R-SIZE-002", severity="warn")
     finding = next(f for f in report.findings if f.rule_id == "R-SIZE-002")
-    assert "generated_code_loc" in finding.message and "component_doc_words" in finding.message
+    assert "generated_code_loc" in finding.message and "generator_words" in finding.message
 
 
 def test_ac_lint_022_does_not_fire_on_one_crowded_dimension(corpus_root):

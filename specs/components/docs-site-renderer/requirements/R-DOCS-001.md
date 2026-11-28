@@ -21,3 +21,11 @@
   `<script type="module">` + its text + `\ninit(document);\n` +
   `</script>`, the page's only `<script` element. Detail and dashboard
   pages carry no script. The asset contains no `</script`.
+
+  The pages are `out_dir/index.html`, `out_dir/dashboard.html` and one
+  detail page per node, `out_dir/nodes/<node id>.html`. Every page
+  written, `index.html`, each detail page and the dashboard,
+  has `ui_style.style_element()` once inside `<head>` as its only CSS,
+  loaded as `specs/architecture/visual-style.md` "Pages" states: no
+  other `<style>` element, no `style="..."` attribute and no `<link`
+  element.

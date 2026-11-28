@@ -1,10 +1,11 @@
-# hotdocs-criterion: sha256:bfdfacded349d688d9c750c59543dcaedcb135a4b4d05a3322b7b60a14ff25b8
+# hotdocs-criterion: sha256:8130c1cdc57dd34140841a05e5904caf0657823f8fd40069349c85ac65dc091d
 import json
 import os
 
 import hotdocs_cli
 
 
+# Verb table rows, every row except "init": (verb words, dir, module, strip)
 ROWS = [
     (["lint"], "gen/spec-linter", "spec_linter", 1),
     (["impact"], "gen/impact-analyzer", "impact_analyzer", 1),
@@ -36,99 +37,124 @@ ROWS = [
 ]
 
 
-def fake_main_source(calls_log, which_log, tag, body_tail):
-    nl = repr("\n")
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _quiet(*args, **kwargs):
+    pass
+
+
+def fake_main_source(log_path, tag, ret=7):
     return (
         "import json\n"
         "def main(argv=None):\n"
-        "    with open(" + repr(str(calls_log)) + ", 'a') as f:\n"
-        "        f.write(json.dumps(argv) + " + nl + ")\n"
-        "    with open(" + repr(str(which_log)) + ", 'a') as f:\n"
-        "        f.write(" + repr(tag) + " + " + nl + ")\n"
-        + body_tail
+        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
+        "        f.write(json.dumps({'tag': " + repr(tag) + ", 'argv': argv}) + '\\n')\n"
+        "    return " + repr(ret) + "\n"
     )
 
 
-def write_fake(root, rel_dir, module, calls_log, which_log, tag, body_tail="    return 7\n"):
-    base = root / rel_dir
+def write_module(root, rel_dir, module, source):
+    base = os.path.join(str(root), *rel_dir.split("/"))
     parts = module.split(".")
-    target_dir = base
-    for pkg in parts[:-1]:
-        target_dir = target_dir / pkg
-        target_dir.mkdir(parents=True, exist_ok=True)
-        init = target_dir / "__init__.py"
-        if not init.exists():
-            init.write_text("")
-    target_dir.mkdir(parents=True, exist_ok=True)
-    path = target_dir / (parts[-1] + ".py")
-    path.write_text(fake_main_source(calls_log, which_log, tag, body_tail))
+    if len(parts) == 1:
+        os.makedirs(base, exist_ok=True)
+        path = os.path.join(base, module + ".py")
+    else:
+        pkg_dir = os.path.join(base, *parts[:-1])
+        os.makedirs(pkg_dir, exist_ok=True)
+        # make every package level importable
+        d = base
+        for p in parts[:-1]:
+            d = os.path.join(d, p)
+            init = os.path.join(d, "__init__.py")
+            if not os.path.exists(init):
+                with open(init, "w") as f:
+                    f.write("")
+        path = os.path.join(pkg_dir, parts[-1] + ".py")
+    with open(path, "w") as f:
+        f.write(source)
     return path
 
 
 def write_fake_llm_endpoint(project):
-    d = project / "gen" / "llm-endpoint"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "llm_endpoint.py").write_text(
+    src = (
         "def load_config(config_path=None):\n"
         "    return None\n"
     )
+    write_module(project, "gen/llm-endpoint", "llm_endpoint", src)
 
 
-def read_lines(path):
-    if not path.exists():
+def read_log(log_path):
+    if not os.path.exists(str(log_path)):
         return []
-    return [line for line in path.read_text().splitlines() if line.strip()]
+    with open(str(log_path)) as f:
+        return [json.loads(line) for line in f.read().splitlines() if line.strip()]
 
 
-def call_run(argv, project, tool_root):
-    outputs = []
-    return hotdocs_cli.run(
-        argv,
-        tool_root=str(tool_root),
-        input_fn=lambda *a, **k: "",
-        output_fn=lambda *a, **k: outputs.append(a),
-        env={},
-        cwd=str(project),
-    )
+def clear_log(log_path):
+    if os.path.exists(str(log_path)):
+        os.remove(str(log_path))
 
 
-def test_each_row_dispatches_with_strip_and_longest_prefix(tmp_path):
+def test_every_row_routes_with_strip_and_longest_prefix(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     tool_root = tmp_path / "toolroot"
     tool_root.mkdir()
-    calls_log = project / "calls.log"
-    which_log = project / "which.log"
+    log_path = project / "calls.log"
+
+    written = set()
+    for words, rel_dir, module, strip in ROWS:
+        key = (rel_dir, module)
+        if key in written:
+            continue
+        written.add(key)
+        write_module(project, rel_dir, module,
+                     fake_main_source(log_path, rel_dir + "::" + module))
     write_fake_llm_endpoint(project)
-    for words, rel_dir, module, strip in ROWS:
-        write_fake(project, rel_dir, module, calls_log, which_log, module)
 
-    repo_token = "--repo-root=" + os.path.abspath(str(project))
+    root_token = "--repo-root=" + os.path.abspath(str(project))
 
     for words, rel_dir, module, strip in ROWS:
-        if calls_log.exists():
-            calls_log.unlink()
-        if which_log.exists():
-            which_log.unlink()
+        clear_log(log_path)
         argv = list(words) + ["x", "--flag"]
-        rc = call_run(argv, project, tool_root)
-        assert rc == 7, (words, rc)
-        lines = read_lines(calls_log)
-        assert len(lines) == 1, (words, lines)
-        received = json.loads(lines[0])
-        expected = argv[strip:] + [repo_token]
-        assert received[: len(expected)] == expected, (words, received)
-        rest = received[len(expected):]
-        assert all(t.startswith("--model=") for t in rest), (words, received)
-        assert read_lines(which_log) == [module], (words, read_lines(which_log))
+        code = hotdocs_cli.run(argv, tool_root=str(tool_root), cwd=str(project),
+                               output_fn=_quiet)
+        entries = read_log(log_path)
+        assert len(entries) == 1, (words, entries)
+        entry = entries[0]
+        assert entry["tag"] == rel_dir + "::" + module, (words, entry)
+        expected = argv[strip:] + [root_token]
+        assert entry["argv"] == expected, (words, entry["argv"], expected)
+        assert code == 7, (words, code)
 
-    # Longest prefix: "track ui build" reaches provenance_tracker_ui, never provenance_tracker.
-    for p in (calls_log, which_log):
-        if p.exists():
-            p.unlink()
-    rc = call_run(["track", "ui", "build", "x", "--flag"], project, tool_root)
-    assert rc == 7
-    assert read_lines(which_log) == ["provenance_tracker_ui"]
+    # explicit spot checks from the criterion
+    clear_log(log_path)
+    hotdocs_cli.run(["lint", "x", "--flag"], tool_root=str(tool_root),
+                    cwd=str(project), output_fn=_quiet)
+    assert read_log(log_path)[0]["argv"] == ["x", "--flag", root_token]
+
+    clear_log(log_path)
+    hotdocs_cli.run(["generate", "x", "--flag"], tool_root=str(tool_root),
+                    cwd=str(project), output_fn=_quiet)
+    assert read_log(log_path)[0]["argv"] == ["generate", "x", "--flag", root_token]
+
+    clear_log(log_path)
+    hotdocs_cli.run(["docs-site", "build", "x", "--flag"], tool_root=str(tool_root),
+                    cwd=str(project), output_fn=_quiet)
+    assert read_log(log_path)[0]["argv"] == ["x", "--flag", root_token]
+
+    # longest prefix: "track ui build" never reaches "track feedback"'s module
+    clear_log(log_path)
+    code = hotdocs_cli.run(["track", "ui", "build", "x", "--flag"],
+                           tool_root=str(tool_root), cwd=str(project), output_fn=_quiet)
+    entries = read_log(log_path)
+    assert code == 7
+    assert len(entries) == 1
+    assert entries[0]["tag"] == "gen/provenance-tracker-ui::provenance_tracker_ui"
+    assert entries[0]["argv"] == ["track", "ui", "build", "x", "--flag", root_token]
 
 
 def test_system_exit_codes_are_returned(tmp_path):
@@ -136,63 +162,82 @@ def test_system_exit_codes_are_returned(tmp_path):
     project.mkdir()
     tool_root = tmp_path / "toolroot"
     tool_root.mkdir()
-    calls_log = project / "calls.log"
-    which_log = project / "which.log"
     counter = project / "counter.txt"
-    counter.write_text("0")
-    nl = repr("\n")
-    tail = (
-        "    with open(" + repr(str(counter)) + ") as f:\n"
-        "        n = int(f.read().strip() or '0')\n"
-        "    with open(" + repr(str(counter)) + ", 'w') as f:\n"
+    log_path = project / "calls.log"
+    src = (
+        "import json, os\n"
+        "def main(argv=None):\n"
+        "    counter = " + repr(str(counter)) + "\n"
+        "    n = 0\n"
+        "    if os.path.exists(counter):\n"
+        "        with open(counter) as f:\n"
+        "            n = int(f.read().strip() or '0')\n"
+        "    with open(counter, 'w') as f:\n"
         "        f.write(str(n + 1))\n"
-        "    codes = [3, None, 'boom']\n"
+        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
+        "        f.write(json.dumps({'tag': 'exit', 'argv': argv}) + '\\n')\n"
+        "    codes = " + repr([3, None, "boom"]) + "\n"
         "    raise SystemExit(codes[n])\n"
     )
-    assert nl  # keeps repr usage consistent
-    write_fake(project, "gen/spec-linter", "spec_linter", calls_log, which_log, "exit", tail)
+    write_module(project, "gen/spec-linter", "spec_linter", src)
 
-    results = [call_run(["lint"], project, tool_root) for _ in range(3)]
+    results = []
+    for _ in range(3):
+        results.append(hotdocs_cli.run(["lint"], tool_root=str(tool_root),
+                                       cwd=str(project), output_fn=_quiet))
     assert results == [3, 0, 1]
-    assert len(read_lines(which_log)) == 3
+    assert len(read_log(log_path)) == 3
 
 
 def test_two_projects_each_reach_their_own_fake(tmp_path):
     tool_root = tmp_path / "toolroot"
     tool_root.mkdir()
-    shared_which = tmp_path / "which.log"
-    project_a = tmp_path / "a"
-    project_b = tmp_path / "b"
-    project_a.mkdir()
-    project_b.mkdir()
-    write_fake(project_a, "gen/spec-linter", "spec_linter", project_a / "calls.log", shared_which, "A")
-    write_fake(project_b, "gen/spec-linter", "spec_linter", project_b / "calls.log", shared_which, "B")
+    proj_a = tmp_path / "a"
+    proj_b = tmp_path / "b"
+    proj_a.mkdir()
+    proj_b.mkdir()
+    log_a = proj_a / "calls.log"
+    log_b = proj_b / "calls.log"
+    write_module(proj_a, "gen/spec-linter", "spec_linter",
+                 fake_main_source(log_a, "fake-a"))
+    write_module(proj_b, "gen/spec-linter", "spec_linter",
+                 fake_main_source(log_b, "fake-b"))
 
-    assert call_run(["lint"], project_a, tool_root) == 7
-    assert read_lines(shared_which) == ["A"]
-    assert call_run(["lint"], project_b, tool_root) == 7
-    assert read_lines(shared_which) == ["A", "B"]
-    assert len(read_lines(project_a / "calls.log")) == 1
-    assert len(read_lines(project_b / "calls.log")) == 1
+    code_a = hotdocs_cli.run(["lint"], tool_root=str(tool_root), cwd=str(proj_a),
+                             output_fn=_quiet)
+    code_b = hotdocs_cli.run(["lint"], tool_root=str(tool_root), cwd=str(proj_b),
+                             output_fn=_quiet)
+    assert code_a == 7
+    assert code_b == 7
+
+    entries_a = read_log(log_a)
+    entries_b = read_log(log_b)
+    assert [e["tag"] for e in entries_a] == ["fake-a"]
+    assert [e["tag"] for e in entries_b] == ["fake-b"]
 
 
-def test_falls_back_to_tool_root_then_prefers_project(tmp_path):
+def test_tool_root_fallback_then_project_fake(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     tool_root = tmp_path / "toolroot"
     tool_root.mkdir()
-    calls_log = project / "calls.log"
-    which_log = project / "which.log"
-    write_fake(tool_root, "gen/spec-linter", "spec_linter", calls_log, which_log, "tool")
-    assert not (project / "gen" / "spec-linter").exists()
+    log_path = project / "calls.log"
 
-    rc = call_run(["lint"], project, tool_root)
-    assert rc == 7
-    assert read_lines(which_log) == ["tool"]
-    assert len(read_lines(calls_log)) == 1
+    write_module(tool_root, "gen/spec-linter", "spec_linter",
+                 fake_main_source(log_path, "tool-root-fake"))
+    assert not os.path.exists(os.path.join(str(project), "gen", "spec-linter"))
 
-    write_fake(project, "gen/spec-linter", "spec_linter", calls_log, which_log, "project")
-    rc = call_run(["lint"], project, tool_root)
-    assert rc == 7
-    assert read_lines(which_log) == ["tool", "project"]
-    assert len(read_lines(calls_log)) == 2
+    code = hotdocs_cli.run(["lint"], tool_root=str(tool_root), cwd=str(project),
+                           output_fn=_quiet)
+    assert code == 7
+    entries = read_log(log_path)
+    assert [e["tag"] for e in entries] == ["tool-root-fake"]
+
+    clear_log(log_path)
+    write_module(project, "gen/spec-linter", "spec_linter",
+                 fake_main_source(log_path, "project-fake"))
+    code = hotdocs_cli.run(["lint"], tool_root=str(tool_root), cwd=str(project),
+                           output_fn=_quiet)
+    assert code == 7
+    entries = read_log(log_path)
+    assert [e["tag"] for e in entries] == ["project-fake"]

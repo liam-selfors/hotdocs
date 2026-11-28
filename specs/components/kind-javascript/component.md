@@ -21,13 +21,7 @@ measure how well a test suite checks the module.
 
 ## Rationale
 
-`D343` builds asset kinds with `javascript` first, so JavaScript is
-declared as a file of its own and mutated over the whole file instead of
-inside Python strings. The adapter carries out
-`specs/architecture/asset-kind-javascript.md` through the interface every adapter
-shares, `specs/architecture/asset-kinds.md`. Its own Node driver is kept
-short so that the adapter passes the rule it helps enforce: no
-JavaScript of 200 characters or more inside a Python string.
+See `D343`.
 
 ## Scope
 
@@ -58,9 +52,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All are `kind: generated-test`, calling the module's functions on
-JavaScript files a test writes under `tmp_path`.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -74,4 +65,4 @@ See `constraints.md`.
 
 ## Change log
 
-- `D343`: initial spec.
+`D343`.

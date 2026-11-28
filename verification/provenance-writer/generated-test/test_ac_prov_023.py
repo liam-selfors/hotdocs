@@ -1,20 +1,25 @@
-# hotdocs-criterion: sha256:ce0ff7fae57cbd6d2cd6ed44377bae40469627e4e3360486c2626dd9a74a0ec0
+# hotdocs-criterion: sha256:068e51fcc439b4d1abe00c43efe9b9747e65dcfd8a11991f303b4b6a7ce7b119
 import json
 import pathlib
+from pathlib import Path
 
 import provenance_writer
+
+
+COMPONENT_ID = "comp-foo"
+SLUG = "foo"
+CRITERION_ID = "AC-FOO-004"
 
 
 class Slotted:
     __slots__ = ("x",)
 
 
-COMPONENT_ID = "comp-foo"
-SLUG = "foo"
-CRITERION_ID = "AC-FOO-002"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _inputs(actual):
+def make_inputs(actual):
     failure_detail = {
         "message": "m",
         "expected": "e",
@@ -25,21 +30,27 @@ def _inputs(actual):
     verification_report = {
         "component_id": COMPONENT_ID,
         "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+            {
+                "id": "AC-FOO-001",
+                "covers": "R-FOO-001",
+                "kind": "compiled",
+                "result": "pass",
+            },
             {
                 "id": CRITERION_ID,
-                "covers": "R-FOO-002",
+                "covers": "R-FOO-004",
                 "kind": "generated-test",
                 "result": "fail",
                 "failure_origin": "implementation",
                 "failure_detail": failure_detail,
             },
         ],
-        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
+        "requirement_results": {"R-FOO-001": "pass", "R-FOO-004": "fail"},
         "interface_drift": False,
-        "mutation_score": None,
+        "mutation_score": 0.9,
         "mutation_error": None,
         "assets": [],
+        "drivers": [],
         "overall": "fail",
     }
     generation_result = {
@@ -71,50 +82,52 @@ def _inputs(actual):
     }
 
 
-def _manifest_paths(repo_root):
-    return [
+def read_manifests(repo_root):
+    paths = [
         repo_root / "gen" / SLUG / ".provenance.json",
         repo_root / "verification" / SLUG / ".provenance.json",
     ]
+    manifests = []
+    for p in paths:
+        assert p.is_file(), "manifest missing at " + str(p)
+        manifests.append(json.loads(p.read_text(encoding="utf-8")))
+    return manifests
 
 
-def _criterion_detail(manifest):
-    report = manifest["verification_report"]
-    assert isinstance(report, dict)
-    matches = [c for c in report["criteria"] if c.get("id") == CRITERION_ID]
+def failing_detail(manifest):
+    report = field(manifest, "verification_report")
+    assert report is not None
+    criteria = field(report, "criteria")
+    matches = [c for c in criteria if field(c, "id") == CRITERION_ID]
     assert len(matches) == 1
-    detail = matches[0]["failure_detail"]
-    assert isinstance(detail, dict)
-    return detail
+    return field(matches[0], "failure_detail")
 
 
-def test_set_bytes_and_path_in_failure_detail_are_converted(tmp_path):
+def test_set_bytes_path_are_converted(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    inputs = make_inputs({"b", "a"})
 
-    provenance_writer.write_provenance(COMPONENT_ID, _inputs({"b", "a"}), repo_root)
+    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
 
-    for path in _manifest_paths(repo_root):
-        assert path.is_file(), path
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-        detail = _criterion_detail(manifest)
+    for manifest in read_manifests(repo_root):
+        detail = failing_detail(manifest)
+        assert detail["message"] == "m"
+        assert detail["expected"] == "e"
         assert detail["actual"] == ["a", "b"]
         assert detail["raw"] == "x"
         assert detail["where"] == "p"
-        assert detail["message"] == "m"
-        assert detail["expected"] == "e"
 
 
-def test_slotted_object_in_failure_detail_becomes_repr_string(tmp_path):
+def test_slotted_actual_becomes_repr_string(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    inputs = make_inputs(Slotted())
 
-    provenance_writer.write_provenance(COMPONENT_ID, _inputs(Slotted()), repo_root)
+    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
 
-    for path in _manifest_paths(repo_root):
-        assert path.is_file(), path
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-        detail = _criterion_detail(manifest)
+    for manifest in read_manifests(repo_root):
+        detail = failing_detail(manifest)
         actual = detail["actual"]
         assert isinstance(actual, str)
         assert actual.startswith("<")

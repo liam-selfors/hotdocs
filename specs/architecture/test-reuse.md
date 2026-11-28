@@ -35,12 +35,15 @@ exactly
 
     text + "".join(f"\n## Uses: {path}\n\n{doc}" for path, doc in uses)
          + "".join(f"\n## Asset kind: {kind}\n\n{guide}" for kind, guide in kinds)
+         + "".join(f"\n## Test driver: {name}\n\n{guide}" for name, guide in drivers)
 
 with `text` the file's full text as read, `""` when the component has no
 `testing.md`; `uses` each `Uses:` path in order with that file's full
 text; and `kinds` each asset kind the component declares, sorted, with
-its definition's `## Test author guidance` section
-(`specs/architecture/asset-kinds.md`). `SpecBundle` never includes it, so the generator never
+its adapter's `guidance()["test_author"]`, stripped
+(`specs/architecture/asset-kinds.md`); and `drivers` each declared test
+driver, sorted, with its adapter's `guidance()["test_author"]`
+(`specs/architecture/test-drivers.md`). `SpecBundle` never includes it, so the generator never
 sees it.
 
 ## The criterion header
@@ -71,7 +74,7 @@ authored again; nothing else makes a current test stale.
 
 Only when it is shown to be faulty, by one of:
 
-1. **The probe.** `test-probe` reports it not `ok` (`R-VERIFY-019`).
+1. **The probe.** `test-probe` reports it not `ok` (`R-SUPPLY-003`).
 2. **The mutation sandbox.** It passed its criterion but fails when run
    alone in the mutation sandbox (Mutation runs, below): it depends on
    where it runs, not on the code.
@@ -90,22 +93,5 @@ a test still faulty after that leaves its criterion `fail` with
 
 ## Mutation runs
 
-When the baseline fails (`specs/architecture/mutation-runs.md`), each
-test file of the run runs alone in the same sandbox with the same
-300-second timeout. Each file that fails alone is a faulty test: its
-criterion's `result` becomes `fail` with `failure_origin` `"test"` and
-`failure_detail.message` `test fails in the mutation sandbox`, its
-cached file is deleted so the next verification authors it again, and
-the baseline runs again without it. With no file left, nothing more
-runs and `mutation_score` and `mutation_error` are both null. When no
-file fails alone, or the second baseline also fails, `mutation_error` is
-reported as `mutation-runs.md` says.
-
-## Timeouts
-
-`R-VERIFY-014`'s "the whole process tree" is every process descended
-from the run, found by walking parent links (`ps -eo pid=,ppid=` or the
-platform's equivalent) when the timeout fires and killed before the run
-itself. Killing the run's process group is not enough: a descendant
-that started its own session, as a nested verification does, leaves
-the group and outlives the run, busy, with no parent.
+A test that fails alone in the mutation sandbox is faulty; how it is
+found is `specs/architecture/mutation-runs.md`'s "Faulty tests".

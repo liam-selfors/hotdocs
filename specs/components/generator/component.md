@@ -20,7 +20,7 @@ exactly one candidate per invocation.
 
 ## Rationale
 
-`hint_code` is a feature-branch-only exception. `G-CACHE-001`: see `D2`.
+See `D2`, `D64`.
 
 ## Scope
 
@@ -53,17 +53,14 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All `generated-test`, with an injected mock model.
-
 ## Non-functional constraints
 
 See `constraints.md`.
 
 ## Open questions
 
+None.
+
 ## Change log
 
-`D35` onward: see the decisions.
-
-- `D343`: declared assets (R-GEN-015, R-GEN-021); `generator@3.1.0`, `v12`.
-- `D344`: the implicit `python` kind (R-GEN-021); `generator@3.2.0`.
+`D35`, `D343`, `D344`.

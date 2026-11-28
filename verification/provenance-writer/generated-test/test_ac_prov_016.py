@@ -1,12 +1,12 @@
-# hotdocs-criterion: sha256:5b94943a568414afdc08f96ae8d0043890ae3d9a3c71702bedf19801016604a5
+# hotdocs-criterion: sha256:c903394f07a6ef8d3665e93cf7e4e1affc545584036a4dfc6d166a6bdee77ea7
 import json
 import types
 
 import provenance_writer
 
 
-COMPONENT_ID = "comp-nsfoo"
-SLUG = "nsfoo"
+COMPONENT_ID = "comp-foo"
+SLUG = "foo"
 
 
 def field(value, name):
@@ -45,19 +45,19 @@ def _secret_fields():
             {
                 "rule_id": "AWS Access Key",
                 "risk_tier": "high",
-                "file": "gen/nsfoo/config.py",
+                "file": "gen/foo/config.py",
                 "line": 12,
             }
         ],
         "allowed": [
             {
                 "rule_id": "AWS Access Key",
-                "file": "verification/nsfoo/test_x.py",
+                "file": "verification/foo/test_x.py",
                 "line": 3,
             }
         ],
         "unused_allowlist_entries": [
-            {"file": "verification/nsfoo/old.py", "type": "AWS Access Key"}
+            {"file": "verification/foo/old.py", "type": "AWS Access Key"}
         ],
         "notified": False,
         "notification_delivery_error": None,
@@ -65,8 +65,8 @@ def _secret_fields():
     }
 
 
-def _make_inputs(license_scan_result, secret_scan_result):
-    data = {
+def _inputs(license_scan_result, secret_scan_result):
+    return {
         "component_id": COMPONENT_ID,
         "generation_result": {"files": {}},
         "verification_report": None,
@@ -77,13 +77,6 @@ def _make_inputs(license_scan_result, secret_scan_result):
         "attempt_history": [],
         "gate_versions": {},
     }
-    cls = getattr(provenance_writer, "ProvenanceInputs", None)
-    if cls is not None:
-        try:
-            return cls(**data)
-        except Exception:
-            pass
-    return data
 
 
 def _read_manifests(repo_root):
@@ -97,14 +90,15 @@ def _read_manifests(repo_root):
     ]
 
 
-def test_simplenamespace_scan_results_are_written_with_all_fields(tmp_path):
+def test_simplenamespace_scan_results_are_written_with_every_field(tmp_path):
     license_fields = _license_fields()
     secret_fields = _secret_fields()
-    license_ns = types.SimpleNamespace(**_license_fields())
-    secret_ns = types.SimpleNamespace(**_secret_fields())
+    license_ns = types.SimpleNamespace(**license_fields)
+    secret_ns = types.SimpleNamespace(**secret_fields)
 
-    inputs = _make_inputs(license_ns, secret_ns)
-    provenance_writer.write_provenance(COMPONENT_ID, inputs, tmp_path)
+    provenance_writer.write_provenance(
+        COMPONENT_ID, _inputs(license_ns, secret_ns), tmp_path
+    )
 
     for manifest in _read_manifests(tmp_path):
         license_scan = manifest["license_scan"]
@@ -112,28 +106,29 @@ def test_simplenamespace_scan_results_are_written_with_all_fields(tmp_path):
         assert isinstance(license_scan, dict)
         assert isinstance(secret_scan, dict)
         for name, value in license_fields.items():
-            assert name in license_scan, "license_scan lacks " + name
-            assert license_scan[name] == value, "license_scan." + name
+            assert name in license_scan, "license_scan lacks " + repr(name)
+            assert license_scan[name] == value, name
         for name, value in secret_fields.items():
-            assert name in secret_scan, "secret_scan lacks " + name
-            assert secret_scan[name] == value, "secret_scan." + name
+            assert name in secret_scan, "secret_scan lacks " + repr(name)
+            assert secret_scan[name] == value, name
 
 
-class _ScanObject:
+class _AttributeLicenseResult:
     def __init__(self):
         self.blocked = True
-        self._cache = {"hidden": 1}
+        self._cache = {"hidden": "value"}
 
     def describe(self):
-        return "a license scan"
+        return "blocked" if self.blocked else "clean"
 
 
-def test_plain_object_converted_from_public_non_callable_attributes(tmp_path):
-    license_obj = _ScanObject()
+def test_object_converted_from_public_non_callable_attributes_only(tmp_path):
+    license_obj = _AttributeLicenseResult()
     secret_ns = types.SimpleNamespace(**_secret_fields())
 
-    inputs = _make_inputs(license_obj, secret_ns)
-    provenance_writer.write_provenance(COMPONENT_ID, inputs, tmp_path)
+    provenance_writer.write_provenance(
+        COMPONENT_ID, _inputs(license_obj, secret_ns), tmp_path
+    )
 
     for manifest in _read_manifests(tmp_path):
         license_scan = manifest["license_scan"]

@@ -31,4 +31,9 @@ Python code computes no layout and holds no JavaScript. Reading the
 asset is the component's own file, not a second data source under
 `R-DOCS-004`.
 
-Implements: `specs/architecture/cli-conventions.md`
+Every page's only CSS is `comp-ui-style`'s `style_element()`, loaded as
+`specs/architecture/visual-style.md` "Pages" states and written once in
+each page's `<head>` (`R-DOCS-001`); it is the tool's own file, not a
+data source under `R-DOCS-004`.
+
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/visual-style.md`

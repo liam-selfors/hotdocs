@@ -5,8 +5,7 @@ hotdocs author-test <component-id> <criterion-id> --model=<model-id> [--seed=<n>
 ```
 
 - `<criterion-id>` — the acceptance criterion's own id (e.g. `AC-FOO-003`).
-- `--model` — required, same discipline as `generator`'s `--model`: never
-  an implicit default.
+- `--model` — required, never an implicit default.
 
 **Exit codes:**
 

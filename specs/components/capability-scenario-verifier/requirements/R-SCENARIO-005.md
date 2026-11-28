@@ -17,16 +17,17 @@
   `verification/capabilities/<P-id>/compiled/test_<scenario id
   lowercased, `-` as `_`>.py`.
 
-  It then runs `<interpreter> -m pytest -q -p no:cacheprovider <path>`
-  with `repo_root` as the working directory, `PYTHONPATH` set to the
-  code directory (`R-SCENARIO-002`) of every component in the
-  capability's realizing set joined by `os.pathsep`, and a 120-second
-  timeout. Exit code `0` is a `pass`. Any other exit code, a timeout, or
+  It then runs `<interpreter> -m pytest -q -p no:cacheprovider
+  <pytest_args()...> <path>` with `repo_root` as the working directory,
+  `PYTHONPATH` the code directory (`R-SCENARIO-002`) of every component
+  in the capability's realizing set, then `plugin_dir`, joined by
+  `os.pathsep`, the environment's `env_for(repo_root)` variables, and a
+  120-second timeout. Exit code `0` is a `pass`. Any other exit code, a timeout, or
   a failure to start is a `fail`.
 
-  `<interpreter>` is what the `python` adapter's `provision(repo_root)`
-  reports (`D344`), the adapter loaded by path as
-  `specs/architecture/asset-kinds.md`'s Lookup gives and called once per
-  `run_capability_scenarios` call, before its first test runs. With no
-  adapter, or `ok` false, no test runs and each scenario that would run
-  one is a `fail`.
+  The environment is `run-environment`'s
+  `prepare_capability(capability_id, repo_root)`, called once per
+  capability before its first test runs and closed after its last
+  (`D383`), giving the `python` kind's interpreter and the capability's
+  declared test drivers (`D373`). With `ok` false, no test runs and each
+  scenario that would run one is a `fail`.

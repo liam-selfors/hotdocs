@@ -1,7 +1,14 @@
-# hotdocs-criterion: sha256:1f05fa63c152c634354189d392c926a7e7fc0cb0b25ef385cf80b2bc28701caa
+# hotdocs-criterion: sha256:83fe38ad68fd7cd4497ec734b4a53168eaaee3434ca13d1afb3d0c3f880abdd8
+"""AC-SECRET-005: a cache hit on the exact full-scan key is reused verbatim.
+
+Given cache-manager already holds a result for the exact full-scan cache key,
+when a full scan runs with matching inputs, the cached result is returned with
+cache_hit true and exactly the cached matches (even though a fresh scan of the
+current files would find something different), and put is not called.
+"""
+
 import json
 import sys
-import urllib.request
 from pathlib import Path
 
 import secret_scanner
@@ -11,11 +18,28 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-FAKE_CACHE_MANAGER_SOURCE = (
+CACHED_MATCHES = [
+    {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "gen/foo/config.py",
+        "line": 12,
+    }
+]
+
+
+# Fake cache-manager, flat-module shape. It reads its log/state directory from
+# an environment variable so it embeds no temporary-directory path.
+FAKE_CACHE_MANAGER = (
     "import json\n"
     "import os\n"
-    "from dataclasses import dataclass\n"
+    "from dataclasses import dataclass, asdict\n"
+    "from datetime import datetime, timezone\n"
     "from pathlib import Path\n"
+    "\n"
+    "\n"
+    "class SchemaValidationError(ValueError):\n"
+    "    pass\n"
     "\n"
     "\n"
     "@dataclass\n"
@@ -41,118 +65,142 @@ FAKE_CACHE_MANAGER_SOURCE = (
     "        return 0\n"
     "\n"
     "\n"
-    "class SchemaValidationError(ValueError):\n"
-    "    pass\n"
+    "def _dir():\n"
+    "    return Path(os.environ['SECRET_TEST_CACHE_LOG_DIR'])\n"
     "\n"
     "\n"
-    "def _state():\n"
-    "    return Path(os.environ['SS_FAKE_CACHE_STATE'])\n"
+    "def _f(value, name):\n"
+    "    return value[name] if isinstance(value, dict) else getattr(value, name)\n"
     "\n"
     "\n"
-    "def _key(k):\n"
-    "    names = ('spec_bundle_hash', 'gate_inputs_hash', 'gate_version', 'model_pin')\n"
-    "    if isinstance(k, dict):\n"
-    "        return [k[n] for n in names]\n"
-    "    return [getattr(k, n) for n in names]\n"
+    "def _key_dict(cache_key):\n"
+    "    names = ['spec_bundle_hash', 'gate_inputs_hash', 'gate_version', 'model_pin']\n"
+    "    return {n: _f(cache_key, n) for n in names}\n"
     "\n"
     "\n"
-    "def _log(name, record):\n"
-    "    with open(_state() / name, 'a', encoding='utf-8') as fh:\n"
-    "        fh.write(json.dumps(record) + '\\n')\n"
-    "\n"
-    "\n"
-    "def get(cache_key, *, repo_root=None):\n"
-    "    key = _key(cache_key)\n"
-    "    _log('get.log', key)\n"
-    "    hits = _state() / 'hits.json'\n"
-    "    if hits.is_file():\n"
-    "        for entry in json.loads(hits.read_text(encoding='utf-8')):\n"
-    "            if entry['key'] == key:\n"
-    "                return CachedResult(gate_type='secret_scanner', payload=entry['payload'], stored_at='2026-01-01T00:00:00Z')\n"
-    "    return Miss()\n"
-    "\n"
-    "\n"
-    "def put(cache_key, result, *, repo_root=None):\n"
-    "    _log('put.log', {'key': _key(cache_key)})\n"
+    "def _log(line):\n"
+    "    with open(_dir() / 'calls.log', 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(line + '\\n')\n"
     "\n"
     "\n"
     "def now_iso():\n"
-    "    import datetime\n"
-    "    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+    "    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+    "\n"
+    "\n"
+    "def get(cache_key, *, repo_root=None):\n"
+    "    key = _key_dict(cache_key)\n"
+    "    _log('get ' + json.dumps(key, sort_keys=True))\n"
+    "    stored = _dir() / 'stored_key.json'\n"
+    "    if not stored.is_file():\n"
+    "        return Miss()\n"
+    "    if json.loads(stored.read_text(encoding='utf-8')) != key:\n"
+    "        return Miss()\n"
+    "    payload = json.loads((_dir() / 'cached_payload.json').read_text(encoding='utf-8'))\n"
+    "    payload['gate_version'] = key['gate_version']\n"
+    "    return CachedResult(gate_type='secret_scanner', payload=payload,\n"
+    "                        stored_at='2026-01-01T00:00:00Z')\n"
+    "\n"
+    "\n"
+    "def put(cache_key, result, *, repo_root=None):\n"
+    "    key = _key_dict(cache_key)\n"
+    "    _log('put ' + json.dumps(key, sort_keys=True))\n"
+    "    (_dir() / 'stored_key.json').write_text(json.dumps(key, sort_keys=True), encoding='utf-8')\n"
     "\n"
     "\n"
     "def stats(*, repo_root=None):\n"
-    "    return {'entry_count': 0}\n"
+    "    return {'entry_count': 1 if (_dir() / 'stored_key.json').is_file() else 0}\n"
 )
 
 
-def _read_lines(path):
-    if not path.is_file():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def test_ac_secret_005_cache_hit_returns_cached_result_without_put(tmp_path, monkeypatch):
-    monkeypatch.setattr(sys, "dont_write_bytecode", True)
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-
-    def _no_network(*args, **kwargs):
-        raise OSError("network disabled in test")
-
-    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
-
-    repo_root = tmp_path / "repo"
-    state = tmp_path / "state"
-    repo_root.mkdir()
-    state.mkdir()
-    monkeypatch.setenv("SS_FAKE_CACHE_STATE", str(state))
-
-    (repo_root / "specs").mkdir()
-    (repo_root / "specs" / "README.md").write_text("hello specs\n", encoding="utf-8")
-    (repo_root / "src").mkdir()
-    (repo_root / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+def _build_repo(repo_root: Path):
+    (repo_root / "specs" / "components" / "foo").mkdir(parents=True)
+    (repo_root / "specs" / "components" / "foo" / "component.md").write_text(
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "A plain component.\n",
+        encoding="utf-8",
+    )
+    (repo_root / "gen" / "foo").mkdir(parents=True)
+    (repo_root / "gen" / "foo" / "app.py").write_text(
+        "def hello():\n    return 'hello'\n", encoding="utf-8"
+    )
     fake_dir = repo_root / "gen" / "cache-manager"
     fake_dir.mkdir(parents=True)
-    (fake_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE, encoding="utf-8")
+    (fake_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER, encoding="utf-8")
 
-    # Run 1: miss -> fresh scan, put called; learn the exact full-scan key.
+
+def _read_calls(log_dir: Path):
+    log = log_dir / "calls.log"
+    if not log.is_file():
+        return []
+    return [ln for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+
+def test_cache_hit_on_exact_key_is_reused_without_put(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.setenv("SECRET_TEST_CACHE_LOG_DIR", str(log_dir))
+
+    _build_repo(repo_root)
+
+    # Phase 1: no entry yet -> a fresh scan, which puts under the exact key.
     first = secret_scanner.scan(repo_root)
     assert field(first, "cache_hit") is False
-    gets = _read_lines(state / "get.log")
-    assert len(gets) >= 1
-    key = gets[-1]
-    assert key[3] == "none"
-    assert key[0].startswith("sha256:")
-    assert key[1].startswith("sha256:")
-    assert key[2].startswith("secret_scanner@")
-    assert len(_read_lines(state / "put.log")) >= 1
-    fresh_matches = field(first, "matches")
+    assert list(field(first, "matches")) == []
+    first_calls = _read_calls(log_dir)
+    assert any(c.startswith("put ") for c in first_calls), first_calls
+    stored_key = json.loads((log_dir / "stored_key.json").read_text(encoding="utf-8"))
+    assert stored_key["model_pin"] == "none"
+    assert stored_key["spec_bundle_hash"].startswith("sha256:")
+    assert stored_key["gate_inputs_hash"].startswith("sha256:")
 
-    # Seed a cached result for that exact key, differing from a fresh scan.
-    cached_matches = [
-        {"rule_id": "Cached Fake Rule", "risk_tier": "high", "file": "gen/nowhere/cached.py", "line": 99}
-    ]
-    assert cached_matches != fresh_matches
-    payload = {
+    # The cache now holds, for that exact key, a result that differs from
+    # what a fresh scan of the (clean) current files would find.
+    cached_payload = {
         "scope": "full",
-        "gate_version": key[2],
+        "gate_version": stored_key["gate_version"],
         "flagged": True,
-        "matches": cached_matches,
+        "matches": CACHED_MATCHES,
         "allowed": [],
         "unused_allowlist_entries": [],
         "notified": False,
         "notification_delivery_error": None,
         "cache_hit": False,
     }
-    (state / "hits.json").write_text(json.dumps([{"key": key, "payload": payload}]), encoding="utf-8")
-    (state / "put.log").unlink()
-    (state / "get.log").unlink()
+    (log_dir / "cached_payload.json").write_text(
+        json.dumps(cached_payload), encoding="utf-8"
+    )
+    (log_dir / "calls.log").write_text("", encoding="utf-8")
 
-    # Run 2: matching inputs -> cache hit reused.
+    # Phase 2: same inputs -> same key -> hit, reused verbatim, no put.
     second = secret_scanner.scan(repo_root)
+    second_calls = _read_calls(log_dir)
 
-    gets2 = _read_lines(state / "get.log")
-    assert gets2 and gets2[-1] == key
+    gets = [c for c in second_calls if c.startswith("get ")]
+    assert gets, second_calls
+    assert json.loads(gets[0][len("get "):]) == stored_key
+    assert not any(c.startswith("put ") for c in second_calls), second_calls
+
     assert field(second, "cache_hit") is True
-    assert list(field(second, "matches")) == cached_matches
-    assert _read_lines(state / "put.log") == []
+    assert list(field(second, "matches")) == CACHED_MATCHES
+    assert field(second, "flagged") is True
+    assert field(second, "scope") == "full"
+
+    as_dict = second.to_dict()
+    assert as_dict["cache_hit"] is True
+    assert as_dict["matches"] == CACHED_MATCHES

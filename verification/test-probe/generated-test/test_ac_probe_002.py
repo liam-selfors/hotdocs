@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:632cccf2c2e733fb0f8bc74635af78b32763d7b97dacc158cce271f7052be164
+# hotdocs-criterion: sha256:716fde0bcf2be4e7e24e42cae51a1bc1f8784e8eb47d5a5b07c125ee1c037e81
 import test_probe
 
 
@@ -22,7 +22,7 @@ def test_undefined_name_is_the_only_finding():
 
     findings = field(report, "findings")
     assert isinstance(findings, list)
-    assert len(findings) == 1, findings
+    assert len(findings) == 1
 
     finding = findings[0]
     assert field(finding, "kind") == "undefined_name"
@@ -31,13 +31,16 @@ def test_undefined_name_is_the_only_finding():
     assert field(finding, "message") == "undefined name 'tmp_dir'"
 
 
-def test_unused_import_gives_no_finding_and_no_stub_run():
+def test_unused_import_gives_no_finding():
     report = test_probe.probe(SOURCE, {}, "slugify")
-
     findings = field(report, "findings")
     kinds = [field(f, "kind") for f in findings]
     assert kinds == ["undefined_name"]
-    assert all("os" not in field(f, "message") for f in findings)
+    messages = [field(f, "message") for f in findings]
+    assert not any("os" in m and "imported" in m for m in messages)
 
+
+def test_no_stub_run_after_error():
+    report = test_probe.probe(SOURCE, {}, "slugify")
     assert field(report, "tests_run") == 0
     assert field(report, "tests_reached") == 0

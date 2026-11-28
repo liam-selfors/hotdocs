@@ -1,11 +1,12 @@
 # provenance manifest
 
-The schema is `SPEC_GUIDELINES.md` §7 itself, reproduced here only for
-convenience, not as a second definition:
+The manifest's definition: its top-level keys are exactly these
+(`D377`).
 
 ```json
 {
   "spec_bundle_hash": "sha256:...",
+  "spec_bundle_parts": {"spec": "sha256:...", "dependency_code": "sha256:..."},
   "model_pin": "claude-sonnet-5",
   "prompt_version": "v1",
   "retry_feedback": null,
@@ -25,8 +26,10 @@ convenience, not as a second definition:
   "secret_scan": { "...": "a SecretScanResult" },
   "assets": [{"kind": "javascript", "path": "static/app.js", "definition_sha256": "sha256:...",
               "adapter_sha256": "sha256:...", "versions": {"node": "24.1.0"},
-              "lockfile_sha256": null}]
+              "lockfile_sha256": null}],
+  "drivers": []
 }
 ```
 
-`assets` is the `verification_report`'s, verbatim (`R-PROV-022`).
+`assets` and `drivers` are the `verification_report`'s, verbatim
+(`R-PROV-022`).

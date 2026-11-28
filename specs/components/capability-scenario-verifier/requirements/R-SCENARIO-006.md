@@ -12,10 +12,11 @@
   `environments/python/requirements.lock`, when it exists, and last,
   always, the UTF-8 of
   `json.dumps(versions, sort_keys=True, separators=(",", ":"))`,
-  `versions` being what the `python` adapter's `provision(repo_root)`
-  reports, the full Python version and packages fingerprint (`D345`),
-  `{}` with no adapter or `ok` false (called once per key, loaded as
-  `R-SCENARIO-005` loads it), so an environment change re-runs scenarios.
+  `versions` mapping `"python"` to the `python` asset entry's `versions`
+  and each declared driver's name to its entry's `versions`, from
+  `prepare_capability(capability_id, repo_root)` (called once per key;
+  `{}` for an entry it could not provision), so an environment change
+  re-runs scenarios (`D345`, `D373`).
 
   It hashes actual code, not `spec_bundle_hash`, which would reopen the
   blind spot this component closes (`D2`).
@@ -26,5 +27,5 @@
   (sorted ids), `capability_scenario_report` (this capability's report),
   `model` (string or `null`), and `seed`. Only `run_capability_gates`
   writes it, on a miss. `gate_version` is the module constant
-  `GATE_VERSION`, `"capability_scenario_verifier@2.2.0"`; any change to
+  `GATE_VERSION`, `"capability_scenario_verifier@3.0.0"`; any change to
   `R-SCENARIO-005`'s execution or this hash MUST raise it here.

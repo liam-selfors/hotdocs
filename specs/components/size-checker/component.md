@@ -14,7 +14,7 @@ sealed: false
 ## Purpose
 
 Measures each component of a spec corpus against the size caps of
-`SPEC_GUIDELINES.md` §4, per component, per unit file and per `Purpose`
+`specs/architecture/size-caps.md`, per component, per unit file and per `Purpose`
 section, and reports each cap exceeded, and each component crowding
 several caps at once, as a finding for the linter's report.
 
@@ -48,8 +48,7 @@ None.
 
 ## Acceptance criteria
 
-See `acceptance/`. All `generated-test`, over small corpora written to a
-temporary `repo_root`.
+See `acceptance/`.
 
 ## Non-functional constraints
 
@@ -61,5 +60,4 @@ None.
 
 ## Change log
 
-- `D242`: split out of `spec-linter`, with `R-LINT-012`, `022`, `023` and
-  `025` renumbered `R-SIZE-001`–`004`.
+`D242`.

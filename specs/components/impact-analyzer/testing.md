@@ -62,3 +62,8 @@ the simplest lint failure for a precondition-error case.
 
 Call `impact_analyzer.main(argv)` in-process and read stdout and stderr
 with pytest's `capsys`; `<repo>` in an argument list is `str(<repo>)`.
+
+So any corpus it is run on, a test's included, must lint clean under
+`SPEC_GUIDELINES.md` and `spec-linter`: for example, each requirement
+or guarantee file opens with the heading `# <its id>`, equal to its
+filename's stem, and states itself with an RFC 2119 keyword.

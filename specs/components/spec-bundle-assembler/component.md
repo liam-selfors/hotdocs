@@ -25,8 +25,7 @@ implementation, not two.
 **In scope:** reading and concatenating the right files for a given
 component id; computing `spec_bundle_hash`; the cold-vs-hint distinction
 at the bundle level; including each dependency's `Purpose` text
-alongside its `interface/` content (`R-ASSEMBLE-010`), so a generating
-model sees not just a dependency's contract but what it's for.
+alongside its `interface/` content (`R-ASSEMBLE-010`).
 
 **Out of scope:** calling any model (`generator`'s job); deciding *whether*
 to regenerate (`impact-analyzer`'s job); verifying anything.
@@ -51,34 +50,15 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: generated-test`, over the synthetic corpus
-`testing.md` defines.
-
 ## Non-functional constraints
 
 See `constraints.md`.
 
 ## Open questions
 
-- ~~Hash raw bytes or a normalized form?~~ Resolved: raw bytes.
-  Markdown whitespace can be meaningful, so no normalization is safe;
-  `R-LINT-019` rejects trailing whitespace instead.
+None.
 
 ## Change log
 
-Each decision holds its full rationale.
-
-- Initial draft; first implementation hand-written, `depends_on` gains
-  `comp-graph-query-engine`.
-- `D37`: `dependency_usage` (`R-ASSEMBLE-011`). `D60`: a sealed
-  dependency's card reads its `source_path`.
-- `D69`: the target's own Rationale, Open questions and Change log are
-  excluded (`R-ASSEMBLE-001`).
-- `D100`: `CriterionBundle.dependency_interfaces`. `D101`: corpus
-  structure comes only from `spec-linter` (`R-ASSEMBLE-012`).
-- `D109`, `D118`: cold-generated; the hand-written suite retired.
-  `D114`: one level of transitive types (`R-ASSEMBLE-013`).
-- `D177`: `AC-ASSEMBLE-011`'s failure traced to its test's fixture.
-- `D207`: the synthetic corpus every criterion uses is stated once, in
-  the library interface.
-- `D343`: asset kinds (`R-ASSEMBLE-016`, `AC-ASSEMBLE-019`-`021`).
+`D37`, `D60`, `D69`, `D100`, `D101`, `D109`, `D114`, `D118`, `D177`,
+`D207`, `D343`, `D379`.

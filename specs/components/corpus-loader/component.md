@@ -20,9 +20,7 @@ the corpus reads the same structure.
 
 ## Rationale
 
-Split out of `spec-linter`, which had reached its size cap, because the
-linter, both checkers and the bundle assembler read the same model
-(`D242`).
+See `D242`.
 
 ## Scope
 
@@ -49,8 +47,7 @@ See `interface/data/`.
 
 ## Acceptance criteria
 
-See `acceptance/`. All `generated-test`, over small corpora written to a
-temporary `repo_root`.
+See `acceptance/`.
 
 ## Non-functional constraints
 
@@ -62,4 +59,4 @@ None.
 
 ## Change log
 
-- `D242`: split out of `spec-linter`.
+`D242`.

@@ -25,9 +25,7 @@ if needed, and returns that path. `build_corpus_graph` writes nothing.
 `graph-query-engine` is loaded by file path (`R-GRAPH-010`), then used
 on a fresh in-memory DuckDB connection: `INSTALL yaml FROM community`
 (an error from it ignored), `LOAD yaml`, then `load_views(con,
-repo_root)`. Tests use the real `graph-query-engine` and write no
-stand-in for it: with no `gen/graph-query-engine/` under a test's
-`repo_root` it comes from the tool root.
+repo_root)`.
 
 A test corpus therefore uses the files those views read, each opening
 with a `---` YAML frontmatter block holding at least `id`, `title` and

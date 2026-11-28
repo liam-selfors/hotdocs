@@ -1,11 +1,7 @@
 # R-GQE-008
 
 **R-GQE-008** — The `decision_lineage` view MUST return one row per
-  decision record: `id` and `last_ratified_commit` only (`D74`) —
-  `status`/`supersedes`/`builds_on` live in `nodes`/`edges` directly,
-  the single canonical home for anything graph-shaped;
-  `last_ratified_commit` has no equivalent column there and stays
-  here, the one fact only decision records carry:
+  decision record: `id` and `last_ratified_commit` only (`D74`):
 
 ```sql
 CREATE OR REPLACE VIEW decision_lineage AS
@@ -16,8 +12,3 @@ FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
   FROM read_text('{repo_root}/specs/decisions/*.md')) AS d
 WHERE fm != '';
 ```
-
-  `R-CITE-004`/`030` MUST query `nodes`/`edges` for `status`/
-  `supersedes`/`builds_on`, and this view only for
-  `last_ratified_commit` when a temporal comparison is actually
-  needed (`decision-drift-detector`'s own job, not spec-linter's).

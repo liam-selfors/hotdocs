@@ -25,8 +25,7 @@ carry the findings of `citation-checker` and `size-checker`, and
 re-exporting `corpus-loader`'s `load_corpus`.
 
 **Out of scope:** generation; verifying generated code's actual
-behavior. **Mostly free of model calls and judgment** — only
-R-LINT-015 is a deliberate exception, about meaning.
+behavior.
 
 ## Definitions
 
@@ -48,16 +47,13 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All `generated-test`, except the two `llm-judge` criteria for
-R-LINT-015's meaning check.
-
 ## Non-functional constraints
 
 See `constraints.md`.
 
 ## Open questions
 
-None. See `verification/spec-linter/BOOTSTRAP.md` for resolved history.
+None.
 
 ## Change log
 

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:b3b189c12ad3403c03acc8d1a9202d5d129b1d2b1715b0870196414a98ce3b27
+# hotdocs-criterion: sha256:71b50c855d1690ddb8e881d7e756040fa7721f2610db22dd9df3d945ab68c1de
 import json
 
 import pytest
@@ -13,12 +13,16 @@ PIN = "m"
 STORED_AT = "2026-01-01T00:00:00Z"
 
 
-@pytest.fixture(autouse=True)
-def _no_remote_store(monkeypatch):
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-
-def _put_entry(repo_root):
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.chdir(root)
     key = cache_manager.CacheKey(
         spec_bundle_hash=SBH,
         gate_inputs_hash=GIH,
@@ -29,58 +33,63 @@ def _put_entry(repo_root):
         gate_type="generator",
         payload={
             "component_id": "comp-foo",
-            "model": "m",
+            "model": "anthropic:claude-sonnet-5",
             "prompt_version": "1",
             "files": {"foo.py": "x = 1\n"},
         },
         stored_at=STORED_AT,
     )
-    cache_manager.put(key, result, repo_root=repo_root)
+    cache_manager.put(key, result, repo_root=root)
+    got = cache_manager.get(key, repo_root=root)
+    assert not isinstance(got, cache_manager.Miss)
+    assert field(got, "gate_type") == "generator"
+    return root
 
 
-def _inspect_argv(repo_root, model_pin=PIN):
-    return [
-        "inspect",
-        "--spec-bundle-hash=" + SBH,
-        "--gate-inputs-hash=" + GIH,
-        "--gate-version=" + GV,
-        "--model-pin=" + model_pin,
-        "--repo-root=" + str(repo_root),
-    ]
-
-
-def _stdout_json(capsys):
-    out = capsys.readouterr().out
+def _parse_stdout(out):
     lines = [line for line in out.splitlines() if line.strip()]
     assert len(lines) == 1, out
     return json.loads(lines[0])
 
 
-def test_inspect_hit_reports_provenance_fields_without_payload(tmp_path, capsys):
-    _put_entry(tmp_path)
+def _full_args(repo_root):
+    return [
+        "--spec-bundle-hash=" + SBH,
+        "--gate-inputs-hash=" + GIH,
+        "--gate-version=" + GV,
+        "--model-pin=" + PIN,
+        "--repo-root=" + str(repo_root),
+    ]
+
+
+def test_inspect_hit_reports_provenance_without_payload(repo_root, capsys):
     capsys.readouterr()
-
-    code = cache_manager.main(_inspect_argv(tmp_path))
-
+    code = cache_manager.main(["inspect"] + _full_args(repo_root))
+    out = capsys.readouterr().out
     assert code == 0
-    doc = _stdout_json(capsys)
-    assert "payload" not in doc
+    doc = _parse_stdout(out)
     assert doc == {
         "result": "hit",
         "gate_type": "generator",
         "stored_at": STORED_AT,
     }
+    assert "payload" not in doc
 
 
-def test_inspect_miss_for_other_model_pin(tmp_path, capsys):
-    _put_entry(tmp_path)
+def test_inspect_miss_on_other_model_pin(repo_root, capsys):
     capsys.readouterr()
-
-    code = cache_manager.main(_inspect_argv(tmp_path, model_pin="other"))
-
+    args = [
+        "inspect",
+        "--spec-bundle-hash=" + SBH,
+        "--gate-inputs-hash=" + GIH,
+        "--gate-version=" + GV,
+        "--model-pin=other",
+        "--repo-root=" + str(repo_root),
+    ]
+    code = cache_manager.main(args)
+    out = capsys.readouterr().out
     assert code == 0
-    doc = _stdout_json(capsys)
-    assert doc == {"result": "miss"}
+    assert _parse_stdout(out) == {"result": "miss"}
 
 
 @pytest.mark.parametrize(
@@ -91,40 +100,18 @@ def test_inspect_miss_for_other_model_pin(tmp_path, capsys):
         ["purge"],
     ],
 )
-def test_usage_errors_return_2(argv, capsys):
-    code = cache_manager.main(argv)
-    assert code == 2
+def test_usage_errors_return_2(repo_root, argv):
+    assert cache_manager.main(list(argv)) == 2
 
 
-@pytest.mark.parametrize(
-    "drop_prefix",
-    [
-        "--spec-bundle-hash=",
-        "--gate-inputs-hash=",
-        "--gate-version=",
-        "--model-pin=",
-    ],
-)
-def test_inspect_missing_required_flag_returns_2(tmp_path, capsys, drop_prefix):
-    _put_entry(tmp_path)
-    capsys.readouterr()
-    argv = [a for a in _inspect_argv(tmp_path) if not a.startswith(drop_prefix)]
-    assert len(argv) == 5
-
-    code = cache_manager.main(argv)
-
-    assert code == 2
+@pytest.mark.parametrize("drop_index", [0, 1, 2, 3])
+def test_inspect_missing_required_flag_returns_2(repo_root, drop_index):
+    args = _full_args(repo_root)
+    del args[drop_index]
+    assert cache_manager.main(["inspect"] + args) == 2
 
 
-def test_inspect_abbreviated_model_flag_returns_2(tmp_path, capsys):
-    _put_entry(tmp_path)
-    capsys.readouterr()
-    argv = [
-        ("--model=" + PIN) if a == "--model-pin=" + PIN else a
-        for a in _inspect_argv(tmp_path)
-    ]
-    assert "--model=m" in argv
-
-    code = cache_manager.main(argv)
-
-    assert code == 2
+def test_inspect_abbreviated_model_flag_returns_2(repo_root):
+    args = _full_args(repo_root)
+    args[3] = "--model=" + PIN
+    assert cache_manager.main(["inspect"] + args) == 2

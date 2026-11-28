@@ -1,25 +1,16 @@
-# hotdocs-criterion: sha256:58428462c781cce69246ed2d6377a7bffbfb3377efc8170d93c12b3c6cebef59
+# hotdocs-criterion: sha256:78849f136e5cc6d58b821ba74ccc090299337cb1f9db727e75fe49900d9a8d68
 import re
-from pathlib import Path
 
 import test_author
 
 
 EXPECTED_LINE = (
-    "- Every list-valued frontmatter field (`owners`, `depends_on`, `realizes`, "
-    "`uses_var`) uses YAML flow style, such as `owners: [a, b]`, never block style "
-    "(`- a` lines), which the frontmatter reader does not read as a list."
+    "- Every list-valued frontmatter field (`owners`, `depends_on`, `realizes`, `uses_var`) "
+    "uses YAML flow style, such as `owners: [a, b]`, never block style (`- a` lines), "
+    "which the frontmatter reader does not read as a list."
 )
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
-VALID_TEST_FILE = (
-    "import widget_maker\n"
-    "\n"
-    "\n"
-    "def test_widget():\n"
-    "    assert widget_maker.make() is not None\n"
-)
+GOOD_TEST = "def test_placeholder():\n    assert True\n"
 
 
 def field(value, name):
@@ -27,7 +18,7 @@ def field(value, name):
 
 
 def write_probe_stand_in(repo_root, log_path):
-    probe_dir = Path(repo_root) / "gen" / "test-probe"
+    probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
         "class _Report:\n"
@@ -46,11 +37,7 @@ def write_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "GATE_VERSION = 'test-probe@1.4.0'\n"
-        "\n"
-        "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None):\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
         "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
         "        fh.write('probe\\n')\n"
         "    return _Report()\n"
@@ -63,15 +50,15 @@ def make_bundle():
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget\nWhen make() is called\nThen a widget is returned",
-        "requirement_text": "R-WIDGET-MAKER-001 - make() MUST return a widget.",
-        "interface": "make() -> Widget",
+        "criterion_text": "Given a widget, When made, Then it exists.",
+        "requirement_text": "R-WIDGET-MAKER-001 The maker MUST make widgets.",
+        "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
 
 
-def test_prompt_holds_flow_style_list_rule(tmp_path, monkeypatch):
+def test_prompt_holds_flow_style_block(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
@@ -83,10 +70,10 @@ def test_prompt_holds_flow_style_list_rule(tmp_path, monkeypatch):
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = NONCE_RE.findall(prompt)[-1]
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + VALID_TEST_FILE
+            + GOOD_TEST
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -100,9 +87,6 @@ def test_prompt_holds_flow_style_list_rule(tmp_path, monkeypatch):
         make_bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert result is not None
     assert field(result, "model_call_error") is None
     assert len(prompts) >= 1
-
-    first_prompt = prompts[0]
-    assert EXPECTED_LINE in first_prompt.splitlines()
+    assert EXPECTED_LINE in prompts[0].splitlines()

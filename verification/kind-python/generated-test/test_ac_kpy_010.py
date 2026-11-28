@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:d3c6437f576318fe0b3131070c89ef5709af38e30dae854c1ec5809f496f6974
+# hotdocs-criterion: sha256:3fff891ffc3caafc8033031e3304be42d0a0c92e5777ff27fe943a86687d9be4
 import shutil
 from pathlib import Path
 
@@ -7,7 +7,7 @@ import pytest
 import kind_python
 
 
-CALC_SOURCE = (
+CALC_SRC = (
     '"""Calculator: a < b and True are prose here."""\n'
     "\n"
     "\n"
@@ -21,10 +21,10 @@ CALC_SOURCE = (
     "    def inner(x):\n"
     "        return x * 2 / 4\n"
     "\n"
-    "    return (a and b or inner(a + b - 1) // 3 % 2, True, False)\n"
+    "    return (a and b) or inner(a + b - 1) // 3 % 2, True, False\n"
 )
 
-PKG_INIT_SOURCE = (
+PKG_INIT_SRC = (
     "def sign(n):\n"
     "    return -1 if n < 0 else 1\n"
 )
@@ -41,53 +41,50 @@ EXPECTED_CALC_AFTER_11 = (
 EXPECTED_PKG_AFTER_20 = "def sign(n):\n    return -1 if n >= 0 else 1"
 
 
-def write_file(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def build_fixture(root):
-    d = root / "demo-code"
-    d.mkdir(parents=True)
-    write_file(d / "calc.py", CALC_SOURCE)
-    write_file(d / "pkg" / "__init__.py", PKG_INIT_SOURCE)
-    return d
+def _build_fixture(root):
+    _write(root / "calc.py", CALC_SRC)
+    _write(root / "pkg" / "__init__.py", PKG_INIT_SRC)
+    return root
 
 
 def test_ac_kpy_010(tmp_path, monkeypatch):
     monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
 
-    src = build_fixture(tmp_path / "src")
+    src = _build_fixture(tmp_path / "src" / "demo")
 
-    # Scenario 1: apply site 11 on a copy of the fixture.
-    d = tmp_path / "one" / "demo-code"
-    d.parent.mkdir(parents=True)
+    # First scenario: apply site 11 (in calc.py).
+    d = tmp_path / "one" / "demo"
     shutil.copytree(src, d)
-    sites = kind_python.strength_sites(d)
     pkg_before = (d / "pkg" / "__init__.py").read_bytes()
-
+    sites = kind_python.strength_sites(d)
     kind_python.apply_site(d, sites[11])
-
     assert (d / "calc.py").read_text(encoding="utf-8") == EXPECTED_CALC_AFTER_11
     assert (d / "pkg" / "__init__.py").read_bytes() == pkg_before
 
-    # Scenario 2: a fresh copy and its sites; apply site 20.
-    d2 = tmp_path / "two" / "demo-code"
-    d2.parent.mkdir(parents=True)
+    # Second scenario: fresh copy, apply site 20 (in pkg/__init__.py).
+    d2 = tmp_path / "two" / "demo"
     shutil.copytree(src, d2)
     sites2 = kind_python.strength_sites(d2)
     calc_before = (d2 / "calc.py").read_bytes()
-
     kind_python.apply_site(d2, sites2[20])
-
-    assert (d2 / "pkg" / "__init__.py").read_text(encoding="utf-8") == EXPECTED_PKG_AFTER_20
+    assert (
+        (d2 / "pkg" / "__init__.py").read_text(encoding="utf-8")
+        == EXPECTED_PKG_AFTER_20
+    )
     assert (d2 / "calc.py").read_bytes() == calc_before
 
-    # Mismatched sites raise ValueError and leave calc.py unchanged.
+    # Invalid sites raise ValueError and leave calc.py unchanged.
     with pytest.raises(ValueError):
         kind_python.apply_site(d2, dict(sites2[0], index=99))
     assert (d2 / "calc.py").read_bytes() == calc_before
 
     with pytest.raises(ValueError):
-        kind_python.apply_site(d2, dict(sites2[0], description="calc.py:5: x -> y"))
+        kind_python.apply_site(
+            d2, dict(sites2[0], description="calc.py:5: x -> y")
+        )
     assert (d2 / "calc.py").read_bytes() == calc_before

@@ -1,207 +1,203 @@
-# hotdocs-criterion: sha256:34701952ae252aa7d8e64885505487f9b733d0c6213ae6e6562646e2cee89456
-"""AC-LINT-019: a spec line ending in two trailing spaces yields a
-fail-severity R-LINT-019 finding naming that line."""
+# hotdocs-criterion: sha256:b051479f62ab625193a4e15905f71078755f2f186453538124ef2bc83a05a81c
+from pathlib import Path
 
 import spec_linter
 
-from pathlib import Path
 
-import pytest
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
+
+
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-FENCE = "```"
-
-PRODUCT_FOO = "\n".join([
-    "---",
-    "id: P-FOO",
-    "title: Foo works",
-    "status: draft",
-    "owners: [team-a]",
-    "---",
-    "",
-    "# Foo works",
-    "",
-    "## Purpose",
-    "",
-    "A foo can be made.",
-    "",
-    "### CS-FOO-001",
-    "Covers: P-FOO",
-    "Kind: generated-test",
-    "",
-    FENCE + "gherkin",
-    "Given nothing",
-    "When a foo is made",
-    "Then it exists",
-    FENCE,
-    "",
-])
-
-COMPONENT_MD_LINES = [
-    "---",
-    "id: comp-foo",
-    "title: Foo",
-    "status: draft",
-    "owners: [team-a]",
-    "depends_on: []",
-    "realizes: [P-FOO]",
-    "sealed: false",
-    "---",
-    "",
-    "# Foo",
-    "",
-    "## Purpose",
-    "",
-    "Makes a foo.",
-    "",
-    "## Scope",
-    "",
-    "**In scope:** making a foo. **Out of scope:** everything else.",
-    "",
-    "## Definitions",
-    "",
-    "No deltas from `specs/glossary.md`.",
-    "",
-    "## Behavior",
-    "",
-    "See `requirements/`.",
-    "",
-    "## Interfaces",
-    "",
-    "See `interface/`.",
-    "",
-    "## Data",
-    "",
-    "None.",
-    "",
-    "## Acceptance criteria",
-    "",
-    "See `acceptance/`.",
-    "",
-    "## Non-functional constraints",
-    "",
-    "See `constraints.md`.",
-    "",
-    "## Open questions",
-    "",
-    "None.",
-    "",
-    "## Change log",
-    "",
-    "- Initial draft.",
-]
-
-REQUIREMENT = "\n".join([
-    "# R-FOO-001",
-    "",
-    '**R-FOO-001** \u2014 `make_foo()` MUST return the string `"foo"`.',
-    "",
-])
-
-LIBRARY = "\n".join([
-    "# Library",
-    "",
-    "One module file, `foo.py`.",
-    "",
-    FENCE,
-    "make_foo() -> str",
-    FENCE,
-    "",
-])
-
-ACCEPTANCE = "\n".join([
-    "# AC-FOO-001",
-    "",
-    "Covers: R-FOO-001",
-    "Kind: generated-test",
-    "",
-    FENCE + "gherkin",
-    "Given nothing",
-    "When make_foo() is called",
-    'Then the result is "foo"',
-    FENCE,
-    "",
-])
-
-CONSTRAINTS_LINES = [
-    "# Foo \u2014 Non-Functional Constraints",
-    "",
-    "- **Pure.** No I/O.",
-]
-
-COMPONENT_REL = "specs/components/foo/component.md"
-CONSTRAINTS_REL = "specs/components/foo/constraints.md"
+TARGET_REL = 'specs/components/foo/requirements/R-FOO-001.md'
 
 
-def write(root, rel, text):
-    path = root / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def _norm(p):
+    return str(p).replace('\\', '/')
 
 
-def build_clean_corpus(root, component_lines=None, constraints_lines=None):
-    write(root, "specs/product/foo.md", PRODUCT_FOO)
-    write(root, COMPONENT_REL,
-          "\n".join(component_lines or COMPONENT_MD_LINES) + "\n")
-    write(root, "specs/components/foo/requirements/R-FOO-001.md", REQUIREMENT)
-    write(root, "specs/components/foo/interface/library.md", LIBRARY)
-    write(root, "specs/components/foo/acceptance/AC-FOO-001.md", ACCEPTANCE)
-    write(root, CONSTRAINTS_REL,
-          "\n".join(constraints_lines or CONSTRAINTS_LINES) + "\n")
-
-
-def lint_findings(root):
-    report = spec_linter.lint(None, root)
-    return report, list(field(report, "findings"))
-
-
-def rule_findings(findings, rule_id):
-    return [f for f in findings if field(f, "rule_id") == rule_id]
-
-
-def norm(path_value):
-    return str(path_value).replace("\\", "/")
+def _r019(report):
+    return [f for f in field(report, 'findings') if field(f, 'rule_id') == 'R-LINT-019']
 
 
 def test_clean_corpus_has_no_trailing_whitespace_finding(tmp_path):
-    build_clean_corpus(tmp_path)
-    _, findings = lint_findings(tmp_path)
-    assert rule_findings(findings, "R-LINT-019") == []
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    write_corpus(repo_root)
+    report = spec_linter.lint(None, repo_root)
+    assert _r019(report) == []
 
 
-@pytest.mark.parametrize(
-    "rel_path,line_number",
-    [
-        (CONSTRAINTS_REL, 3),   # body line of a unit file
-        (COMPONENT_REL, 3),     # a frontmatter line ("title: Foo")
-    ],
-)
-def test_trailing_two_spaces_is_fail_finding_naming_line(
-        tmp_path, rel_path, line_number):
-    component_lines = list(COMPONENT_MD_LINES)
-    constraints_lines = list(CONSTRAINTS_LINES)
-    if rel_path == CONSTRAINTS_REL:
-        constraints_lines[line_number - 1] += "  "
-    else:
-        component_lines[line_number - 1] += "  "
-    build_clean_corpus(tmp_path, component_lines, constraints_lines)
+def test_trailing_two_spaces_reports_fail_finding_on_that_line(tmp_path):
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    changed = (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.  \n'
+    )
+    write_corpus(repo_root, {TARGET_REL: changed})
 
-    # Sanity: exactly one line in the corpus ends in trailing whitespace.
-    raw = (tmp_path / rel_path).read_text(encoding="utf-8").splitlines()
-    assert raw[line_number - 1].endswith("  ")
+    report = spec_linter.lint(None, repo_root)
+    findings = _r019(report)
 
-    report, findings = lint_findings(tmp_path)
-    hits = rule_findings(findings, "R-LINT-019")
-    assert len(hits) == 1, findings
-    finding = hits[0]
-    assert field(finding, "severity") == "fail"
-    assert norm(field(finding, "file")).endswith(rel_path)
-    assert field(finding, "line") == line_number
-    assert field(report, "hard_failures") >= 1
+    assert len(findings) == 1, findings
+    finding = findings[0]
+    assert field(finding, 'severity') == 'fail'
+    file_value = _norm(field(finding, 'file'))
+    assert file_value == TARGET_REL or file_value.endswith('/' + TARGET_REL)
+    assert field(finding, 'line') == 3
+    assert field(report, 'hard_failures') >= 1
 
-    rc = spec_linter.main(["--repo-root=" + str(tmp_path)])
-    assert rc == 1
+
+def test_trailing_spaces_in_frontmatter_also_fail(tmp_path):
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    rel = 'specs/components/foo/component.md'
+    original = CLEAN_CORPUS[rel]
+    changed = original.replace('title: Foo\n', 'title: Foo  \n', 1)
+    assert changed != original
+    write_corpus(repo_root, {rel: changed})
+
+    report = spec_linter.lint(None, repo_root)
+    findings = _r019(report)
+
+    assert len(findings) == 1, findings
+    finding = findings[0]
+    assert field(finding, 'severity') == 'fail'
+    file_value = _norm(field(finding, 'file'))
+    assert file_value == rel or file_value.endswith('/' + rel)
+    assert field(finding, 'line') == 3
+
+
+def test_cli_exits_1_on_trailing_whitespace(tmp_path, capsys):
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    changed = (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.  \n'
+    )
+    write_corpus(repo_root, {TARGET_REL: changed})
+    code = spec_linter.main(['--format=json', '--repo-root=' + str(repo_root)])
+    assert code == 1

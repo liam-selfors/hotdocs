@@ -1,5 +1,7 @@
-# hotdocs-criterion: sha256:a87f095969ec821f9eaf4ce4fd8518e8b945658e3b617c36a5c44379223e38ab
+# hotdocs-criterion: sha256:d9b8a26c3111846ce76313275f3e3a05085dd10c335fa2fa79e4ef0dce718cb3
 import inspect
+
+import pytest
 
 import kind_javascript
 
@@ -15,12 +17,17 @@ def test_gate_version_constant():
 
 
 def test_asset_error_is_exception_class():
-    asset_error = kind_javascript.AssetError
-    assert inspect.isclass(asset_error)
-    assert issubclass(asset_error, Exception) is True
+    assert inspect.isclass(kind_javascript.AssetError)
+    assert issubclass(kind_javascript.AssetError, Exception) is True
 
 
-def test_asset_error_str_is_message():
+def test_asset_error_message():
     err = kind_javascript.AssetError("x")
-    assert isinstance(err, Exception)
     assert str(err) == "x"
+    assert isinstance(err, Exception)
+
+
+def test_asset_error_can_be_raised_and_caught():
+    with pytest.raises(kind_javascript.AssetError) as excinfo:
+        raise kind_javascript.AssetError("x")
+    assert str(excinfo.value) == "x"

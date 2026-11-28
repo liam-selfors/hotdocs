@@ -4,4 +4,4 @@
   `requirements/`, `interface/` — including `interface/data/` — or
   `acceptance/`, or its `constraints.md`) that carries a YAML frontmatter
   block at all. Frontmatter lives only on a component's `component.md`
-  (D1, `SPEC_GUIDELINES.md` §2); a unit file's identity is its filename.
+  (D1, `specs/architecture/spec-frontmatter.md`); a unit file's identity is its filename.

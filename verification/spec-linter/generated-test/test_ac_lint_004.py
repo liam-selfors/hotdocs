@@ -1,225 +1,257 @@
-# hotdocs-criterion: sha256:04cd083c597ce5b4dae419064d0b5e848acf3c6e9a8a4984a1eda445f1890872
-import json
-from pathlib import Path
+# hotdocs-criterion: sha256:07655f08ec2d95c39fc020ac3aba6201a3ee1f47cf4a57c9f507ca2cb0b303e8
+"""AC-LINT-004: a depends_on cycle (A -> B -> A) is a fail-severity
+R-LINT-004 finding naming both components by their comp-<slug> ids."""
 
 import spec_linter
+
+
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
+
+
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PRODUCT_FOO = (
-    "---\n"
-    "id: P-FOO\n"
-    "title: Foo works\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Foo works\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "A foo can be made.\n"
-    "\n"
-    "### CS-FOO-001\n"
-    "Covers: P-FOO\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When a foo is made\n"
-    "Then it exists\n"
-    "```\n"
-)
-
-COMPONENT_BODY = (
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Makes a thing.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "**In scope:** making a thing. **Out of scope:** everything else.\n"
-    "\n"
-    "## Definitions\n"
-    "\n"
-    "No deltas from `specs/glossary.md`.\n"
-    "\n"
-    "## Behavior\n"
-    "\n"
-    "See `requirements/`.\n"
-    "\n"
-    "## Interfaces\n"
-    "\n"
-    "See `interface/`.\n"
-    "\n"
-    "## Data\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Acceptance criteria\n"
-    "\n"
-    "See `acceptance/`.\n"
-    "\n"
-    "## Non-functional constraints\n"
-    "\n"
-    "See `constraints.md`.\n"
-    "\n"
-    "## Open questions\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Change log\n"
-    "\n"
-    "- Initial draft.\n"
-)
-
-FOO_COMPONENT = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "depends_on: []\n"
-    "realizes: [P-FOO]\n"
-    "sealed: false\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    + COMPONENT_BODY
-)
-
-
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def write_clean_corpus(root):
-    specs = root / "specs"
-    write(specs / "product" / "foo.md", PRODUCT_FOO)
-    foo = specs / "components" / "foo"
-    write(foo / "component.md", FOO_COMPONENT)
-    write(
-        foo / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** \u2014 `make_foo()` MUST return the string `\"foo\"`.\n",
-    )
-    write(
-        foo / "interface" / "library.md",
-        "# Library\n\nOne module file, `foo.py`.\n\n```\nmake_foo() -> str\n```\n",
-    )
-    write(
-        foo / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven nothing\nWhen make_foo() is called\nThen the result is \"foo\"\n```\n",
-    )
-    write(
-        foo / "constraints.md",
-        "# Foo \u2014 Non-Functional Constraints\n\n- **Pure.** No I/O.\n",
+def _component_md(comp_id, title, depends_on):
+    return (
+        '---\n'
+        'id: ' + comp_id + '\n'
+        'title: ' + title + '\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: [' + depends_on + ']\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# ' + title + '\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a ' + title.lower() + '.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a thing. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
     )
 
 
-def write_sealed_component(root, slug, depends_on):
-    comp_dir = root / "specs" / "components" / slug
-    upper = slug.upper()
-    deps = "[" + ", ".join(depends_on) + "]"
-    write(
-        comp_dir / "component.md",
-        "---\n"
-        "id: comp-" + slug + "\n"
-        "title: " + slug.capitalize() + "\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: " + deps + "\n"
-        "sealed: true\n"
-        "source_path: legacy/" + slug + "/\n"
-        "---\n"
-        "\n"
-        "# " + slug.capitalize() + "\n"
-        + COMPONENT_BODY,
-    )
-    rid = "R-" + upper + "-001"
-    acid = "AC-" + upper + "-001"
-    write(
-        comp_dir / "requirements" / (rid + ".md"),
-        "# " + rid + "\n\n**" + rid + "** \u2014 `make()` MUST return the string `\"x\"`.\n",
-    )
-    write(
-        comp_dir / "interface" / "library.md",
-        "# Library\n\n```\nmake() -> str\n```\n",
-    )
-    write(
-        comp_dir / "acceptance" / (acid + ".md"),
-        "# " + acid + "\n\nCovers: " + rid + "\nKind: generated-test\n\n"
-        "```gherkin\nGiven nothing\nWhen make() is called\nThen the result is \"x\"\n```\n",
-    )
-    write(
-        comp_dir / "constraints.md",
-        "# " + slug.capitalize() + " \u2014 Non-Functional Constraints\n\n- **Pure.** No I/O.\n",
-    )
+CYCLE_CHANGES = {
+    'specs/components/foo/component.md': _component_md('comp-foo', 'Foo', 'comp-bar'),
+    'specs/components/bar/component.md': _component_md('comp-bar', 'Bar', 'comp-foo'),
+    'specs/components/bar/requirements/R-BAR-001.md': (
+        '# R-BAR-001\n'
+        '\n'
+        '**R-BAR-001** — `make_bar()` MUST return the string `"bar"`.\n'
+    ),
+    'specs/components/bar/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `bar.py`.\n'
+        '\n'
+        '```\n'
+        'make_bar() -> str\n'
+        '```\n'
+    ),
+    'specs/components/bar/acceptance/AC-BAR-001.md': (
+        '# AC-BAR-001\n'
+        '\n'
+        'Covers: R-BAR-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_bar() is called\n'
+        'Then the result is "bar"\n'
+        '```\n'
+    ),
+    'specs/components/bar/constraints.md': (
+        '# Bar — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
 
 
-def cycle_findings(report):
+def _cycle_findings(report):
     return [
         f for f in field(report, "findings")
         if field(f, "rule_id") == "R-LINT-004"
     ]
 
 
-def names_both(finding):
-    text = str(field(finding, "message")) + " " + str(field(finding, "file"))
-    return "comp-alpha" in text and "comp-beta" in text
+def test_clean_corpus_has_no_cycle_finding(tmp_path):
+    write_corpus(tmp_path)
+    report = spec_linter.lint(None, tmp_path)
+    assert _cycle_findings(report) == []
 
 
-def test_cycle_between_two_components_is_fail_finding_naming_both(tmp_path):
-    write_clean_corpus(tmp_path)
-    write_sealed_component(tmp_path, "alpha", ["comp-beta"])
-    write_sealed_component(tmp_path, "beta", ["comp-alpha"])
+def test_two_component_cycle_is_fail_finding_naming_both(tmp_path):
+    write_corpus(tmp_path, CYCLE_CHANGES)
 
     report = spec_linter.lint(None, tmp_path)
 
-    findings = cycle_findings(report)
-    assert findings, "expected an R-LINT-004 finding, got: " + repr(field(report, "findings"))
-    matching = [
-        f for f in findings
-        if field(f, "severity") == "fail" and names_both(f)
+    cycle = _cycle_findings(report)
+    assert cycle, "expected an R-LINT-004 finding, got: " + repr(field(report, "findings"))
+
+    naming_both = [
+        f for f in cycle
+        if field(f, "severity") == "fail"
+        and "comp-foo" in field(f, "message")
+        and "comp-bar" in field(f, "message")
     ]
-    assert matching, "no fail R-LINT-004 finding naming comp-alpha and comp-beta: " + repr(findings)
-    for f in matching:
-        assert "comp-alpha" in str(field(f, "message"))
-        assert "comp-beta" in str(field(f, "message"))
+    assert naming_both, (
+        "expected a fail-severity R-LINT-004 finding naming comp-foo and comp-bar, got: "
+        + repr(cycle)
+    )
     assert field(report, "hard_failures") >= 1
-
-
-def test_acyclic_dependency_has_no_cycle_finding(tmp_path):
-    write_clean_corpus(tmp_path)
-    write_sealed_component(tmp_path, "alpha", ["comp-beta"])
-    write_sealed_component(tmp_path, "beta", [])
-
-    report = spec_linter.lint(None, tmp_path)
-
-    assert cycle_findings(report) == []
-
-
-def test_cli_reports_cycle_and_exits_one(tmp_path, capsys):
-    write_clean_corpus(tmp_path)
-    write_sealed_component(tmp_path, "alpha", ["comp-beta"])
-    write_sealed_component(tmp_path, "beta", ["comp-alpha"])
-
-    code = spec_linter.main(["--format=json", "--repo-root=" + str(tmp_path)])
-    out = capsys.readouterr().out
-
-    assert code == 1
-    data = json.loads(out)
-    matching = [
-        f for f in data["findings"]
-        if f["rule_id"] == "R-LINT-004"
-        and f["severity"] == "fail"
-        and "comp-alpha" in f["message"]
-        and "comp-beta" in f["message"]
-    ]
-    assert matching, "no matching finding in CLI JSON: " + out
-    assert data["summary"]["hard_failures"] >= 1

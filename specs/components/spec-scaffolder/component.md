@@ -23,7 +23,7 @@ content.
 ## Scope
 
 **In scope:** `hotdocs decision new`, `decision ratify`,
-`decision record-commit`, `component new` and `kind new`, and the library functions
+`decision record-commit`, `component new`, `kind new` and `capability new`, and the library functions
 behind them, all acting on files under a given `repo_root`.
 
 **Out of scope:** writing a decision's reasoning or a component's
@@ -52,10 +52,6 @@ None.
 
 See `acceptance/`.
 
-All criteria are `kind: generated-test`: each builds a temporary
-`repo_root` on disk, and the commit-recording criterion a real git
-repository, which the compiled step grammar cannot express.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -66,8 +62,4 @@ None.
 
 ## Change log
 
-- `D299`: initial spec.
-- `D346`: `new_kind` and `hotdocs kind new` scaffold a new asset kind
-  for a person or an agent to complete.
-- `D364`: `new_capability` and `hotdocs capability new`
-  (`R-SCAFFOLD-009`).
+`D299`, `D346`, `D364`.

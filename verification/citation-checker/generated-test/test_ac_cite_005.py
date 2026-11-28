@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:606ef5684f2e447afde6ac8faa64849a2cc71edae07d62cf8822d58f1d426045
+# hotdocs-criterion: sha256:6bb015a6e2d3ce70146b0d223bb52f417eb8111f4bf2f3c3323cd992481913c8
 from pathlib import Path
 
 import citation_checker
@@ -8,54 +8,60 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _decision(doc_id, builds_on):
+def decision_source(doc_id, title, builds_on):
     return (
         "---\n"
         + "id: " + doc_id + "\n"
-        + "title: Decision " + doc_id + "\n"
+        + "title: " + title + "\n"
         + "status: draft\n"
-        + "owners: [team-a]\n"
+        + "owners: [pipeline-team]\n"
         + "builds_on: [" + ", ".join(builds_on) + "]\n"
         + "---\n"
         + "\n"
-        + "# " + doc_id + "\n"
+        + "# " + doc_id + " " + title + "\n"
         + "\n"
         + "A decision record used as a test fixture.\n"
     )
 
 
-def test_ac_cite_005_only_unresolved_non_historical_builds_on_is_flagged(tmp_path):
-    repo_root = tmp_path / "repo"
+def build_corpus(repo_root):
     specs = repo_root / "specs"
-
-    _write(
+    write(
         specs / "glossary.md",
-        "# Glossary\n\n- **Fixture term** — a term used only by this fixture.\n",
+        "# Glossary\n"
+        "\n"
+        "- **Fixture term** — a term used only by this test fixture.\n",
+    )
+    write(
+        specs / "decisions" / "D200.md",
+        decision_source("D200", "Dangling builds on", ["D999"]),
+    )
+    write(
+        specs / "decisions" / "D201.md",
+        decision_source("D201", "Builds on informal decision", ["D7"]),
     )
 
-    # First record: builds_on names D99, which has no specs/decisions/ file.
-    _write(specs / "decisions" / "D100.md", _decision("D100", ["D99"]))
-    # Second record: builds_on names D7, one of D1-D14, never formalized as files.
-    _write(specs / "decisions" / "D101.md", _decision("D101", ["D7"]))
 
-    assert not (specs / "decisions" / "D99.md").exists()
-    assert not (specs / "decisions" / "D7.md").exists()
+def test_ac_cite_005_builds_on_unresolved_flagged_but_d1_to_d14_exempt(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_corpus(repo_root)
 
     findings = citation_checker.check(repo_root)
+    assert isinstance(findings, list)
 
-    cite005 = [f for f in findings if field(f, "rule_id") == "R-CITE-005"]
-    files = [field(f, "file") for f in cite005]
+    cite5 = [f for f in findings if field(f, "rule_id") == "R-CITE-005"]
 
-    assert len(cite005) == 1, findings
-    assert files == ["specs/decisions/D100.md"], findings
-    assert "specs/decisions/D101.md" not in files
-
-    only = cite005[0]
+    assert len(cite5) == 1, cite5
+    only = cite5[0]
+    assert field(only, "file").replace("\\", "/") == "specs/decisions/D200.md"
     assert field(only, "severity") in ("fail", "warn")
     assert isinstance(field(only, "line"), int)
-    assert isinstance(field(only, "message"), str)
+
+    flagged_files = [field(f, "file").replace("\\", "/") for f in cite5]
+    assert "specs/decisions/D201.md" not in flagged_files

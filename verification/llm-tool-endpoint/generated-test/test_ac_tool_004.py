@@ -1,8 +1,6 @@
-# hotdocs-criterion: sha256:b82c26fcc97c2727f8656139450bd2f86e487d3b66b69cad558ebc921ab549ff
+# hotdocs-criterion: sha256:30a6a52d97a7041f0667bdfc1323b39f3c43d573ece4535aac6fc51a02743473
 import json
 import urllib.request
-
-import pytest
 
 import llm_tool_endpoint
 
@@ -11,9 +9,9 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class _FakeReply:
-    def __init__(self, document):
-        self._data = json.dumps(document).encode("utf-8")
+class _Reply:
+    def __init__(self, doc):
+        self._data = json.dumps(doc).encode("utf-8")
 
     def __enter__(self):
         return self
@@ -25,62 +23,65 @@ class _FakeReply:
         return self._data
 
 
-@pytest.fixture
-def loop_env(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    work = tmp_path / "work"
-    work.mkdir()
-    monkeypatch.chdir(work)
+def _decode_body(request):
+    data = request.data
+    if data is None:
+        return None
+    if isinstance(data, (bytes, bytearray)):
+        data = data.decode("utf-8")
+    return json.loads(data)
+
+
+def test_ac_tool_004(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-    return work
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
 
-
-def test_ac_tool_004_error_results_returned_and_loop_continues(loop_env, monkeypatch):
-    replies = [
-        {
-            "id": "msg_1",
-            "type": "message",
-            "role": "assistant",
-            "model": "claude-opus-5-5",
-            "content": [
-                {"type": "tool_use", "id": "a", "name": "boom", "input": {}},
-                {"type": "tool_use", "id": "b", "name": "nope", "input": {}},
-                {"type": "tool_use", "id": "c", "name": "boom", "input": "text"},
-            ],
-            "stop_reason": "tool_use",
-        },
-        {
-            "id": "msg_2",
-            "type": "message",
-            "role": "assistant",
-            "model": "claude-opus-5-5",
-            "content": [{"type": "text", "text": "done"}],
-            "stop_reason": "end_turn",
-        },
-    ]
-    requests = []
+    first_reply = {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-opus-5-5",
+        "content": [
+            {"type": "tool_use", "id": "a", "name": "boom", "input": {}},
+            {"type": "tool_use", "id": "b", "name": "nope", "input": {}},
+            {"type": "tool_use", "id": "c", "name": "boom", "input": "text"},
+        ],
+        "stop_reason": "tool_use",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    second_reply = {
+        "id": "msg_2",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-opus-5-5",
+        "content": [{"type": "text", "text": "done"}],
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    scripted = [first_reply, second_reply]
+    recorded = []
 
     def fake_urlopen(request, *args, **kwargs):
-        body = request.data
-        if isinstance(body, bytes):
-            body = body.decode("utf-8")
-        requests.append(
+        recorded.append(
             {
                 "url": request.full_url,
-                "headers": dict(request.header_items()),
-                "body": json.loads(body) if body else None,
+                "headers": {k.lower(): v for k, v in request.header_items()},
+                "body": _decode_body(request),
             }
         )
-        index = len(requests) - 1
-        assert index < len(replies), "more requests than scripted replies"
-        return _FakeReply(replies[index])
+        if len(recorded) > len(scripted):
+            raise AssertionError("more requests than scripted replies")
+        return _Reply(scripted[len(recorded) - 1])
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
     tools = [
         {
             "name": "boom",
-            "description": "Always fails.",
+            "description": "explodes",
             "input_schema": {"type": "object", "properties": {}},
         }
     ]
@@ -94,24 +95,34 @@ def test_ac_tool_004_error_results_returned_and_loop_continues(loop_env, monkeyp
         "sys", "go", "anthropic:claude-opus-5-5", tools, execute
     )
 
-    assert calls == [("boom", {})]
-    assert len(requests) == 2
+    # execute was called exactly once, for the valid "boom" call
+    assert len(calls) == 1
+    assert calls[0][0] == "boom"
+    assert calls[0][1] == {}
 
-    second_messages = requests[1]["body"]["messages"]
-    last = second_messages[-1]
+    assert len(recorded) == 2
+    second_body = recorded[1]["body"]
+    messages = second_body["messages"]
+    last = messages[-1]
     assert last["role"] == "user"
     results = last["content"]
     assert isinstance(results, list)
     assert len(results) == 3
-    for item in results:
-        assert item["type"] == "tool_result"
-    assert [r["tool_use_id"] for r in results] == ["a", "b", "c"]
-    assert [r["content"] for r in results] == [
-        "tool error: ValueError: bad",
-        "unknown tool: nope",
-        "arguments must be a JSON object",
+
+    expected = [
+        ("a", "tool error: ValueError: bad"),
+        ("b", "unknown tool: nope"),
+        ("c", "arguments must be a JSON object"),
     ]
-    for item in results:
-        assert item.get("is_error") is True
+    for block, (tool_use_id, text) in zip(results, expected):
+        assert block["type"] == "tool_result"
+        assert block["tool_use_id"] == tool_use_id
+        content = block["content"]
+        if isinstance(content, list):
+            content = "".join(
+                part.get("text", "") for part in content if isinstance(part, dict)
+            )
+        assert content == text
+        assert block.get("is_error") is True
 
     assert field(result, "stop") == "end_turn"

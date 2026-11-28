@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:9f3d320d2dbecaf840ba7eaf8a9db4b300abb8cd1686520d3786814f096c9e2e
+# hotdocs-criterion: sha256:3bbdacdfa29d5166222fcd64e72f19a01d063f0e0251616d2b071350a3379fe2
 import io
 import urllib.error
 
@@ -10,38 +10,37 @@ def field(value, name):
 
 
 def test_ac_endpoint_003_http_429_is_rate_limit_without_retry(tmp_path, monkeypatch):
-    # complete() writes its call log under .hotdocs/calls/ in the current
-    # directory; keep that inside a fresh temporary directory.
-    monkeypatch.chdir(tmp_path)
+    # Keep the call log and any config discovery inside a fresh directory.
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
 
-    calls = []
+    call_log = tmp_path / "backend_calls.log"
 
     def mock_backend(prompt, model, **params):
-        calls.append((prompt, model, dict(params)))
+        with open(call_log, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
         raise urllib.error.HTTPError(
             "https://example.invalid/v1/messages",
             429,
             "Too Many Requests",
             {},
-            io.BytesIO(b'{"error": "rate limited"}'),
+            io.BytesIO(b'{"error": "vendor says slow down"}'),
         )
 
-    model = "anthropic:claude-sonnet-5"
-    response = llm_endpoint.complete("hello", model, backend=mock_backend)
+    response = llm_endpoint.complete(
+        "hello", "anthropic:claude-sonnet-5", backend=mock_backend
+    )
 
-    # Exactly one call: no internal retry loop.
-    assert len(calls) == 1
+    # Exactly one call was made to the backend: no internal retry loop.
+    assert call_log.is_file(), "mock backend was never called"
+    lines = [line for line in call_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == 1, "expected exactly one backend call, got " + repr(len(lines))
 
-    # Text is null on failure.
+    # The failure is structured data, not a boolean.
     assert field(response, "text") is None
-
-    # The failure is structured data, with the exact category.
     error = field(response, "model_call_error")
     assert error is not None
     assert not isinstance(error, bool)
-    category = field(error, "category")
-    assert category == "rate_limit"
-
-    # Still no second call after the response has been built.
-    assert len(calls) == 1
+    assert field(error, "category") == "rate_limit"

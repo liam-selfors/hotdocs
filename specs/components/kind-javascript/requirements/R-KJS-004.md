@@ -13,5 +13,4 @@
   `javascript environment: node --version failed`.
 - Otherwise `ok` true, `reason` `""`, `versions` `{"node": "<x.y.z>"}`.
 
-`lockfile_sha256` is always `None`. `repo_root` is not read: the kind
-has no packages and no environment directory.
+`lockfile_sha256` is always `None`. `repo_root` is not read.

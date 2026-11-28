@@ -1,7 +1,5 @@
-# hotdocs-criterion: sha256:3bd4ff41770ce4487532f0fab29e81e8abf2360d10338dbee0d6234bcafb6dc4
-import os
-import stat
-import sys
+# hotdocs-criterion: sha256:fa775f0e0bb0c3b20454927d38e580139db34efa8450212bfde1ebb1d35a1b17
+import subprocess
 import urllib.request
 
 import pytest
@@ -9,73 +7,100 @@ import pytest
 import llm_endpoint
 
 
-def _install_call_traps(tmp_path, monkeypatch):
-    """Record any attempt to reach a network or the claude command."""
-    log_path = tmp_path / "call_attempts.log"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+@pytest.fixture
+def isolated(tmp_path, monkeypatch):
+    """Fresh cwd, no VAR_HOTDOCS_CONFIG, and recorders that note any call attempt."""
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    attempts = []
 
     def fake_urlopen(*args, **kwargs):
-        with open(log_path, "a") as fh:
-            fh.write("urlopen\n")
-        raise AssertionError("urlopen must not be called")
+        attempts.append(("urlopen", args, kwargs))
+        raise AssertionError("no HTTP call may be attempted")
+
+    real_run = subprocess.run
+
+    def fake_run(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args")
+        text = " ".join(cmd) if isinstance(cmd, (list, tuple)) else str(cmd)
+        if "claude" in text:
+            attempts.append(("subprocess", args, kwargs))
+            raise AssertionError("no claude command may be run")
+        return real_run(*args, **kwargs)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    script = bin_dir / "claude"
-    source = (
-        "#!" + sys.executable + "\n"
+    # A fake `claude` first on PATH that records if it is ever invoked.
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "claude_calls.log"
+    script = bindir / "claude"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
         "import sys\n"
-        "with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
-        "    fh.write('claude ' + ' '.join(sys.argv[1:]) + '\\n')\n"
-        "sys.exit(1)\n"
+        "with open(" + repr(str(log)) + ", 'a') as f:\n"
+        "    f.write(' '.join(sys.argv[1:]) + '\\n')\n"
     )
-    script.write_text(source)
-    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    return log_path
+    script.chmod(0o755)
+    import os
+
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
+
+    return {"dir": workdir, "attempts": attempts, "log": log}
 
 
-def _fresh_cwd(tmp_path, monkeypatch, name):
-    work = tmp_path / name
-    work.mkdir()
-    monkeypatch.chdir(work)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    return work
+def _assert_no_call(env):
+    assert env["attempts"] == []
+    assert not env["log"].exists() or env["log"].read_text() == ""
 
 
-def test_unmatched_bare_name_without_config_raises_usage_error(tmp_path, monkeypatch):
-    work = _fresh_cwd(tmp_path, monkeypatch, "work")
-    assert not (work / "hotdocs.toml").exists()
-    log_path = _install_call_traps(tmp_path, monkeypatch)
-
+def test_unmatched_bare_name_without_config_raises_usage_error(isolated):
+    assert not (isolated["dir"] / "hotdocs.toml").exists()
     with pytest.raises(llm_endpoint.ModelResolutionError):
-        llm_endpoint.complete("Say hello.", "gpt-5")
+        llm_endpoint.complete("hello", "gpt-5")
+    _assert_no_call(isolated)
 
-    assert not log_path.exists(), log_path.read_text()
+
+def test_injected_backend_bypasses_resolution(isolated):
+    def backend(prompt, model, **params):
+        return {
+            "text": "ok",
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
+
+    result = llm_endpoint.complete("hello", "gpt-5", backend=backend)
+    assert field(result, "model") == "gpt-5"
+    assert field(result, "text") == "ok"
+    assert field(result, "model_call_error") is None
+    _assert_no_call(isolated)
 
 
-def test_openai_compatible_without_base_url_raises_usage_error(tmp_path, monkeypatch):
-    work = _fresh_cwd(tmp_path, monkeypatch, "work")
-    (work / "hotdocs.toml").write_text(
+def test_openai_compatible_without_base_url_raises_usage_error(isolated):
+    (isolated["dir"] / "hotdocs.toml").write_text(
         "[llm]\n"
         'provider = "openai-compatible"\n'
         'model = "my-local-model"\n'
     )
-    log_path = _install_call_traps(tmp_path, monkeypatch)
-
     with pytest.raises(llm_endpoint.ModelResolutionError):
-        llm_endpoint.complete("Say hello.", "my-local-model")
+        llm_endpoint.complete("hello", "my-local-model")
+    _assert_no_call(isolated)
 
-    assert not log_path.exists(), log_path.read_text()
 
-
-def test_invalid_config_raises_same_usage_error(tmp_path, monkeypatch):
-    work = _fresh_cwd(tmp_path, monkeypatch, "work")
-    (work / "hotdocs.toml").write_text("[llm\nprovider = = broken\n")
-    log_path = _install_call_traps(tmp_path, monkeypatch)
-
+def test_invalid_config_raises_same_usage_error(isolated):
+    (isolated["dir"] / "hotdocs.toml").write_text(
+        "[llm\n"
+        "provider = = not valid toml\n"
+    )
     with pytest.raises(llm_endpoint.ModelResolutionError):
-        llm_endpoint.complete("Say hello.", "my-local-model")
-
-    assert not log_path.exists(), log_path.read_text()
+        llm_endpoint.complete("hello", "my-local-model")
+    _assert_no_call(isolated)

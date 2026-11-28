@@ -11,12 +11,12 @@ depends_on: []
 ## Purpose
 
 How a test of `verifier-orchestrator` builds the synthetic corpus and
-the stand-ins `verify` runs against, and how a test run reaches a
-declared asset (`specs/architecture/asset-kinds.md`, `D343`).
+the stand-ins `verify` and its parts run against, and how a test run
+reaches a declared asset (`specs/architecture/asset-kinds.md`, `D343`).
 
 ## Rules
 
-A test plants a fake dependency at the path `verify` loads it from:
+A test plants a fake dependency at the path `verify` or `test-supply` loads it from:
 `<repo_root>/gen/spec-bundle-assembler/spec_bundle_assembler.py`,
 `<repo_root>/gen/test-probe/test_probe.py`, or
 `<repo_root>/pipeline/criterion-compiler/criterion_compiler.py`. A fixture
@@ -38,7 +38,8 @@ has no fixture for errors the whole criterion (`D326`). Test functions
 for a fixture's own suite are written only inside string literals.
 
 A `test-probe` stand-in defines `probe(test_source, criterion_bundle,
-module_name, *, timeout=60.0)` returning an object with `ok` (bool),
+module_name, **kwargs)`; `test-supply` passes `interpreter`, `assets` and
+`drivers` as keywords (`R-SUPPLY-003`). It returns an object with `ok` (bool),
 `findings` (a list of dicts with `kind`, `severity`, `line` and
 `message`) and `to_dict()`. A fixture that does not concern probing
 plants one returning `ok` true with no findings, so every test runs.
@@ -55,10 +56,10 @@ sibling `gen/` directory resolves to the tree the criterion run used.
 
 A `spec-bundle-assembler` stand-in defines
 `assemble_criterion(component_id, criterion_id, repo_root)`, the only
-assembler function `verify` calls. Its return value, a `CriterionBundle`
-or a mapping with its keys, is the bundle `verify` hashes for
-`R-VERIFY-019`, passes to `test_author` and passes to `test-probe`'s
-`probe`. A test that needs a cached file's correct header plants such a
+assembler function `verify` and `test-supply` call. Its return value, a
+`CriterionBundle` or a mapping with its keys, is the bundle `test-supply`
+hashes for the criterion header (`R-SUPPLY-001`), passes to `test_author`
+and passes to `test-probe`'s `probe`. A test that needs a cached file's correct header plants such a
 stand-in with known `criterion_text`, `requirement_text`, `interface`,
 `glossary` and `testing` and writes the first line as
 `# hotdocs-criterion: sha256:` followed by the SHA-256 hex of
@@ -82,7 +83,8 @@ appending to a file the test controls.
 A `generated-test` criterion's file runs as
 `<interpreter> -m pytest <file>`, `<interpreter>` the one the `python`
 adapter's `provision` reported (`D344`), with the working directory
-`repo_root` and `PYTHONPATH` set to `gen/<slug>/` (`R-VERIFY-001`). Its
+`repo_root` and `PYTHONPATH` set to `gen/<slug>/` then the run
+environment's `plugin_dir` (`R-VERIFY-001`, `R-VERIFY-020`). Its
 `result` is `pass` exactly when that run exits `0`, and `fail`
 otherwise. The mutation score and interface drift change only the
 overall verdict, never a criterion's `result`. A fixture plants
@@ -96,29 +98,14 @@ stand-in's failing finding therefore carries `"severity": "error"`.
 
 ## Assets
 
-**The `asset_runner` plugin.** Each `verify` call writes a fresh
-temporary directory `<plug>` holding only `hotdocs_asset_runner.py`.
-Every pytest run of a criterion, baseline or mutant gets
-`-p hotdocs_asset_runner`, `<plug>` as the last `PYTHONPATH` entry, and
-the environment variable `HOTDOCS_ASSETS`: a JSON list with one object
-per declared asset, in declaration order,
-`{"path": <declared path>, "file": <absolute path of that asset in the code being verified>, "adapter": <absolute path of the adapter module found by Lookup>}`,
-and `[]` when the component declares none. The code being verified is
-`gen/<slug>/` for a criterion run and `<tmp>/gen/<slug>/` for a
-mutation run. The plugin defines the function-scoped fixture
-`asset_runner`, a function of one `path`: for the entry whose `path`
-equals it, it loads the module at `adapter` with
-`importlib.util.spec_from_file_location` and returns
-`module.asset_runner(Path(file))`; any other `path` raises
-`KeyError` with the message
-`asset_runner: <repr of path> is not a declared asset (declared: <each
-entry's path, joined by ", ", or none>)` (`D369`). It reads `HOTDOCS_ASSETS` when the fixture is
-requested, and imports nothing from `hotdocs`.
+**The plugin.** `run-environment` provisions every kind and driver
+and writes the plugin that gives each run the `asset_runner` fixture
+(`specs/architecture/run-environment.md`, `D383`); a verifier test
+reaches it only through `verify`.
 
 **A fake kind.** A test concerning assets plants a kind needing no
-program, never `javascript`: `<repo_root>/specs/architecture/asset-kind-fake.md`,
-frontmatter then the seven `## ` sections of asset-kinds.md's "The
-definition", each with one line of text, and
+program, never `javascript`: `<repo_root>/specs/architecture/asset-kind-fake.md`
+(any text), and
 `<repo_root>/gen/kind-fake/kind_fake.py`, its adapter. The component
 declares `assets: [fake:data/table.txt]` in its `component.md`
 frontmatter and writes `gen/<slug>/data/table.txt` as the two lines

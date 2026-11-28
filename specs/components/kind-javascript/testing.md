@@ -22,3 +22,6 @@ Catch failures with `pytest.raises(kind_javascript.AssetError)` and
 compare `str(excinfo.value)` exactly where a criterion gives the
 message. Compare `run` results with `==` against the exact values given.
 Never start `node` yourself.
+
+All are `kind: generated-test`, calling the module's functions on
+JavaScript files a test writes under `tmp_path`.

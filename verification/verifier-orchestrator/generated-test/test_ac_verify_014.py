@@ -1,13 +1,22 @@
-# hotdocs-criterion: sha256:138d81cb52eacc335c9c06e508b6c9dd73be6ca7860f5712bce66a9d218b4a29
+# hotdocs-criterion: sha256:1e1dcc1f10f271b05b84837170316f16214b51f36e935d940f7e76f748104493
+"""AC-VERIFY-014 / R-VERIFY-013.
+
+Two repo_roots each hold a component with the same slug (`widget`) but
+different code. `verify` runs against each in turn in one process; each
+report's `interface_drift` and compiled-criterion result must reflect its
+own repo_root's code, never a module cached from the other repo_root.
+"""
+
 import shutil
 from pathlib import Path
 
 import verifier_orchestrator
 
 
-SLUG = "twinslug"
-COMPONENT_ID = "comp-twinslug"
-MODULE = "twinslug"
+COMPONENT_ID = "comp-widget"
+SLUG = "widget"
+MODULE = "widget"
+CRITERION_ID = "AC-WIDGET-001"
 
 
 def field(value, name):
@@ -19,219 +28,179 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-CODE_A = (
-    "class _Box(dict):\n"
-    "    def __getattr__(self, name):\n"
-    "        if name in self:\n"
-    "            return self[name]\n"
-    "        raise AttributeError(name)\n"
+def live_root():
+    return (
+        Path(verifier_orchestrator.__file__).resolve().parents[1]
+        / "spec-bundle-assembler"
+    ).resolve().parents[1]
+
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-widget\n"
+    "title: Widget\n"
+    "status: draft\n"
+    "owners: [test-team]\n"
+    "depends_on: []\n"
+    "realizes: [P-WIDGET]\n"
+    "---\n"
     "\n"
+    "# Widget\n"
     "\n"
-    "def twin_value():\n"
-    "    return _Box(value=1)\n"
+    "## Purpose\n"
+    "\n"
+    "Computes a widget value.\n"
 )
 
-CODE_B = (
-    "class _Box(dict):\n"
-    "    def __getattr__(self, name):\n"
-    "        if name in self:\n"
-    "            return self[name]\n"
-    "        raise AttributeError(name)\n"
+CAPABILITY_MD = (
+    "---\n"
+    "id: P-WIDGET\n"
+    "title: Widget capability\n"
+    "status: draft\n"
+    "owners: [test-team]\n"
+    "---\n"
     "\n"
+    "# Widget capability\n"
     "\n"
-    "def other_value():\n"
-    "    return _Box(value=2)\n"
+    "Widgets can be computed.\n"
 )
 
-GENERATED_TEST = (
-    "import " + MODULE + "\n"
+REQUIREMENT_MD = (
+    "# R-WIDGET-001\n"
     "\n"
-    "\n"
-    "def test_twin_value():\n"
-    "    assert " + MODULE + ".twin_value().value == 1\n"
+    "**R-WIDGET-001** - `compute(x)` MUST return an object whose `value`\n"
+    "is twice `x`; `describe(x)` MUST return a description of `x`.\n"
 )
 
-PROBE_SOURCE = (
+LIBRARY_MD = (
+    "# Library\n"
+    "\n"
+    "```\n"
+    "compute(x)\n"
+    "describe(x)\n"
+    "```\n"
+    "\n"
+    "`compute` returns an object with attribute `value`.\n"
+)
+
+ACCEPTANCE_MD = (
+    "# AC-WIDGET-001\n"
+    "\n"
+    "Covers: R-WIDGET-001\n"
+    "Kind: compiled\n"
+    "\n"
+    "```gherkin\n"
+    "Given a n is 2\n"
+    "When compute is invoked with [2]\n"
+    "Then value equals 4\n"
+    "```\n"
+)
+
+CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
+
+GLOSSARY_MD = "# Glossary\n\nNo terms.\n"
+
+TEST_PROBE_SRC = (
     "class _Report:\n"
     "    def __init__(self):\n"
     "        self.ok = True\n"
     "        self.findings = []\n"
-    "        self.tests_run = 1\n"
-    "        self.tests_reached = 1\n"
     "\n"
     "    def to_dict(self):\n"
-    "        return dict(ok=self.ok, findings=list(self.findings),\n"
-    "                    tests_run=self.tests_run, tests_reached=self.tests_reached)\n"
+    "        return {'ok': self.ok, 'findings': list(self.findings)}\n"
     "\n"
     "\n"
-    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-    "          interpreter=None, assets=None):\n"
+    "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
     "    return _Report()\n"
 )
 
-ASSEMBLER_SOURCE = (
-    "from pathlib import Path\n"
+# Repo A: matches the interface (both functions) and passes the criterion.
+CODE_A = (
+    "import types\n"
     "\n"
     "\n"
-    "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-    "    root = Path(repo_root)\n"
-    "    comp = root / 'specs' / 'components' / " + repr(SLUG) + "\n"
-    "    covers = 'R-' + criterion_id[len('AC-'):]\n"
-    "    crit = (comp / 'acceptance' / (criterion_id + '.md')).read_text(encoding='utf-8')\n"
-    "    req = (comp / 'requirements' / (covers + '.md')).read_text(encoding='utf-8')\n"
-    "    iface = (comp / 'interface' / 'library.md').read_text(encoding='utf-8')\n"
-    "    return dict(\n"
-    "        component_id=component_id,\n"
-    "        criterion_id=criterion_id,\n"
-    "        covers=covers,\n"
-    "        criterion_text=crit,\n"
-    "        requirement_text=req,\n"
-    "        interface=iface,\n"
-    "        glossary='',\n"
-    "        dependency_interfaces=dict(),\n"
-    "        testing='',\n"
-    "    )\n"
+    "def compute(x):\n"
+    "    return types.SimpleNamespace(value=x * 2)\n"
+    "\n"
+    "\n"
+    "def describe(x):\n"
+    "    return 'widget ' + str(x)\n"
+)
+
+# Repo B: same slug and module name, but lacks `describe` (interface drift)
+# and computes the wrong value (criterion fails).
+CODE_B = (
+    "import types\n"
+    "\n"
+    "\n"
+    "def compute(x):\n"
+    "    return types.SimpleNamespace(value=x * 3)\n"
 )
 
 
-def build_fixture(repo_root, code):
+def build_fixture(repo_root, module_source):
     comp = repo_root / "specs" / "components" / SLUG
-    write(
-        comp / "component.md",
-        "---\n"
-        "id: " + COMPONENT_ID + "\n"
-        "title: Twin slug\n"
-        "status: draft\n"
-        "owners: [tester]\n"
-        "realizes: [P-TWIN]\n"
-        "---\n"
-        "\n"
-        "# Twin slug\n"
-        "\n"
-        "## Purpose\n\nReturns a boxed value.\n\n"
-        "## Scope\n\n- In scope: twin_value.\n\n"
-        "## Definitions\n\nNone.\n\n"
-        "## Behavior\n\nSee `requirements/`.\n\n"
-        "## Interfaces\n\nSee `interface/`.\n\n"
-        "## Data\n\nSee `interface/data/`.\n\n"
-        "## Acceptance criteria\n\nSee `acceptance/`.\n\n"
-        "## Non-functional constraints\n\nSee `constraints.md`.\n\n"
-        "## Open questions\n\n"
-        "## Change log\n\n- Initial.\n",
-    )
-    write(
-        comp / "requirements" / "R-TWIN-001.md",
-        "# R-TWIN-001\n\n**R-TWIN-001** — `twin_value()` MUST return an "
-        "object whose `value` is 1.\n",
-    )
-    write(
-        comp / "requirements" / "R-TWIN-002.md",
-        "# R-TWIN-002\n\n**R-TWIN-002** — `twin_value().value` MUST equal 1.\n",
-    )
-    write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\ntwin_value() -> dict\n```\n\n"
-        "Returns a mapping whose `value` field is also an attribute.\n",
-    )
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    write(
-        comp / "acceptance" / "AC-TWIN-001.md",
-        "# AC-TWIN-001\n\n"
-        "Covers: R-TWIN-001\n"
-        "Kind: compiled\n\n"
-        "```gherkin\n"
-        "Given a seed is 0\n"
-        "When twin_value is invoked with []\n"
-        "Then value equals 1\n"
-        "```\n",
-    )
-    write(
-        comp / "acceptance" / "AC-TWIN-002.md",
-        "# AC-TWIN-002\n\n"
-        "Covers: R-TWIN-002\n"
-        "Kind: generated-test\n\n"
-        "```gherkin\n"
-        "Given the twinslug module\n"
-        "When twin_value is called\n"
-        "Then its value is 1\n"
-        "```\n",
-    )
-    write(
-        repo_root / "specs" / "product" / "twin.md",
-        "---\n"
-        "id: P-TWIN\n"
-        "title: Twin\n"
-        "status: draft\n"
-        "owners: [tester]\n"
-        "---\n\n"
-        "# Twin\n\n## Purpose\n\nTwin capability.\n\n## Scope\n\n- Twin.\n",
-    )
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
-    write(repo_root / "gen" / SLUG / (MODULE + ".py"), code)
-    write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        ASSEMBLER_SOURCE,
-    )
-    write(repo_root / "gen" / "test-probe" / "test_probe.py", PROBE_SOURCE)
+    write(comp / "component.md", COMPONENT_MD)
+    write(comp / "constraints.md", CONSTRAINTS_MD)
+    write(comp / "requirements" / "R-WIDGET-001.md", REQUIREMENT_MD)
+    write(comp / "interface" / "library.md", LIBRARY_MD)
+    write(comp / "acceptance" / (CRITERION_ID + ".md"), ACCEPTANCE_MD)
+    write(repo_root / "specs" / "product" / "widget.md", CAPABILITY_MD)
+    write(repo_root / "specs" / "glossary.md", GLOSSARY_MD)
 
-    live = (
-        Path(verifier_orchestrator.__file__).resolve().parents[1]
-        / "spec-bundle-assembler"
-    ).resolve().parents[1]
+    write(repo_root / "gen" / SLUG / (MODULE + ".py"), module_source)
+    write(repo_root / "gen" / "test-probe" / "test_probe.py", TEST_PROBE_SRC)
+
+    src = live_root() / "pipeline" / "criterion-compiler"
+    dst = repo_root / "pipeline" / "criterion-compiler"
+    dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(
-        live / "pipeline" / "criterion-compiler",
-        repo_root / "pipeline" / "criterion-compiler",
-        ignore=shutil.ignore_patterns("__pycache__"),
+        src,
+        dst,
+        ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"),
+    )
+    return repo_root
+
+
+def criterion_result(report):
+    criteria = field(report, "criteria")
+    matches = [c for c in criteria if field(c, "id") == CRITERION_ID]
+    assert len(matches) == 1, criteria
+    c = matches[0]
+    assert field(c, "kind") == "compiled", c
+    return field(c, "result")
+
+
+def assert_report_a(report):
+    assert field(report, "component_id") == COMPONENT_ID
+    assert field(report, "interface_drift") is False, (
+        "repo A's code matches its interface, so interface_drift must be False"
+    )
+    assert criterion_result(report) == "pass", (
+        "repo A's compute(2).value is 4, so its compiled criterion must pass"
     )
 
 
-def make_test_author(log_path):
-    def author(bundle):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(str(field(bundle, "criterion_id")) + "\n")
-        return {
-            "model": "fake-model",
-            "seed": 0,
-            "prompt_version": "v1",
-            "cache_hit": False,
-            "model_call_error": None,
-            "file": {"path": "ignored.py", "content": GENERATED_TEST},
-        }
-
-    return author
+def assert_report_b(report):
+    assert field(report, "component_id") == COMPONENT_ID
+    assert field(report, "interface_drift") is True, (
+        "repo B's code lacks describe, so interface_drift must be True"
+    )
+    assert criterion_result(report) == "fail", (
+        "repo B's compute(2).value is 6, so its compiled criterion must fail"
+    )
 
 
-def results_by_id(report):
-    return {c["id"]: c["result"] for c in field(report, "criteria")}
+def test_same_slug_in_two_repo_roots_never_shares_modules(tmp_path):
+    repo_a = build_fixture(tmp_path / "repo_a", CODE_A)
+    repo_b = build_fixture(tmp_path / "repo_b", CODE_B)
 
+    report_a = verifier_orchestrator.verify(COMPONENT_ID, repo_a)
+    assert_report_a(report_a)
 
-def assert_matches_a(report):
-    assert field(report, "interface_drift") is False
-    results = results_by_id(report)
-    assert results["AC-TWIN-001"] == "pass"
-    assert results["AC-TWIN-002"] == "pass"
+    report_b = verifier_orchestrator.verify(COMPONENT_ID, repo_b)
+    assert_report_b(report_b)
 
-
-def assert_matches_b(report):
-    assert field(report, "interface_drift") is True
-    results = results_by_id(report)
-    assert results["AC-TWIN-001"] == "fail"
-    assert results["AC-TWIN-002"] == "fail"
-
-
-def test_same_slug_in_two_repo_roots_never_shares_a_module(tmp_path):
-    root_a = tmp_path / "repo_a"
-    root_b = tmp_path / "repo_b"
-    build_fixture(root_a, CODE_A)
-    build_fixture(root_b, CODE_B)
-    log = tmp_path / "author.log"
-    author = make_test_author(log)
-
-    report_a = verifier_orchestrator.verify(COMPONENT_ID, root_a, test_author=author)
-    report_b = verifier_orchestrator.verify(COMPONENT_ID, root_b, test_author=author)
-    report_a_again = verifier_orchestrator.verify(COMPONENT_ID, root_a, test_author=author)
-
-    assert log.is_file()
-    assert_matches_a(report_a)
-    assert_matches_b(report_b)
-    assert_matches_a(report_a_again)
+    # And back again: repo A must not now see repo B's module.
+    report_a_again = verifier_orchestrator.verify(COMPONENT_ID, repo_a)
+    assert_report_a(report_a_again)

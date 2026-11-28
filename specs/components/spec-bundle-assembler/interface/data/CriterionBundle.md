@@ -18,5 +18,3 @@ A dataclass with these fields in this order, `dependency_interfaces`
 defaulting to `{}` and `testing` to `""`, that also reads as a mapping (`bundle["covers"]`,
 `bundle.get("covers")`), as `SpecBundle` does.
 
-Narrower than `SpecBundle` by design (R-ASSEMBLE-009) — `test-author`'s
-consumer of this schema.

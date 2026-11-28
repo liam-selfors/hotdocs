@@ -16,6 +16,7 @@
   "assets": [{ "kind": "python", "path": ".", "definition_sha256": null,
     "adapter_sha256": "sha256:<hex>", "versions": { "python": "3.12.4" },
     "lockfile_sha256": null }],
+  "drivers": [],
   "overall": "pass"
 }
 ```
@@ -39,8 +40,10 @@ is R-VERIFY-011's projection.
 ```
 
 **`failure_origin`** (R-VERIFY-019), exactly on a failed `compiled` or
-`generated-test` criterion: `"test"` when no sound test could run for it,
-`"environment"` when an asset's kind is unknown or unprovisioned
+`generated-test` criterion: `"test"` when no sound test could run for it
+or it failed alone in the mutation sandbox,
+`"environment"` when the run environment could not be provisioned
 (`R-VERIFY-020`), `"implementation"` when a test ran and failed.
 
-**`assets`**: R-VERIFY-020.
+**`assets`** and **`drivers`**: the run environment's (`R-VERIFY-020`);
+both `[]` for a sealed component.

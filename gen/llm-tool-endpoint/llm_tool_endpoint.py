@@ -1,6 +1,5 @@
-"""LLM Tool Endpoint: multi-turn tool-use loops over several providers."""
+"""LLM Tool Endpoint: a multi-turn tool-use loop over any tool-capable provider."""
 
-import dataclasses
 import http.client
 import importlib.util
 import json
@@ -15,51 +14,57 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 
-_MODULE_FILE = os.path.abspath(__file__)
+_ERROR_MESSAGES = {
+    "auth": "authentication failed",
+    "rate_limit": "rate limited by backend",
+    "timeout": "request timed out",
+    "network": "request failed",
+}
 
-_ANTHROPIC_STOPS = {
-    "tool_use": None,
-    "pause_turn": None,
+_ANTHROPIC_ACTIONS = {
+    "tool_use": "tools",
     "end_turn": "end_turn",
     "stop_sequence": "end_turn",
+    "pause_turn": "continue",
     "max_tokens": "truncated",
     "refusal": "refusal",
 }
 
-_OPENAI_STOPS = {
-    "tool_calls": None,
+_OPENAI_ACTIONS = {
+    "tool_calls": "tools",
     "stop": "end_turn",
     "length": "truncated",
     "content_filter": "refusal",
 }
 
-_MESSAGES = {
-    "auth": "authentication failed",
-    "rate_limit": "rate limited by backend",
-    "timeout": "request timed out",
-    "network": "network or backend failure",
-}
-
-_CLI_SETTINGS = '{"autoMemoryEnabled":false,"disableAllHooks":true}'
+_CLAUDE_SETTINGS = '{"autoMemoryEnabled":false,"disableAllHooks":true}'
 
 
 class ToolUseUnsupported(Exception):
-    pass
+    """Raised for a provider that does not support tool use."""
 
 
-@dataclasses.dataclass
+@dataclass
 class ToolLoopResult:
-    text: str
-    transcript: list
-    turns: int
-    tool_calls: int
-    stop: str
+    text: str = ""
+    transcript: list = field(default_factory=list)
+    turns: int = 0
+    tool_calls: int = 0
+    stop: str = "end_turn"
     model_call_error: dict = None
 
     def to_dict(self):
-        return dataclasses.asdict(self)
+        return {
+            "text": self.text,
+            "transcript": self.transcript,
+            "turns": self.turns,
+            "tool_calls": self.tool_calls,
+            "stop": self.stop,
+            "model_call_error": self.model_call_error,
+        }
 
 
 def _get(obj, key):
@@ -68,19 +73,25 @@ def _get(obj, key):
     return getattr(obj, key, None)
 
 
+def _error(category):
+    return {"category": category, "message": _ERROR_MESSAGES[category]}
+
+
 def _tool_root():
-    for parent in Path(_MODULE_FILE).parents:
+    for parent in Path(__file__).resolve().parents:
         if parent.name == "gen":
             return parent.parent
-    return Path(_MODULE_FILE).parent
+    return None
 
 
-def _load_endpoint(repo_root):
-    rel = Path("gen") / "llm-endpoint" / "llm_endpoint.py"
+def _load_llm_endpoint(repo_root):
+    rel = Path("gen", "llm-endpoint", "llm_endpoint.py")
     path = None
-    if repo_root is not None and (Path(repo_root) / rel).exists():
-        path = Path(repo_root) / rel
-    else:
+    if repo_root is not None:
+        candidate = Path(repo_root) / rel
+        if candidate.is_file():
+            path = candidate
+    if path is None:
         path = _tool_root() / rel
     spec = importlib.util.spec_from_file_location("llm_endpoint", str(path))
     module = importlib.util.module_from_spec(spec)
@@ -89,349 +100,394 @@ def _load_endpoint(repo_root):
     return module
 
 
-def _error(category):
-    return {"category": category, "message": _MESSAGES[category]}
+class _Budget:
+    """Tool-call counter and dispatcher shared by every loop."""
 
+    def __init__(self, names, execute, cap):
+        self.names = names
+        self.execute = execute
+        self.cap = cap
+        self.count = 0
+        self.exhausted = False
+        self.lock = threading.Lock()
 
-def _dispatch(name, args, names, execute, counter, max_tool_calls):
-    """Return (text, is_error) or None when the call is past the cap."""
-    if name not in names:
-        return "unknown tool: %s" % name, True
-    if not isinstance(args, dict):
-        return "arguments must be a JSON object", True
-    if counter[0] >= max_tool_calls:
-        return None
-    counter[0] += 1
-    try:
-        text, is_error = execute(name, args)
-    except Exception as exc:  # noqa: BLE001 - any tool failure goes back to the model
-        return "tool error: %s: %s" % (type(exc).__name__, exc), True
-    return text, bool(is_error)
+    def dispatch(self, name, arguments):
+        """Return (text, is_error), or None when the call is past the cap."""
+        if name not in self.names:
+            return "unknown tool: %s" % name, True
+        if not isinstance(arguments, dict):
+            return "arguments must be a JSON object", True
+        with self.lock:
+            if self.count >= self.cap:
+                return None
+            self.count += 1
+        try:
+            text, is_error = self.execute(name, arguments)
+        except Exception as exc:
+            return "tool error: %s: %s" % (type(exc).__name__, exc), True
+        return text, bool(is_error)
 
 
 def _post(url, headers, body, timeout):
     request = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST"
     )
-    with urllib.request.urlopen(request, timeout=timeout) as reply:
-        raw = reply.read()
-    return json.loads(raw)
-
-
-def _send(url, headers, body, timeout):
-    """Return (data, category); exactly one is None."""
     try:
-        return _post(url, headers, body, timeout), None
+        with urllib.request.urlopen(request, timeout=timeout) as reply:
+            raw = reply.read()
     except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            return None, "auth"
-        if exc.code == 429:
-            return None, "rate_limit"
-        if exc.code in (408, 504):
-            return None, "timeout"
-        return None, "network"
-    except TimeoutError:
-        return None, "timeout"
+        code = exc.code
+        if code in (401, 403):
+            return None, _error("auth")
+        if code == 429:
+            return None, _error("rate_limit")
+        if code in (408, 504):
+            return None, _error("timeout")
+        return None, _error("network")
     except urllib.error.URLError as exc:
-        if isinstance(exc.reason, TimeoutError):
-            return None, "timeout"
-        return None, "network"
-    except (OSError, http.client.HTTPException, ValueError):
-        return None, "network"
+        if isinstance(exc.reason, (socket.timeout, TimeoutError)):
+            return None, _error("timeout")
+        return None, _error("network")
+    except (socket.timeout, TimeoutError):
+        return None, _error("timeout")
+    except (OSError, http.client.HTTPException):
+        return None, _error("network")
+    try:
+        return json.loads(raw), None
+    except ValueError:
+        return None, _error("network")
 
 
-def _anthropic_text(data):
-    if data is None:
-        return ""
-    return "".join(
-        b.get("text") or "" for b in data["content"] if b.get("type") == "text"
-    )
+# --- anthropic -------------------------------------------------------------
 
+def _anthropic_body(model, system, tools):
+    tool_list = [
+        {"name": t["name"], "description": t["description"], "input_schema": t["input_schema"]}
+        for t in tools
+    ]
 
-def _openai_text(data):
-    if data is None:
-        return ""
-    return data["choices"][0]["message"].get("content") or ""
-
-
-def _http_loop(system, prompt, provider, resolved, key, tools, execute,
-               max_turns, max_tool_calls, wall_seconds, start):
-    anthropic = provider == "anthropic"
-    base = _get(resolved, "base_url").rstrip("/")
-    model = _get(resolved, "model")
-    timeout_seconds = float(_get(resolved, "timeout_seconds"))
-    names = {t["name"] for t in tools}
-
-    if anthropic:
-        url = base + "/v1/messages"
-        headers = {
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-        base_body = {
+    def build(messages):
+        return {
             "model": model,
             "max_tokens": 32000,
-            "system": [{"type": "text", "text": system,
-                        "cache_control": {"type": "ephemeral"}}],
-            "tools": [{"name": t["name"], "description": t["description"],
-                       "input_schema": t["input_schema"]} for t in tools],
+            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            "tools": tool_list,
             "tool_choice": {"type": "auto"},
+            "messages": messages,
         }
-        messages = [{"role": "user", "content": prompt}]
-        text_of = _anthropic_text
-    else:
-        url = base + "/chat/completions"
-        headers = {"content-type": "application/json"}
-        if key:
-            headers["Authorization"] = "Bearer " + key
-        base_body = {
-            "model": model,
-            "tools": [{"type": "function",
-                       "function": {"name": t["name"],
-                                    "description": t["description"],
-                                    "parameters": t["input_schema"]}}
-                      for t in tools],
-            "tool_choice": "auto",
-        }
-        if provider == "openai":
-            base_body["max_completion_tokens"] = 32000
-        else:
-            base_body["max_tokens"] = 32000
-        messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": prompt}]
-        text_of = _openai_text
 
-    transcript = list(messages)
-    last = None
+    return build
+
+
+def _anthropic_parse(data):
+    content = data["content"]
+    action = _ANTHROPIC_ACTIONS[data["stop_reason"]]
+    text = "".join(block["text"] for block in content if block["type"] == "text")
+    calls = []
+    if action == "tools":
+        calls = [
+            (block["id"], block["name"], block["input"])
+            for block in content
+            if block["type"] == "tool_use"
+        ]
+    return {"role": "assistant", "content": content}, text, action, calls
+
+
+def _anthropic_results(results):
+    blocks = []
+    for call_id, (text, is_error) in results:
+        block = {"type": "tool_result", "tool_use_id": call_id, "content": text}
+        if is_error:
+            block["is_error"] = True
+        blocks.append(block)
+    return [{"role": "user", "content": blocks}]
+
+
+# --- openai / openai-compatible ---------------------------------------------
+
+def _openai_body(model, tools, token_key):
+    tool_list = [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["input_schema"],
+            },
+        }
+        for t in tools
+    ]
+
+    def build(messages):
+        return {
+            "model": model,
+            "messages": messages,
+            "tools": tool_list,
+            "tool_choice": "auto",
+            token_key: 32000,
+        }
+
+    return build
+
+
+def _openai_parse(data):
+    choice = data["choices"][0]
+    message = choice["message"]
+    action = _OPENAI_ACTIONS[choice["finish_reason"]]
+    text = message.get("content") or ""
+    calls = []
+    if action == "tools":
+        for call in message["tool_calls"]:
+            function = call["function"]
+            try:
+                arguments = json.loads(function["arguments"])
+            except (ValueError, TypeError):
+                arguments = None
+            calls.append((call["id"], function["name"], arguments))
+    return message, text, action, calls
+
+
+def _openai_results(results):
+    return [
+        {"role": "tool", "tool_call_id": call_id, "content": text}
+        for call_id, (text, _is_error) in results
+    ]
+
+
+# --- HTTP loop ---------------------------------------------------------------
+
+def _http_loop(url, headers, build, parse, results_of, messages, timeout_seconds,
+               budget, max_turns, wall_seconds):
+    start = time.monotonic()
+    transcript = messages
     turns = 0
-    counter = [0]
+    text = ""
 
     def finish(stop, error=None):
-        return ToolLoopResult(text_of(last), transcript, turns, counter[0],
-                              stop, error)
+        return ToolLoopResult(text, transcript, turns, budget.count, stop, error)
 
     while True:
-        if turns >= max_turns:
-            return finish("budget_exhausted")
         remaining = wall_seconds - (time.monotonic() - start)
-        if remaining <= 0:
+        if turns >= max_turns or remaining <= 0:
             return finish("budget_exhausted")
-        body = dict(base_body)
-        body["messages"] = messages
-        transcript = list(messages)
+        data, error = _post(url, headers, build(messages), min(timeout_seconds, remaining))
         turns += 1
-        data, category = _send(url, headers, body, min(timeout_seconds, remaining))
-        if category is not None:
-            return finish("error", _error(category))
+        transcript = messages
+        if error is not None:
+            return finish("error", error)
         try:
-            if anthropic:
-                content = data["content"]
-                reason = data["stop_reason"]
-                outcome = _ANTHROPIC_STOPS[reason]
-                assistant = {"role": "assistant", "content": content}
-                calls = []
-                if reason == "tool_use":
-                    calls = [(b["id"], b["name"], b["input"])
-                             for b in content if b["type"] == "tool_use"]
-                _anthropic_text(data)
-            else:
-                choice = data["choices"][0]
-                assistant = choice["message"]
-                reason = choice["finish_reason"]
-                outcome = _OPENAI_STOPS[reason]
-                calls = []
-                if reason == "tool_calls":
-                    calls = [(c["id"], c["function"]["name"],
-                              c["function"]["arguments"])
-                             for c in assistant["tool_calls"]]
-                _openai_text(data)
-        except (KeyError, TypeError, IndexError, AttributeError):
+            assistant, reply_text, action, calls = parse(data)
+        except (KeyError, IndexError, TypeError, AttributeError):
             return finish("error", _error("network"))
-        last = data
-        transcript.append(assistant)
-
-        if outcome is not None:
-            return finish(outcome)
-        if anthropic and reason == "pause_turn":
-            messages.append(assistant)
+        text = reply_text
+        transcript = messages + [assistant]
+        if action == "continue":
+            messages = transcript
             continue
-
+        if action != "tools":
+            return finish(action)
         results = []
-        for call_id, name, raw_args in calls:
-            if anthropic:
-                args = raw_args
-            else:
-                try:
-                    args = json.loads(raw_args)
-                except (ValueError, TypeError):
-                    args = None
-            result = _dispatch(name, args, names, execute, counter, max_tool_calls)
-            if result is None:
+        for call_id, name, arguments in calls:
+            outcome = budget.dispatch(name, arguments)
+            if outcome is None:
                 return finish("budget_exhausted")
-            results.append((call_id, result[0], result[1]))
-
-        messages.append(assistant)
-        if anthropic:
-            blocks = []
-            for call_id, text, is_error in results:
-                block = {"type": "tool_result", "tool_use_id": call_id,
-                         "content": text}
-                if is_error:
-                    block["is_error"] = True
-                blocks.append(block)
-            messages.append({"role": "user", "content": blocks})
-        else:
-            for call_id, text, _ in results:
-                messages.append({"role": "tool", "tool_call_id": call_id,
-                                 "content": text})
+            results.append((call_id, outcome))
+        messages = transcript + results_of(results)
 
 
-def _serve_socket(listener, stop_event, handle):
-    while not stop_event.is_set():
+# --- claude-cli loop -----------------------------------------------------------
+
+def _answer_connection(conn, budget):
+    with conn, conn.makefile("rwb") as stream:
+        for line in stream:
+            request = json.loads(line.decode("utf-8"))
+            outcome = budget.dispatch(request.get("name"), request.get("arguments"))
+            if outcome is None:
+                budget.exhausted = True
+                outcome = ("tool-call budget exhausted", True)
+            reply = {"text": outcome[0], "is_error": outcome[1]}
+            stream.write((json.dumps(reply) + "\n").encode("utf-8"))
+            stream.flush()
+
+
+def _accept_loop(server, budget, stopping):
+    while not stopping.is_set():
         try:
-            conn, _ = listener.accept()
-        except TimeoutError:
+            conn, _ = server.accept()
+        except socket.timeout:
             continue
         except OSError:
             return
-        with conn:
-            conn.settimeout(None)
-            reader = conn.makefile("rb")
-            for line in reader:
-                text, is_error = handle(json.loads(line))
-                conn.sendall((json.dumps({"text": text, "is_error": is_error})
-                              + "\n").encode("utf-8"))
+        conn.setblocking(True)
+        threading.Thread(target=_answer_connection, args=(conn, budget), daemon=True).start()
 
 
-def _cli_loop(system, prompt, resolved, tools, execute, max_turns,
-              max_tool_calls, wall_seconds, claude_command):
-    names = {t["name"] for t in tools}
-    counter = [0]
-    over_cap = [False]
-
-    def handle(request):
-        result = _dispatch(request.get("name"), request.get("arguments"),
-                           names, execute, counter, max_tool_calls)
-        if result is None:
-            over_cap[0] = True
-            return "tool-call budget exhausted", True
-        return result
-
-    tmp = tempfile.mkdtemp()
-    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    stop_event = threading.Event()
+def _claude_loop(claude_command, model, system, prompt, tools, budget, max_turns,
+                 wall_seconds):
+    workdir = tempfile.mkdtemp()
+    server = None
+    stopping = threading.Event()
     try:
-        tools_path = os.path.join(tmp, "tools.json")
-        sock_path = os.path.join(tmp, "mcp.sock")
-        cfg_path = os.path.join(tmp, "mcp.json")
-        with open(tools_path, "w", encoding="utf-8") as fh:
-            json.dump(tools, fh)
-        listener.bind(sock_path)
-        listener.listen()
-        listener.settimeout(0.1)
-        with open(cfg_path, "w", encoding="utf-8") as fh:
-            json.dump({"mcpServers": {"hotdocs": {
-                "command": sys.executable,
-                "args": [_MODULE_FILE, "--mcp-serve", sock_path, tools_path],
-            }}}, fh)
-        thread = threading.Thread(target=_serve_socket,
-                                  args=(listener, stop_event, handle),
-                                  daemon=True)
-        thread.start()
+        tools_path = os.path.join(workdir, "tools.json")
+        with open(tools_path, "w", encoding="utf-8") as handle:
+            json.dump(tools, handle)
+        socket_path = os.path.join(workdir, "mcp.sock")
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(socket_path)
+        server.listen()
+        server.settimeout(0.1)
+        config_path = os.path.join(workdir, "mcp.json")
+        config = {
+            "mcpServers": {
+                "hotdocs": {
+                    "command": sys.executable,
+                    "args": [os.path.abspath(__file__), "--mcp-serve", socket_path, tools_path],
+                }
+            }
+        }
+        with open(config_path, "w", encoding="utf-8") as handle:
+            json.dump(config, handle)
+        threading.Thread(
+            target=_accept_loop, args=(server, budget, stopping), daemon=True
+        ).start()
 
-        cmd = [claude_command, "-p", "--model", _get(resolved, "model"),
-               "--output-format", "stream-json", "--verbose",
-               "--tools", "", "--mcp-config", cfg_path, "--strict-mcp-config",
-               "--allowedTools"]
-        cmd += ["mcp__hotdocs__" + t["name"] for t in tools]
-        cmd += ["--no-session-persistence", "--setting-sources", "",
-                "--disable-slash-commands", "--settings", _CLI_SETTINGS,
-                "--system-prompt", system, "--max-turns", str(max_turns)]
-
-        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, cwd=tmp,
-                                start_new_session=True)
+        argv = [
+            claude_command, "-p", "--model", model,
+            "--output-format", "stream-json", "--verbose",
+            "--tools", "", "--mcp-config", config_path, "--strict-mcp-config",
+            "--allowedTools",
+        ]
+        argv += ["mcp__hotdocs__%s" % t["name"] for t in tools]
+        argv += [
+            "--no-session-persistence", "--setting-sources", "",
+            "--disable-slash-commands", "--settings", _CLAUDE_SETTINGS,
+            "--system-prompt", system, "--max-turns", str(max_turns),
+        ]
+        proc = subprocess.Popen(
+            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, cwd=workdir, text=True,
+            encoding="utf-8", errors="replace", start_new_session=True,
+        )
         killed = False
         try:
-            out, _ = proc.communicate(prompt.encode("utf-8"),
-                                      timeout=wall_seconds)
+            out, _ = proc.communicate(prompt, timeout=wall_seconds)
         except subprocess.TimeoutExpired:
             killed = True
             os.killpg(proc.pid, signal.SIGKILL)
             out, _ = proc.communicate()
     finally:
-        stop_event.set()
-        listener.close()
-        shutil.rmtree(tmp, ignore_errors=True)
+        stopping.set()
+        if server is not None:
+            server.close()
+        shutil.rmtree(workdir, ignore_errors=True)
 
     events = []
-    for line in out.decode("utf-8", errors="replace").splitlines():
+    result = None
+    for line in out.splitlines():
         try:
             event = json.loads(line)
         except ValueError:
             continue
         events.append(event)
-    result = None
-    for event in events:
         if isinstance(event, dict) and event.get("type") == "result":
             result = event
 
-    error = None
-    if killed or (result is not None
-                  and result.get("subtype") == "error_max_turns"):
-        stop = "budget_exhausted"
-    elif proc.returncode != 0 or result is None:
-        if over_cap[0]:
-            stop = "budget_exhausted"
-        else:
-            stop = "error"
-            error = _error("network")
-    elif over_cap[0]:
-        stop = "budget_exhausted"
-    else:
-        stop = "end_turn"
-
     text = ""
     turns = 0
+    subtype = None
     if result is not None:
         text = result.get("result") or ""
         turns = result.get("num_turns") or 0
-    return ToolLoopResult(text, events, turns, counter[0], stop, error)
+        subtype = result.get("subtype")
 
+    error = None
+    if killed or budget.exhausted or subtype == "error_max_turns":
+        stop = "budget_exhausted"
+    elif proc.returncode != 0 or result is None:
+        stop = "error"
+        error = {"category": "network", "message": "claude-cli call failed"}
+    else:
+        stop = "end_turn"
+    return ToolLoopResult(text, events, turns, budget.count, stop, error)
+
+
+# --- public API ----------------------------------------------------------------
 
 def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,
                   max_tool_calls=120, wall_seconds=1800.0, repo_root=None,
                   claude_command="claude"):
-    start = time.monotonic()
-    endpoint = _load_endpoint(repo_root)
-    resolved = endpoint.resolve_provider(model, endpoint.load_config())
+    llm = _load_llm_endpoint(repo_root)
+    resolved = llm.resolve_provider(model, llm.load_config())
     provider = _get(resolved, "provider")
     if provider in ("gemini", "ollama"):
-        raise ToolUseUnsupported("tool use is not supported by provider %s"
-                                 % provider)
+        raise ToolUseUnsupported("tool use is not supported by provider %s" % provider)
+
+    model_name = _get(resolved, "model")
+    budget = _Budget({t["name"] for t in tools}, execute, max_tool_calls)
+
     if provider == "claude-cli":
-        return _cli_loop(system, prompt, resolved, tools, execute, max_turns,
-                         max_tool_calls, wall_seconds, claude_command)
+        return _claude_loop(claude_command, model_name, system, prompt, tools, budget,
+                            max_turns, wall_seconds)
+
     key_env = _get(resolved, "api_key_env")
     key = os.environ.get(key_env) if key_env else None
-    if provider in ("anthropic", "openai") and not key:
-        return ToolLoopResult("", [], 0, 0, "error", _error("auth"))
-    return _http_loop(system, prompt, provider, resolved, key, tools, execute,
-                      max_turns, max_tool_calls, wall_seconds, start)
+    if not key and provider in ("anthropic", "openai"):
+        return ToolLoopResult("", [], 0, 0, "error",
+                              {"category": "auth", "message": "no API key configured"})
+
+    base = _get(resolved, "base_url").rstrip("/")
+    timeout_seconds = _get(resolved, "timeout_seconds")
+    headers = {"content-type": "application/json"}
+
+    if provider == "anthropic":
+        headers["x-api-key"] = key
+        headers["anthropic-version"] = "2023-06-01"
+        return _http_loop(
+            base + "/v1/messages", headers, _anthropic_body(model_name, system, tools),
+            _anthropic_parse, _anthropic_results,
+            [{"role": "user", "content": prompt}],
+            timeout_seconds, budget, max_turns, wall_seconds,
+        )
+
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    token_key = "max_completion_tokens" if provider == "openai" else "max_tokens"
+    return _http_loop(
+        base + "/chat/completions", headers, _openai_body(model_name, tools, token_key),
+        _openai_parse, _openai_results,
+        [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+        timeout_seconds, budget, max_turns, wall_seconds,
+    )
+
+
+def _forward_call(socket_path, params):
+    request = {"name": params.get("name"), "arguments": params.get("arguments", {})}
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.connect(socket_path)
+    with conn, conn.makefile("rwb") as stream:
+        stream.write((json.dumps(request) + "\n").encode("utf-8"))
+        stream.flush()
+        reply = json.loads(stream.readline().decode("utf-8"))
+    return {
+        "content": [{"type": "text", "text": reply["text"]}],
+        "isError": reply["is_error"],
+    }
 
 
 def serve_mcp(socket_path, tools_path):
-    with open(tools_path, encoding="utf-8") as fh:
-        tools = json.load(fh)
+    with open(tools_path, encoding="utf-8") as handle:
+        tools = json.load(handle)
+    listed = [
+        {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
+        for t in tools
+    ]
     for raw in sys.stdin.buffer:
-        msg = json.loads(raw)
-        if "id" not in msg:
+        message = json.loads(raw.decode("utf-8"))
+        if "id" not in message:
             continue
-        method = msg.get("method")
-        params = msg.get("params") or {}
-        reply = {"jsonrpc": "2.0", "id": msg["id"]}
+        method = message.get("method")
+        params = message.get("params") or {}
+        reply = {"jsonrpc": "2.0", "id": message["id"]}
         if method == "initialize":
             reply["result"] = {
                 "protocolVersion": params.get("protocolVersion"),
@@ -439,21 +495,9 @@ def serve_mcp(socket_path, tools_path):
                 "serverInfo": {"name": "hotdocs", "version": "1"},
             }
         elif method == "tools/list":
-            reply["result"] = {"tools": [
-                {"name": t["name"], "description": t["description"],
-                 "inputSchema": t["input_schema"]} for t in tools]}
+            reply["result"] = {"tools": listed}
         elif method == "tools/call":
-            request = {"name": params.get("name"),
-                       "arguments": params.get("arguments", {})}
-            conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            conn.connect(socket_path)
-            conn.sendall((json.dumps(request) + "\n").encode("utf-8"))
-            answer = json.loads(conn.makefile("rb").readline())
-            conn.close()
-            reply["result"] = {
-                "content": [{"type": "text", "text": answer["text"]}],
-                "isError": answer["is_error"],
-            }
+            reply["result"] = _forward_call(socket_path, params)
         else:
             reply["error"] = {"code": -32601, "message": "Method not found"}
         sys.stdout.write(json.dumps(reply) + "\n")
@@ -461,5 +505,5 @@ def serve_mcp(socket_path, tools_path):
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and sys.argv[1:2] == ["--mcp-serve"]:
     sys.exit(serve_mcp(sys.argv[2], sys.argv[3]))

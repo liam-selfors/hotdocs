@@ -1,11 +1,12 @@
 # R-SIZE-001
 
-**R-SIZE-001** — The linter MUST compute the eight `SPEC_GUIDELINES.md`
-  §4 size-cap dimensions per component (`generated_code_loc`,
-  `component_doc_words`, `requirement_count`, `interface_surface`,
-  `fan_out`, `fan_in`, and — since `D17` — `guarantee_count`,
+**R-SIZE-001** — The linter MUST compute the nine size-cap dimensions of
+  `specs/architecture/size-caps.md` per component (`generated_code_loc`,
+  `generator_words`, `criterion_words_max`, `requirement_count`,
+  `interface_surface`, `fan_out`, `fan_in`, `guarantee_count`,
   `acceptance_count`) and report each at `warn` or `fail` severity per
-  the published thresholds. `component_doc_words` MUST be queried from
-  the `component_size` view (`specs/architecture/graph-query-engine.md`'s
-  "Query surface" section, `D13`), never recomputed independently —
-  `R-GRAPH-009` queries the same view, one definition, not two to drift.
+  its thresholds (`D380`). `generator_words` and `criterion_words_max`
+  MUST be queried from the `bundle_size` view (`R-GQE-009`) on
+  `load_corpus`'s `graph` connection, `SELECT component_id,
+  generator_words, criterion_words_max FROM bundle_size`, `component_id`
+  being the bare slug, never recomputed independently, so one definition serves every reader.

@@ -4,9 +4,10 @@ Covers: R-LICENSE-007
 Kind: generated-test
 
 ```gherkin
-Given a first generation sample that scans flagged, and a retried sample
-  that scans clean
-When the final merge decision is made
-Then both the original flagged LicenseScanResult and the clean one are
-  present in the record — the flagged one is not deleted or overwritten
+Given content that scans flagged, then the same component's content
+  changed so that it scans clean
+When the flagged content is restored and scanned again
+Then the second scan was not blocked, and the third returns the flagged
+  result again from the cache, with the same similarity_score and
+  matches
 ```

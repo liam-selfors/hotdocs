@@ -1,4 +1,5 @@
-# hotdocs-criterion: sha256:751dc74d3ff4c162ff8f38cdfaba9cedd33bee06b8c60d1c98365d53f7df9beb
+# hotdocs-criterion: sha256:02be13d2fcc16bfafb2e6dde499822ca29199d5b49cb6809b5f47b650d16ca5e
+import json
 import re
 from pathlib import Path
 
@@ -10,62 +11,49 @@ EXPECTED_LINE = (
     "`interface/` or `acceptance/`) carries no frontmatter at all."
 )
 
+REPLY_BODY = "def test_placeholder():\n    assert True\n"
+
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_probe_stand_in(repo_root, log_path):
-    probe_dir = Path(repo_root) / "gen" / "test-probe"
+def write_probe_stand_in(repo_root, calls_log):
+    probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
-        "GATE_VERSION = " + repr("test-probe@1.4.0") + "\n"
-        "\n"
-        "\n"
-        "class ProbeReport:\n"
-        "    def __init__(self, ok, findings, tests_run, tests_reached):\n"
-        "        self.ok = ok\n"
-        "        self.findings = findings\n"
-        "        self.tests_run = tests_run\n"
-        "        self.tests_reached = tests_reached\n"
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
         "        return {\n"
-        "            " + repr("ok") + ": self.ok,\n"
-        "            " + repr("findings") + ": [dict(f) for f in self.findings],\n"
-        "            " + repr("tests_run") + ": self.tests_run,\n"
-        "            " + repr("tests_reached") + ": self.tests_reached,\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
         "        }\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None):\n"
-        "    with open(LOG_PATH, " + repr("a") + ", encoding=" + repr("utf-8") + ") as fh:\n"
-        "        fh.write(" + repr("probe") + " + " + repr("\n") + ")\n"
-        "    return ProbeReport(True, [], 1, 1)\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
+        "    with open(" + repr(str(calls_log)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
     )
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def test_first_prompt_contains_unit_file_frontmatter_rule(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-
-    probe_log = tmp_path / "probe_calls.log"
-    _write_probe_stand_in(repo_root, probe_log)
-
-    prompts = []
-
-    def mock_backend(prompt, model, **params):
-        prompts.append(prompt)
+def make_mock_backend(prompts_log):
+    def backend(prompt, model, **params):
+        with open(prompts_log, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(prompt) + "\n")
         nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
-        body = "def test_placeholder():\n    assert True\n"
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + body
+            + REPLY_BODY
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -75,11 +63,25 @@ def test_first_prompt_contains_unit_file_frontmatter_rule(tmp_path, monkeypatch)
             "model_call_error": None,
         }
 
+    return backend
+
+
+def test_ac_author_018_prompt_holds_unit_file_frontmatter_line(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    prompts_log = logs / "prompts.jsonl"
+    probe_log = logs / "probe_calls.log"
+
+    write_probe_stand_in(repo_root, probe_log)
+    monkeypatch.chdir(repo_root)
+
     bundle = {
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget\nWhen made\nThen it exists",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
         "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make widgets.",
         "interface": "make_widget(name: str) -> dict",
         "glossary": "",
@@ -87,11 +89,14 @@ def test_first_prompt_contains_unit_file_frontmatter_rule(tmp_path, monkeypatch)
     }
 
     result = test_author.author_test(
-        bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
+        bundle, "mock", repo_root=repo_root, llm_backend=make_mock_backend(prompts_log)
     )
 
-    assert result is not None
-    assert field(result, "criterion_id") == "AC-WIDGET-MAKER-001"
-    assert len(prompts) >= 1
-    first_prompt = prompts[0]
+    assert field(result, "model_call_error") is None
+
+    assert prompts_log.is_file(), "the mock model was never called"
+    lines = [ln for ln in prompts_log.read_text(encoding="utf-8").splitlines() if ln]
+    assert lines, "no prompt was recorded"
+    first_prompt = json.loads(lines[0])
+
     assert EXPECTED_LINE in first_prompt.splitlines()

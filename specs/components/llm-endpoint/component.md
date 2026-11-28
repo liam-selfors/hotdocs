@@ -23,9 +23,7 @@ call, a specific vendor's API.
 
 ## Rationale
 
-Callers each knew how to reach a vendor until this component took the
-mechanics over, so the model identifier stays a plain string everywhere
-else (`D18`).
+See `D18`.
 
 ## Scope
 
@@ -55,11 +53,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Mixed `kind`, mirroring `generator`'s own split: the external call itself
-is `generated-test` (exercised via an injected mock backend); backend
-resolution and credential-safety are pure, deterministic checks,
-`compiled`.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -72,11 +65,4 @@ See `constraints.md`.
 
 ## Change log
 
-Each decision holds its full rationale.
-
-- `D18`, `D33`: first, hand-written implementation through the `claude`
-  command. `D34`/`D35`/`D52`: timeout floor, `--tools ""`. `D82`:
-  `--safe-mode` without an API key.
-- `D180`–`D183`: the six providers, `hotdocs.toml`, setup helpers.
-- `D209`, `D220`, `D221`, `D223`, `D224`: the interface stated exactly for
-  generation from this spec. `D225`: the `claude` command's whole reply.
+`D18`, `D33`, `D34`, `D35`, `D52`, `D82`, `D180`, `D181`, `D182`, `D183`, `D209`, `D220`, `D221`, `D223`, `D224`, `D225`.

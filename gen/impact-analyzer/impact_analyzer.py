@@ -1,8 +1,7 @@
-"""impact-analyzer: computes the blast radius of a set of changed spec ids."""
+"""Impact analyzer: computes the blast radius of a set of changed spec ids."""
 
 from __future__ import annotations
 
-import fnmatch
 import importlib.util
 import json
 import subprocess
@@ -12,10 +11,13 @@ from pathlib import Path
 
 USAGE = "usage: hotdocs impact --changed <spec-id>... [--repo-root=<dir>] [--format=json|text]"
 
+_TYPE_FILES = ("cli.md", "library.md")
 
-# --------------------------------------------------------------------------
-# Report types
-# --------------------------------------------------------------------------
+
+def _get(obj, name):
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
 @dataclass
@@ -28,11 +30,11 @@ class ImpactedComponent:
     def __getitem__(self, key):
         return getattr(self, key)
 
-    def to_dict(self) -> dict:
-        d = {"component_id": self.component_id, "reason": self.reason, "via": self.via}
-        if self.reason == "transitive-guarantee":
-            d["guarantee_ids"] = list(self.guarantee_ids)
-        return d
+    def to_dict(self):
+        out = {"component_id": self.component_id, "reason": self.reason, "via": self.via}
+        if self.guarantee_ids is not None:
+            out["guarantee_ids"] = list(self.guarantee_ids)
+        return out
 
 
 @dataclass
@@ -43,53 +45,41 @@ class BlastRadiusReport:
     def __getitem__(self, key):
         return getattr(self, key)
 
-    def to_dict(self) -> dict:
+    def to_dict(self):
         return {
-            "impacted": [e.to_dict() for e in self.impacted],
+            "impacted": [entry.to_dict() for entry in self.impacted],
             "precondition_error": self.precondition_error,
         }
 
 
-# --------------------------------------------------------------------------
-# Helpers
-# --------------------------------------------------------------------------
+# --- dependency loading -------------------------------------------------------
 
 
-def _get(obj, key):
-    if isinstance(obj, dict):
-        return obj.get(key)
-    return getattr(obj, key, None)
-
-
-def _as_list(value) -> list:
-    if isinstance(value, list):
-        return value
-    return [value] if value else []
-
-
-def _tool_root() -> Path:
-    here = Path(__file__).resolve()
-    for parent in here.parents:
+def _tool_root():
+    for parent in Path(__file__).resolve().parents:
         if parent.name == "gen":
             return parent.parent
-    return here.parent
+    return Path(__file__).resolve().parent
 
 
 def _load_spec_linter(repo_root: Path):
-    dep_dir = Path(repo_root) / "gen" / "spec-linter"
-    if not dep_dir.is_dir():
-        dep_dir = _tool_root() / "gen" / "spec-linter"
-    pkg_init = dep_dir / "spec_linter" / "__init__.py"
+    base = Path(repo_root) / "gen" / "spec-linter"
+    if not base.is_dir():
+        base = _tool_root() / "gen" / "spec-linter"
+    pkg_init = base / "spec_linter" / "__init__.py"
     if pkg_init.is_file():
         spec = importlib.util.spec_from_file_location(
             "spec_linter", pkg_init, submodule_search_locations=[str(pkg_init.parent)]
         )
     else:
-        spec = importlib.util.spec_from_file_location("spec_linter", dep_dir / "spec_linter.py")
+        spec = importlib.util.spec_from_file_location("spec_linter", base / "spec_linter.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules["spec_linter"] = module
     spec.loader.exec_module(module)
     return module
+
+
+# --- git / change detection ---------------------------------------------------
 
 
 def _git(repo_root: Path, *args):
@@ -101,250 +91,262 @@ def _git(repo_root: Path, *args):
 
 def _prior_commit(repo_root: Path):
     branch = None
-    out = _git(repo_root, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
-    if out is not None and out.strip():
-        branch = out.decode().strip()
+    ref = _git(repo_root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+    if ref is not None:
+        branch = ref.decode().strip()
     else:
-        for ref in ("refs/heads/main", "refs/heads/master"):
-            if _git(repo_root, "rev-parse", "--verify", "-q", ref) is not None:
-                branch = ref
+        for candidate in ("refs/heads/main", "refs/heads/master"):
+            if _git(repo_root, "rev-parse", "--verify", "--quiet", candidate) is not None:
+                branch = candidate
                 break
     if branch is None:
         return None
-    out = _git(repo_root, "merge-base", "HEAD", branch)
-    if out is None or not out.strip():
-        return None
-    return out.decode().strip()
-
-
-def _base_files(repo_root: Path, base, reldir: str) -> dict:
+    base = _git(repo_root, "merge-base", "HEAD", branch)
     if base is None:
+        return None
+    return base.decode().strip()
+
+
+def _prior_files(repo_root: Path, commit, rel_dir: str):
+    if commit is None:
         return {}
-    out = _git(repo_root, "ls-tree", "-r", "-z", "--name-only", base, "--", reldir)
+    listing = _git(repo_root, "ls-tree", "-r", "--name-only", "-z", commit, "--", "./" + rel_dir + "/")
+    if listing is None:
+        return {}
     files = {}
-    if out is None:
-        return files
-    for name in out.decode().split("\0"):
-        if name:
-            files[name] = _git(repo_root, "cat-file", "blob", f"{base}:./{name}")
+    prefix = rel_dir + "/"
+    for raw in listing.decode().split("\0"):
+        if not raw.startswith(prefix):
+            continue
+        content = _git(repo_root, "cat-file", "blob", commit + ":./" + raw)
+        files[raw[len(prefix):]] = content
     return files
 
 
-def _work_files(repo_root: Path, reldir: str) -> dict:
-    root = Path(repo_root)
-    files = {}
-    for p in sorted((root / reldir).rglob("*")):
-        if p.is_file():
-            files[p.relative_to(root).as_posix()] = p.read_bytes()
-    return files
+def _current_files(repo_root: Path, rel_dir: str):
+    base = Path(repo_root) / rel_dir
+    return {
+        p.relative_to(base).as_posix(): p.read_bytes()
+        for p in sorted(base.rglob("*"))
+        if p.is_file()
+    }
 
 
-def _changed(base: dict, work: dict, select) -> list:
-    keys = sorted(k for k in set(base) | set(work) if select(k))
-    return [k for k in keys if base.get(k) != work.get(k)]
+def _guarantee_id(rel: str):
+    if not rel.startswith("guarantees/"):
+        return None
+    name = rel[len("guarantees/"):]
+    if "/" in name or not name.startswith("G-") or not name.endswith(".md"):
+        return None
+    return name[: -len(".md")]
 
 
-# --------------------------------------------------------------------------
-# Library
-# --------------------------------------------------------------------------
+def _interface_changes(repo_root: Path, commit, slug: str):
+    rel_dir = "specs/components/" + slug + "/interface"
+    prior = _prior_files(repo_root, commit, rel_dir)
+    current = _current_files(repo_root, rel_dir)
+    type_changed = False
+    changed_guarantees = set()
+    for rel in sorted(set(prior) | set(current)):
+        if prior.get(rel) == current.get(rel):
+            continue
+        if rel in _TYPE_FILES or rel.startswith("data/"):
+            type_changed = True
+        gid = _guarantee_id(rel)
+        if gid is not None:
+            changed_guarantees.add(gid)
+    owned = {g for g in (_guarantee_id(rel) for rel in current) if g is not None}
+    return type_changed, changed_guarantees, owned
 
 
-def _analyze(changed_ids, repo_root: Path):
+# --- core ---------------------------------------------------------------------
+
+
+def _frontmatter(component):
+    root = _get(component, "root")
+    if root is None:
+        return {}
+    return _get(root, "frontmatter") or {}
+
+
+def _lint_failures(linter, repo_root: Path):
+    report = linter.lint(None, repo_root)
+    return sum(1 for f in (_get(report, "findings") or []) if _get(f, "severity") == "fail")
+
+
+def compute_blast_radius(changed_ids, repo_root) -> BlastRadiusReport:
     repo_root = Path(repo_root)
     linter = _load_spec_linter(repo_root)
-    lint_report = linter.lint(None, repo_root)
-    fails = [f for f in (_get(lint_report, "findings") or []) if _get(f, "severity") == "fail"]
-    if fails:
-        msg = f"corpus is not lint-clean: {len(fails)} fail-severity finding(s)"
-        return BlastRadiusReport(impacted=[], precondition_error=msg), None
-
+    failures = _lint_failures(linter, repo_root)
+    if failures:
+        return BlastRadiusReport(
+            impacted=[],
+            precondition_error=(
+                f"corpus did not pass spec-linter cleanly ({failures} fail-severity finding(s))"
+            ),
+        )
     corpus = linter.load_corpus(repo_root)
-    docs = _get(corpus, "docs") or []
-    known = set(_get(corpus, "id_index") or {})
-    var_ids, cap_ids = set(), set()
-    for doc in docs:
-        doc_id = _get(doc, "doc_id")
-        known.add(doc_id)
-        doc_type = _get(doc, "doc_type")
-        if doc_type == "var":
-            var_ids.add(doc_id)
-        elif doc_type == "product":
-            cap_ids.add(doc_id)
+    components = _get(corpus, "components") or {}
+    slugs = sorted(components)
+    fms = {"comp-" + slug: _frontmatter(components[slug]) for slug in slugs}
 
-    comps = {}  # component id -> (slug, frontmatter)
-    owner = {}  # G-id -> owning component id
-    for slug, comp in sorted((_get(corpus, "components") or {}).items()):
-        root = _get(comp, "root")
-        if root is None:
-            continue
-        fm = _get(root, "frontmatter") or {}
-        cid = _get(fm, "id")
-        comps[cid] = (slug, fm)
-        for gid in _get(comp, "interface_guarantees") or {}:
-            owner[gid] = cid
+    doc_types = {}
+    for doc in _get(corpus, "docs") or []:
+        doc_types[_get(doc, "doc_id")] = _get(doc, "doc_type")
 
     changed = sorted(set(changed_ids))
-    direct = [c for c in changed if c in comps]
-    base = _prior_commit(repo_root)
+    changed_components = [c for c in changed if c in fms]
+    changed_vars = [c for c in changed if doc_types.get(c) == "var"]
+    changed_caps = [c for c in changed if doc_types.get(c) == "product"]
 
-    def dependents(key, target):
-        return sorted(c for c, (_, fm) in comps.items() if target in _as_list(_get(fm, key)))
-
+    direct = {cid: ImpactedComponent(cid, "direct", None) for cid in changed_components}
     found = {}
-    for cid in direct:
-        slug = comps[cid][0]
-        cdir = f"specs/components/{slug}/interface"
-        base_files = _base_files(repo_root, base, cdir)
-        work_files = _work_files(repo_root, cdir)
 
-        def is_interface(path, cdir=cdir):
-            return path in (f"{cdir}/cli.md", f"{cdir}/library.md") or path.startswith(f"{cdir}/data/")
+    def add(cid, entry):
+        if cid not in direct and cid not in found:
+            found[cid] = entry
 
-        def is_guarantee(path, cdir=cdir):
-            parent, _, name = path.rpartition("/")
-            return parent == f"{cdir}/guarantees" and fnmatch.fnmatchcase(name, "G-*.md")
+    commit = _prior_commit(repo_root) if changed_components else None
 
-        deps = dependents("depends_on", cid)
-        if _changed(base_files, work_files, is_interface):
-            for dep in deps:
-                found.setdefault(dep, ImpactedComponent(dep, "transitive-interface", cid))
-        changed_g = sorted(
-            Path(p).stem for p in _changed(base_files, work_files, is_guarantee)
-        )
+    for upstream in changed_components:
+        slug = upstream[len("comp-"):]
+        type_changed, changed_g, owned = _interface_changes(repo_root, commit, slug)
+        dependents = [
+            cid for cid in sorted(fms)
+            if cid != upstream and upstream in (fms[cid].get("depends_on") or [])
+        ]
+        if type_changed:
+            for cid in dependents:
+                add(cid, ImpactedComponent(cid, "transitive-interface", upstream))
         if changed_g:
-            for dep in deps:
-                declared = [
-                    g for g in _as_list(_get(comps[dep][1], "depends_on_guarantees"))
-                    if owner.get(g) == cid
-                ]
+            for cid in dependents:
+                declared = set(fms[cid].get("depends_on_guarantees") or []) & owned
                 if declared:
-                    hit = sorted(set(declared) & set(changed_g))
+                    hit = declared & changed_g
                     if hit:
-                        found.setdefault(
-                            dep, ImpactedComponent(dep, "transitive-guarantee", cid, hit)
-                        )
+                        add(cid, ImpactedComponent(cid, "transitive-guarantee", upstream, sorted(hit)))
                 else:
-                    found.setdefault(
-                        dep, ImpactedComponent(dep, "transitive-guarantee", cid, list(changed_g))
-                    )
+                    add(cid, ImpactedComponent(cid, "transitive-guarantee", upstream, sorted(changed_g)))
 
-    for vid in (v for v in changed if v in var_ids):
-        for dep in dependents("uses_var", vid):
-            found.setdefault(dep, ImpactedComponent(dep, "transitive-var", vid))
+    for var in changed_vars:
+        for cid in sorted(fms):
+            if var in (fms[cid].get("uses_var") or []):
+                add(cid, ImpactedComponent(cid, "transitive-var", var))
 
-    for pid in (p for p in changed if p in cap_ids):
-        for dep in dependents("realizes", pid):
-            found.setdefault(dep, ImpactedComponent(dep, "transitive-capability", pid))
+    for cap in changed_caps:
+        for cid in sorted(fms):
+            if cap in (fms[cid].get("realizes") or []):
+                add(cid, ImpactedComponent(cid, "transitive-capability", cap))
 
-    impacted = [ImpactedComponent(c, "direct", None) for c in direct]
-    impacted += [found[c] for c in sorted(found) if c not in direct]
-    return BlastRadiusReport(impacted=impacted, precondition_error=None), known
-
-
-def compute_blast_radius(changed_ids: list, repo_root: Path) -> BlastRadiusReport:
-    return _analyze(changed_ids, repo_root)[0]
+    impacted = [direct[c] for c in sorted(direct)] + [found[c] for c in sorted(found)]
+    return BlastRadiusReport(impacted=impacted, precondition_error=None)
 
 
-# --------------------------------------------------------------------------
-# CLI
-# --------------------------------------------------------------------------
+# --- CLI ----------------------------------------------------------------------
 
 
 class _UsageError(Exception):
     pass
 
 
-def _parse(argv: list) -> tuple:
-    changed, repo_root, fmt = [], None, "text"
+def _parse(argv):
+    ids = []
+    repo_root = None
+    fmt = "text"
+    collecting = False
     i = 0
-    n = len(argv)
-
-    def take_ids(j):
-        while j < n and not argv[j].startswith("-"):
-            changed.append(argv[j])
-            j += 1
-        return j
-
-    while i < n:
+    while i < len(argv):
         tok = argv[i]
         if tok == "--changed":
-            if i + 1 >= n:
-                raise _UsageError("--changed requires a value")
-            i = take_ids(i + 1)
-            continue
-        if tok.startswith("--changed="):
-            changed.append(tok[len("--changed="):])
-            i = take_ids(i + 1)
-            continue
-        if tok in ("--repo-root", "--format"):
-            if i + 1 >= n:
+            collecting = True
+        elif tok.startswith("--changed="):
+            ids.append(tok[len("--changed="):])
+            collecting = True
+        elif tok in ("--repo-root", "--format"):
+            collecting = False
+            if i + 1 >= len(argv):
                 raise _UsageError(f"{tok} requires a value")
-            name, value = tok, argv[i + 1]
-            i += 2
-        elif tok.startswith("--repo-root=") or tok.startswith("--format="):
-            name, _, value = tok.partition("=")
             i += 1
+            if tok == "--repo-root":
+                repo_root = argv[i]
+            else:
+                fmt = argv[i]
+        elif tok.startswith("--repo-root="):
+            collecting = False
+            repo_root = tok[len("--repo-root="):]
+        elif tok.startswith("--format="):
+            collecting = False
+            fmt = tok[len("--format="):]
+        elif tok.startswith("-"):
+            raise _UsageError(f"unknown argument: {tok}")
+        elif collecting:
+            ids.append(tok)
         else:
             raise _UsageError(f"unknown argument: {tok}")
-        if name == "--repo-root":
-            repo_root = value
-        else:
-            if value not in ("json", "text"):
-                raise _UsageError(f"invalid --format value: {value}")
-            fmt = value
-    if not changed:
-        raise _UsageError("no --changed ids given")
-    return changed, repo_root, fmt
+        i += 1
+    if fmt not in ("json", "text"):
+        raise _UsageError(f"invalid --format value: {fmt}")
+    if not ids:
+        raise _UsageError("--changed requires at least one spec id")
+    return ids, repo_root, fmt
 
 
-def _default_repo_root() -> Path:
+def _default_repo_root():
     out = _git(Path.cwd(), "rev-parse", "--show-toplevel")
     if out is None:
         return Path.cwd()
     return Path(out.decode().strip())
 
 
-def _usage_error(cause: str) -> int:
+def _usage_error(cause):
     print(f"usage error: {cause}", file=sys.stderr)
     print(USAGE, file=sys.stderr)
     return 2
 
 
-def _text(report: BlastRadiusReport) -> str:
+def _known_ids(repo_root: Path):
+    corpus = _load_spec_linter(repo_root).load_corpus(repo_root)
+    known = {_get(doc, "doc_id") for doc in (_get(corpus, "docs") or [])}
+    known |= set(_get(corpus, "id_index") or {})
+    known |= {"comp-" + slug for slug in (_get(corpus, "components") or {})}
+    return known
+
+
+def _render_text(report: BlastRadiusReport):
     if report.precondition_error is not None:
         return f"precondition error: {report.precondition_error}"
     if not report.impacted:
         return "no components impacted"
     lines = []
-    for e in report.impacted:
-        parts = [e.component_id, e.reason]
-        if e.via is not None:
-            parts.append(f"via {e.via}")
-        if e.reason == "transitive-guarantee":
-            parts.append(",".join(e.guarantee_ids))
+    for entry in report.impacted:
+        parts = [entry.component_id, entry.reason]
+        if entry.via is not None:
+            parts.append(f"via {entry.via}")
+        if entry.reason == "transitive-guarantee":
+            parts.append(",".join(entry.guarantee_ids))
         lines.append("\t".join(parts))
     return "\n".join(lines)
 
 
-def main(argv: list | None = None) -> int:
+def main(argv=None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     try:
-        changed, repo_root, fmt = _parse(list(argv))
+        ids, repo_root, fmt = _parse(list(argv))
     except _UsageError as exc:
         return _usage_error(str(exc))
     root = Path(repo_root) if repo_root is not None else _default_repo_root()
-    report, known = _analyze(changed, root)
-    if report.precondition_error is None:
-        unknown = sorted(c for c in set(changed) if c not in known)
-        if unknown:
-            return _usage_error(f"unknown spec id: {', '.join(unknown)}")
+    known = _known_ids(root)
+    for spec_id in ids:
+        if spec_id not in known:
+            return _usage_error(f"unknown spec id: {spec_id}")
+    report = compute_blast_radius(ids, root)
     if fmt == "json":
         print(json.dumps(report.to_dict(), indent=2))
     else:
-        print(_text(report))
+        print(_render_text(report))
     return 1 if report.precondition_error is not None else 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

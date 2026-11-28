@@ -4,9 +4,11 @@ Covers: R-LINT-015
 Kind: generated-test
 
 ```gherkin
-Given a corpus with no fail-severity finding, at least one warn finding,
-  and one Definitions entry naming a glossary term in words that are
-  not near-verbatim
+Given testing.md's clean corpus written with write_corpus and these
+  changes: specs/glossary.md holding "# Glossary", "", "- **Foo** — a
+  made thing."; foo's component.md's Definitions body replaced by
+  "- **Foo** — a widget the team sells by weight."; and
+  interface/cli.md added as testing.md's one-warn edit
 When lint(None, repo_root) runs with no judge
 Then that entry's R-LINT-015 finding has severity "skipped", and
   hard_failures, warnings and skipped equal the numbers of fail, warn

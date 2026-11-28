@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:d43d722dfbeec4a4c3bc846e0a33ecd3d6a45ea9454ad8132501f2078d48af83
+# hotdocs-criterion: sha256:44b85fde140a55ff77cfdd7f62abe5b82b3d8267155075a06392cf5d6c109847
 import os
 import sys
 import urllib.request
@@ -9,7 +9,7 @@ import pytest
 import secret_scanner
 
 
-LOG_ENV = "SECRET_SCANNER_AC012_CACHE_LOG"
+LOG_ENV = "SECRET_SCANNER_TEST_CM_LOG"
 
 
 def field(value, name):
@@ -17,142 +17,151 @@ def field(value, name):
 
 
 def _fake_cache_manager_source():
-    lines = [
-        "import dataclasses",
-        "import os",
-        "import time",
-        "",
-        "LOG_ENV = " + repr(LOG_ENV),
-        "",
-        "",
-        "def _log(name):",
-        "    p = os.environ.get(LOG_ENV)",
-        "    if p:",
-        "        with open(p, 'a') as fh:",
-        "            fh.write(name + chr(10))",
-        "",
-        "",
-        "class SchemaValidationError(ValueError):",
-        "    pass",
-        "",
-        "",
-        "class Miss:",
-        "    def __eq__(self, other):",
-        "        return isinstance(other, Miss)",
-        "",
-        "    def __hash__(self):",
-        "        return 0",
-        "",
-        "",
-        "@dataclasses.dataclass",
-        "class CacheKey:",
-        "    spec_bundle_hash: str",
-        "    gate_inputs_hash: str",
-        "    gate_version: str",
-        "    model_pin: str",
-        "",
-        "    def __post_init__(self):",
-        "        _log('CacheKey')",
-        "",
-        "",
-        "@dataclasses.dataclass",
-        "class CachedResult:",
-        "    gate_type: str",
-        "    payload: dict",
-        "    stored_at: str",
-        "",
-        "    def __post_init__(self):",
-        "        _log('CachedResult')",
-        "",
-        "",
-        "def get(cache_key, *, repo_root=None):",
-        "    _log('get')",
-        "    return Miss()",
-        "",
-        "",
-        "def put(cache_key, result, *, repo_root=None):",
-        "    _log('put')",
-        "    return None",
-        "",
-        "",
-        "def now_iso():",
-        "    _log('now_iso')",
-        "    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())",
-        "",
-        "",
-        "def stats(*, repo_root=None):",
-        "    _log('stats')",
-        "    return dict(entry_count=0)",
-        "",
-    ]
-    return "\n".join(lines)
+    return (
+        "import os\n"
+        "from dataclasses import dataclass\n"
+        "from pathlib import Path\n"
+        "\n"
+        "_LOG_ENV = " + repr(LOG_ENV) + "\n"
+        "\n"
+        "\n"
+        "def _log(name):\n"
+        "    path = os.environ.get(_LOG_ENV)\n"
+        "    if path:\n"
+        "        with open(path, 'a', encoding='utf-8') as fh:\n"
+        "            fh.write(name + '\\n')\n"
+        "\n"
+        "\n"
+        "class SchemaValidationError(ValueError):\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "class Miss:\n"
+        "    def __eq__(self, other):\n"
+        "        return isinstance(other, Miss)\n"
+        "\n"
+        "    def __hash__(self):\n"
+        "        return hash('Miss')\n"
+        "\n"
+        "\n"
+        "@dataclass\n"
+        "class CacheKey:\n"
+        "    spec_bundle_hash: str\n"
+        "    gate_inputs_hash: str\n"
+        "    gate_version: str\n"
+        "    model_pin: str\n"
+        "\n"
+        "    def __post_init__(self):\n"
+        "        _log('CacheKey')\n"
+        "\n"
+        "\n"
+        "@dataclass\n"
+        "class CachedResult:\n"
+        "    gate_type: str\n"
+        "    payload: dict\n"
+        "    stored_at: str\n"
+        "\n"
+        "    def __post_init__(self):\n"
+        "        _log('CachedResult')\n"
+        "\n"
+        "\n"
+        "def get(cache_key, *, repo_root=None):\n"
+        "    _log('get')\n"
+        "    return Miss()\n"
+        "\n"
+        "\n"
+        "def put(cache_key, result, *, repo_root=None):\n"
+        "    _log('put')\n"
+        "    return None\n"
+        "\n"
+        "\n"
+        "def now_iso():\n"
+        "    _log('now_iso')\n"
+        "    return '2026-01-01T00:00:00Z'\n"
+        "\n"
+        "\n"
+        "def stats(*, repo_root=None):\n"
+        "    _log('stats')\n"
+        "    return {'entry_count': 0}\n"
+    )
 
 
 def _write_fake_cache_manager(repo_root):
-    d = repo_root / "gen" / "cache-manager"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "cache_manager.py").write_text(_fake_cache_manager_source())
-
-
-def _write_secret_file(repo_root):
-    # Built at runtime so this test file holds no detectable literal.
-    key = "AKIA" + "IOSFODNN7" + "EXAMPLE"
-    src = "AWS_ACCESS_KEY_ID = " + repr(key) + "\n"
-    target = repo_root / "src" / "config.py"
+    target = repo_root / "gen" / "cache-manager" / "cache_manager.py"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(src)
+    target.write_text(_fake_cache_manager_source(), encoding="utf-8")
+    return target
 
 
 def _snapshot(root):
     snap = {}
-    st = root.stat()
-    snap["."] = ("dir", None, st.st_mtime_ns)
-    for p in sorted(root.rglob("*")):
-        rel = p.relative_to(root).as_posix()
-        st = p.stat()
-        if p.is_dir():
-            snap[rel] = ("dir", None, st.st_mtime_ns)
-        else:
-            snap[rel] = ("file", p.read_bytes(), st.st_mtime_ns)
+    for dirpath, dirnames, filenames in os.walk(root):
+        d = Path(dirpath)
+        snap[("dir", str(d.relative_to(root)))] = None
+        for name in filenames:
+            p = d / name
+            st = p.stat()
+            snap[("file", str(p.relative_to(root)))] = (
+                p.read_bytes(),
+                st.st_mtime_ns,
+                st.st_size,
+            )
     return snap
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    log_dir = tmp_path / "log"
-    log_dir.mkdir()
-    log_path = log_dir / "calls.log"
-    monkeypatch.setenv(LOG_ENV, str(log_path))
+def isolated_env(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
 
-    def _no_network(*args, **kwargs):
+    webhook_calls = []
+
+    def fake_urlopen(*args, **kwargs):
+        webhook_calls.append((args, kwargs))
         raise OSError("network disabled in test")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
-    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_file = log_dir / "cache_manager_calls.log"
+    monkeypatch.setenv(LOG_ENV, str(log_file))
+
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    return repo_root, log_path
+    return repo_root, log_file, webhook_calls
 
 
-@pytest.mark.parametrize("with_secret", [False, True])
-def test_gate_version_matches_scan_result(env, with_secret):
-    repo_root, _log_path = env
+def _read_log(log_file):
+    if not log_file.exists():
+        return []
+    return [line for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_gate_version_matches_scan_result(isolated_env):
+    repo_root, log_file, _ = isolated_env
     _write_fake_cache_manager(repo_root)
-    if with_secret:
-        _write_secret_file(repo_root)
+    (repo_root / "README.md").write_text("hello world\n", encoding="utf-8")
 
     version = secret_scanner.gate_version(repo_root)
     result = secret_scanner.scan(repo_root)
 
     assert isinstance(version, str)
+    assert version
     assert version == field(result, "gate_version")
 
 
-def test_gate_version_does_not_scan_call_cache_or_write(env):
-    repo_root, log_path = env
+def test_gate_version_does_not_call_cache_manager_or_write(isolated_env):
+    repo_root, log_file, webhook_calls = isolated_env
     _write_fake_cache_manager(repo_root)
-    _write_secret_file(repo_root)
+
+    secret_dir = repo_root / "gen" / "foo"
+    secret_dir.mkdir(parents=True, exist_ok=True)
+    aws_key = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+    (secret_dir / "config.py").write_text(
+        "AWS_ACCESS_KEY_ID = " + repr(aws_key) + "\n", encoding="utf-8"
+    )
 
     before = _snapshot(repo_root)
 
@@ -161,11 +170,7 @@ def test_gate_version_does_not_scan_call_cache_or_write(env):
     after = _snapshot(repo_root)
 
     assert isinstance(version, str)
-    calls = log_path.read_text().splitlines() if log_path.exists() else []
-    assert calls == [], "cache-manager stand-in was called: " + repr(calls)
-    assert sorted(after.keys()) == sorted(before.keys()), (
-        "files created or removed under repo_root: "
-        + repr(sorted(set(after) ^ set(before)))
-    )
-    for rel, entry in before.items():
-        assert after[rel] == entry, "changed under repo_root: " + repr(rel)
+    assert version
+    assert _read_log(log_file) == [], "cache-manager stand-in was called"
+    assert after == before, "gate_version created or changed files under repo_root"
+    assert webhook_calls == []

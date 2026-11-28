@@ -25,7 +25,7 @@ that follow, so a spec can be checked against them before generation
   card, its vars, and the glossary. It never sees `acceptance/` or any
   test.
 - **A criterion's test author** sees that criterion's `CriterionBundle`
-  (`verifier-orchestrator`'s `R-VERIFY-009`): the criterion's own text,
+  (`test-supply`'s `R-SUPPLY-001`): the criterion's own text,
   the text of the one requirement its `Covers:` names, the component's
   `interface/` with its `Implements:` documents, each dependency's
   `interface/`, and the glossary. It never sees another criterion,

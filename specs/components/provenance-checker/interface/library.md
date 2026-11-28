@@ -4,15 +4,11 @@ The importable module is `provenance_checker`
 (`gen/provenance-checker/provenance_checker.py`).
 
 ```
-check_provenance(component_id: str, spec_bundle_hash: str, gate_versions: dict[str, str], repo_root: Path) -> ProvenanceCheckResult
+check_provenance(component_id: str, spec_bundle_hash: str, gate_versions: dict[str, str], repo_root: Path, spec_bundle_parts: dict | None = None) -> ProvenanceCheckResult
 current_provenance_key(component_id: str, repo_root: Path) -> ProvenanceKey
 current_sealed_key(component_id: str, repo_root: Path) -> SealedKey | None
 check_sealed_provenance(component_id: str, repo_root: Path) -> SealedCheckResult
 ```
-
-`check_provenance` is a pure function of the working tree's current
-state plus `VAR-TRUST-JUDGE-PROVENANCE` — no network access, no model
-call, except what an adapter's `provision` does (`R-PROVCHECK-004`).
 
 `current_provenance_key` is the one definition of the values a caller
 passes to `check_provenance`, and that `component-gate-runner` passes
@@ -24,7 +20,7 @@ it reads no `component.md` to find them. The module is
 `<dir>/<module>.py`, else `<dir>/<module>/__init__.py`, where `<module>`
 is the slug with hyphens replaced by underscores (`spec_bundle_assembler`,
 `criterion_compiler`, `test_author`, `verifier_orchestrator`,
-`license_scanner`, `secret_scanner`, `generator`). Only when `<dir>` is
+`license_scanner`, `secret_scanner`, `generator`, `run_environment`). Only when `<dir>` is
 absent under `repo_root` is the tool root's copy used (`D199`). Each is
 loaded from its file afresh on every call, never reused from an earlier
 `sys.modules` entry. Beyond
@@ -32,7 +28,7 @@ loading these and the asset reads below, it reads nothing under
 `repo_root`: every other corpus read happens inside `assemble`. It reads, in this order:
 
 1. `spec-bundle-assembler`'s `assemble(component_id, repo_root=...,
-   mode="cold")`, taking only its `spec_bundle_hash`
+   mode="cold")`, taking only its `spec_bundle_hash` and `spec_bundle_parts`
 2. `criterion-compiler`'s `GATE_VERSION`
 3. `test-author`'s `GATE_VERSION`
 4. `verifier-orchestrator`'s `GATE_VERSION`
@@ -40,23 +36,14 @@ loading these and the asset reads below, it reads nothing under
 6. `secret-scanner`'s `gate_version(repo_root)`
 7. `generator`'s `GATE_VERSION` and `PROMPT_VERSION`
 
-No network access, no model call, no write, `provision` aside
-(`R-PROVCHECK-004`).
-
-## Assets (`D343`, `D344`)
+## Assets and drivers (`D343`, `D373`)
 
 `current_provenance_key` and `check_provenance` (the latter only after
-`spec_bundle_hash` and `gate_versions` match) read the component's
-`<repo_root>/specs/components/<slug>/component.md` frontmatter `assets`
-and, per kind, the implicit `python` first and then each declared
-kind, the repository's definition
-`<repo_root>/specs/architecture/asset-kind-<kind>.md`, if any, and the
-adapter `asset-kinds.md`'s Lookup finds: `<repo_root>/gen/kind-<kind>/kind_<module>.py`,
-else the tool root's, the tool root as asset-kinds.md defines it. The adapter is loaded by path afresh on every call, with
-`sys.dont_write_bytecode` true while it loads so no `__pycache__` is
-written (`R-PROVCHECK-004`); only its `provision(repo_root)` is called (`R-PROVCHECK-009`). A miss in
-`versions` or `lockfile_sha256` alone is `environment differs`
-(`R-PROVCHECK-010`, `D345`).
+`spec_bundle_hash` and `gate_versions` match) take a component's assets
+and drivers values from `run-environment`'s `prepare`, loaded from
+`<repo_root>/gen/run-environment/`, else the tool root's
+(`R-PROVCHECK-009`). A miss in `versions` or `lockfile_sha256` alone is
+`environment differs` (`R-PROVCHECK-010`, `D345`).
 
 ## Sealed components (`D170`)
 

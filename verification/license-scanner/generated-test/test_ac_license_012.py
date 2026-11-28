@@ -1,4 +1,6 @@
-# hotdocs-criterion: sha256:79e7d45c5cb685a6466301b00fbd3c41c475006abfee90f4fe74fb2e2b251059
+# hotdocs-criterion: sha256:f857aa152f2574819c761472685cadf18bc37cfe84e723c69c02631d87329aca
+"""AC-LICENSE-012 (covers R-LICENSE-010): evaluated/reason semantics of LicenseScanResult."""
+
 import hashlib
 import json
 from pathlib import Path
@@ -12,8 +14,9 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-FAKE_CACHE_BODY = (
+FAKE_CACHE_MANAGER_SOURCE = (
     "import dataclasses\n"
+    "import datetime\n"
     "\n"
     "\n"
     "@dataclasses.dataclass\n"
@@ -43,67 +46,61 @@ FAKE_CACHE_BODY = (
     "    pass\n"
     "\n"
     "\n"
-    "def _log(line):\n"
-    "    with open(LOG_PATH, 'a') as fh:\n"
-    "        fh.write(line + '\\n')\n"
-    "\n"
-    "\n"
     "def get(cache_key, *, repo_root=None):\n"
-    "    _log('get')\n"
     "    return Miss()\n"
     "\n"
     "\n"
     "def put(cache_key, result, *, repo_root=None):\n"
-    "    _log('put')\n"
     "    return None\n"
     "\n"
     "\n"
     "def now_iso():\n"
-    "    import datetime\n"
-    "    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+    "    return datetime.datetime.now(datetime.timezone.utc).strftime("
+    + repr("%Y-%m-%dT%H:%M:%SZ")
+    + ")\n"
     "\n"
     "\n"
     "def stats(*, repo_root=None):\n"
-    "    return {'entry_count': 0}\n"
+    "    return dict(entry_count=0)\n"
 )
 
-
 FOO_SOURCE = (
-    "def compute_total(alpha, beta, gamma, delta):\n"
-    "    result = alpha + beta + gamma + delta\n"
-    "    values = [alpha, beta, gamma, delta, 42, 7, 99]\n"
-    "    for item in values:\n"
-    "        result = result + item * 3\n"
+    "def compute_total(values, factor):\n"
+    "    result = 0\n"
+    "    for value in values:\n"
+    "        result = result + value * factor\n"
     "    return result\n"
     "\n"
     "\n"
-    "def another_function(x, y, z):\n"
-    "    return compute_total(x, y, z, 12345)\n"
+    "class Accumulator:\n"
+    "    def __init__(self, start):\n"
+    "        self.total = start\n"
+    "\n"
+    "    def add(self, amount):\n"
+    "        self.total = self.total + amount\n"
+    "        return self.total\n"
 )
 
 
-def _make_repo(tmp_path, name):
-    repo_root = tmp_path / name
-    (repo_root / "gen" / "foo").mkdir(parents=True)
-    (repo_root / "gen" / "foo" / "foo.py").write_text(FOO_SOURCE)
-    cache_dir = repo_root / "gen" / "cache-manager"
-    cache_dir.mkdir(parents=True)
-    log_path = tmp_path / (name + "-cache.log")
-    source = "LOG_PATH = " + repr(str(log_path)) + "\n" + FAKE_CACHE_BODY
-    (cache_dir / "cache_manager.py").write_text(source)
-    return repo_root
-
-
-@pytest.fixture(autouse=True)
-def _clean_env(monkeypatch):
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    (root / "gen" / "foo").mkdir(parents=True)
+    (root / "gen" / "foo" / "foo.py").write_text(FOO_SOURCE, encoding="utf-8")
+    cm_dir = root / "gen" / "cache-manager"
+    cm_dir.mkdir(parents=True)
+    (cm_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE, encoding="utf-8")
     monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    return root
 
 
-def test_no_reference_corpus(tmp_path, monkeypatch):
-    repo_root = _make_repo(tmp_path, "repo_unset")
-    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
+def _is_number(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
+
+def test_unset_corpus_is_not_evaluated_and_not_blocked(repo_root):
     result = license_scanner.scan("comp-foo", repo_root)
 
     assert field(result, "evaluated") is False
@@ -115,10 +112,12 @@ def test_no_reference_corpus(tmp_path, monkeypatch):
     assert field(result, "gate_version") == "license_scanner@4.0.0-no-reference-corpus"
 
 
-def test_empty_entries_corpus_is_invalid(tmp_path, monkeypatch):
-    repo_root = _make_repo(tmp_path, "repo_empty")
+def test_empty_entries_corpus_is_invalid_and_blocks(repo_root, monkeypatch):
     corpus_path = repo_root / "corpus.json"
-    corpus_path.write_text(json.dumps({"corpus_version": 1, "block_threshold": 0.7, "entries": []}))
+    corpus_path.write_text(
+        json.dumps({"corpus_version": 2, "block_threshold": 0.7, "entries": []}),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
 
     result = license_scanner.scan("comp-foo", repo_root)
@@ -126,26 +125,34 @@ def test_empty_entries_corpus_is_invalid(tmp_path, monkeypatch):
     assert field(result, "evaluated") is False
     assert field(result, "reason") == "corpus-invalid"
     assert field(result, "blocked") is True
+    assert field(result, "similarity_score") is None
+    assert field(result, "block_threshold") is None
+    assert list(field(result, "matches")) == []
 
 
-def test_valid_corpus_no_shared_windows(tmp_path, monkeypatch):
-    repo_root = _make_repo(tmp_path, "repo_valid")
+def test_usable_corpus_with_no_shared_windows_scores_zero(repo_root, monkeypatch):
+    unrelated_window = "\x1f".join(
+        ["zebra", "quokka", "xylophone", "marmalade", "nebula",
+         "obsidian", "pelican", "quasar", "rhubarb"]
+    )
+    unrelated_hash = hashlib.sha256(unrelated_window.encode("utf-8")).hexdigest()
     corpus = {
-        "corpus_version": 3,
+        "corpus_version": 7,
         "block_threshold": 0.7,
         "entries": [
             {
                 "reference_id": "ref-001",
-                "license_family": "MIT",
+                "license_family": "GPL",
                 "risk_tier": "low",
-                "hashes": [hashlib.sha256(b"definitely-not-a-window").hexdigest()],
+                "hashes": [unrelated_hash],
             }
         ],
     }
     corpus_path = repo_root / "corpus.json"
-    corpus_path.write_text(json.dumps(corpus))
-    corpus_bytes = corpus_path.read_bytes()
+    corpus_path.write_bytes(json.dumps(corpus).encode("utf-8"))
     monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+
+    expected_h = hashlib.sha256(corpus_path.read_bytes()).hexdigest()[:12]
 
     result = license_scanner.scan("comp-foo", repo_root)
 
@@ -153,8 +160,7 @@ def test_valid_corpus_no_shared_windows(tmp_path, monkeypatch):
     assert field(result, "reason") is None
     score = field(result, "similarity_score")
     assert score is not None
-    assert isinstance(score, (int, float)) and not isinstance(score, bool)
+    assert _is_number(score)
     assert score == 0.0
     assert field(result, "blocked") is False
-    expected = "license_scanner@4.0." + "3" + "+" + hashlib.sha256(corpus_bytes).hexdigest()[:12]
-    assert field(result, "gate_version") == expected
+    assert field(result, "gate_version") == "license_scanner@4.0.7+" + expected_h

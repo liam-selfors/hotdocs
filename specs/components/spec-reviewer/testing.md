@@ -60,3 +60,5 @@ Then it returns 4
 
 `interface/library.md`: `# Library` and a fenced `foo(x: int) -> int`.
 `constraints.md`: `# Constraints` and `None.`
+
+All criteria are `kind: generated-test`, with an injected mock model.

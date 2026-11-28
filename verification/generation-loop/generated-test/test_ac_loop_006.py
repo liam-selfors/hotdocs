@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:3af97adb1cb2455896623fc77f08bf8673ba1bfb52c63f71b4da6a3882e292f4
+# hotdocs-criterion: sha256:9ef10bf988a07b390c19c89fe20454b6bb11fec16c617a4e2a247525477fec14
 import json
 from pathlib import Path
 
@@ -22,31 +22,26 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def _setup(tmp_path):
+def _build_repo(tmp_path):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
     logs = tmp_path / "logs"
     logs.mkdir()
+    author_log = logs / "author.log"
+    llm_log = logs / "llm.log"
+    reply_cfg = logs / "reply.json"
 
     _write(repo_root / "gen" / "widget" / "widget.py", "CODE-MARK = 1\n")
-    pyc = repo_root / "gen" / "widget" / "__pycache__" / "x.pyc"
-    pyc.parent.mkdir(parents=True, exist_ok=True)
-    pyc.write_bytes(b"PYC-MARK-SHOULD-BE-SKIPPED\n")
-
-    author_log = logs / "author.jsonl"
-    llm_log = logs / "llm.jsonl"
-    control = logs / "control.json"
+    _write(repo_root / "gen" / "widget" / "__pycache__" / "x.pyc", "PYC-MARK\n")
 
     author_src = "\n".join([
         "import json",
         "LOG = " + repr(str(author_log)),
         "",
         "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):",
-        "    rec = {'bundle': dict(bundle), 'model': model, 'seed': seed,",
-        "           'repo_root': None if repo_root is None else str(repo_root),",
-        "           'llm_backend': repr(llm_backend)}",
         "    with open(LOG, 'a', encoding='utf-8') as f:",
-        "        f.write(json.dumps(rec) + '\\n')",
+        "        f.write(json.dumps({'bundle': dict(bundle), 'model': model, 'seed': seed,",
+        "                            'repo_root': str(repo_root),",
+        "                            'llm_backend_is_none': llm_backend is None}) + '\\n')",
         "    return {",
         "        'component_id': bundle['component_id'],",
         "        'criterion_id': 'AC-WIDGET-001',",
@@ -55,7 +50,7 @@ def _setup(tmp_path):
         "        'prompt_version': 'v1',",
         "        'cache_hit': False,",
         "        'file': {'path': 'verification/widget/generated-test/test_ac_widget_001.py',",
-        "                 'content': 'def test_x():\\n    pass\\n'},",
+        "                 'content': 'AUTHORED-MARK'},",
         "        'model_call_error': None,",
         "        'repair_attempts': 0,",
         "        'probe_findings': [],",
@@ -67,83 +62,85 @@ def _setup(tmp_path):
     llm_src = "\n".join([
         "import json",
         "LOG = " + repr(str(llm_log)),
-        "CONTROL = " + repr(str(control)),
+        "REPLY = " + repr(str(reply_cfg)),
         "",
         "def complete(prompt, model, *, backend=None, **params):",
         "    with open(LOG, 'a', encoding='utf-8') as f:",
         "        f.write(json.dumps({'prompt': prompt, 'model': model}) + '\\n')",
-        "    with open(CONTROL, encoding='utf-8') as f:",
-        "        ctl = json.load(f)",
-        "    if ctl.get('error') is not None:",
+        "    with open(REPLY, encoding='utf-8') as f:",
+        "        cfg = json.load(f)",
+        "    if cfg['kind'] == 'error':",
         "        return {'text': None, 'model': model, 'backend': 'mock',",
-        "                'model_call_error': ctl['error']}",
-        "    return {'text': ctl['text'], 'model': model, 'backend': 'mock',",
+        "                'model_call_error': {'category': 'network', 'message': 'down'}}",
+        "    return {'text': cfg['text'], 'model': model, 'backend': 'mock',",
         "            'model_call_error': None}",
         "",
     ])
     _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", llm_src)
 
-    return repo_root, author_log, llm_log, control
+    return repo_root, author_log, llm_log, reply_cfg
 
 
-def _set_reply(control, text=None, error=None):
-    control.write_text(json.dumps({"text": text, "error": error}), encoding="utf-8")
+def _set_reply(reply_cfg, cfg):
+    reply_cfg.write_text(json.dumps(cfg), encoding="utf-8")
 
 
-def _read_lines(path):
+def _lines(path):
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def test_closures_call_author_test_and_judge_builds_prompt(tmp_path):
-    repo_root, author_log, llm_log, control = _setup(tmp_path)
-    _set_reply(control, text='```json\n{"result": "pass", "rationale": "ok"}\n```')
+def test_ac_loop_006_closures(tmp_path):
+    repo_root, author_log, llm_log, reply_cfg = _build_repo(tmp_path)
+    _set_reply(reply_cfg, {
+        "kind": "text",
+        "text": "```json\n{\"result\": \"pass\", \"rationale\": \"ok\"}\n```",
+    })
 
     closures = generation_loop.make_closures("m", 4, repo_root)
+    assert isinstance(closures, tuple)
     assert len(closures) == 2
     test_author, judge = closures
 
+    # test_author closure
     authored = test_author(dict(BUNDLE))
-    records = _read_lines(author_log)
-    assert len(records) == 1
-    rec = records[0]
-    assert rec["bundle"] == BUNDLE
-    assert rec["model"] == "m"
-    assert rec["seed"] == 4
-    assert Path(rec["repo_root"]).resolve() == repo_root.resolve()
-    assert field(authored, "component_id") == "comp-widget"
-    assert field(authored, "seed") == 4
-    assert field(authored, "model") == "m"
+    calls = _lines(author_log)
+    assert len(calls) == 1
+    assert calls[0]["bundle"] == BUNDLE
+    assert calls[0]["model"] == "m"
+    assert calls[0]["seed"] == 4
+    assert field(field(authored, "file"), "content") == "AUTHORED-MARK"
 
+    # judge closure, fenced pass reply
     verdict = judge(dict(BUNDLE))
     assert field(verdict, "result") == "pass"
     assert field(verdict, "rationale") == "ok"
+    if isinstance(verdict, dict):
+        assert verdict == {"result": "pass", "rationale": "ok"}
 
-    calls = _read_lines(llm_log)
-    assert len(calls) == 1
-    prompt = calls[0]["prompt"]
+    prompts = _lines(llm_log)
+    assert len(prompts) == 1
+    prompt = prompts[0]["prompt"]
     assert "CRIT" in prompt
     assert "REQ" in prompt
     assert "IFACE" in prompt
     assert "CODE-MARK = 1" in prompt
-    assert "PYC-MARK-SHOULD-BE-SKIPPED" not in prompt
+    assert "PYC-MARK" not in prompt
 
-
-def test_judge_unavailable_cases_fail(tmp_path):
-    repo_root, author_log, llm_log, control = _setup(tmp_path)
-    test_author, judge = generation_loop.make_closures("m", 4, repo_root)
-
+    # failure replies
     cases = [
-        {"text": '{"result": "maybe", "rationale": "x"}', "error": None},
-        {"text": "no json", "error": None},
-        {"text": None, "error": {"category": "network", "message": "backend unreachable"}},
+        {"kind": "text", "text": json.dumps({"result": "maybe", "rationale": "x"})},
+        {"kind": "text", "text": "no json"},
+        {"kind": "error"},
     ]
-    for i, case in enumerate(cases):
-        _set_reply(control, text=case["text"], error=case["error"])
-        verdict = judge(dict(BUNDLE))
-        assert field(verdict, "result") == "fail", case
-        rationale = field(verdict, "rationale")
-        assert isinstance(rationale, str)
-        assert rationale.startswith("judge unavailable: "), (case, rationale)
-        assert len(_read_lines(llm_log)) == i + 1
+    for i, cfg in enumerate(cases):
+        _set_reply(reply_cfg, cfg)
+        before = len(_lines(llm_log))
+        out = judge(dict(BUNDLE))
+        after = len(_lines(llm_log))
+        assert after == before + 1, cfg
+        assert field(out, "result") == "fail", cfg
+        rationale = field(out, "rationale")
+        assert isinstance(rationale, str), cfg
+        assert rationale.startswith("judge unavailable: "), (cfg, rationale)

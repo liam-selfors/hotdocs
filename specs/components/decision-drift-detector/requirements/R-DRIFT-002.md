@@ -9,5 +9,4 @@
   the superseding ratification) MUST be reported as a drift candidate;
   a non-zero exit code (the file was already touched at or after the
   superseding decision, or the two commits are unrelated) MUST NOT be.
-  Never a timestamp comparison — commit ancestry is the only
-  trustworthy "happened-before" relationship in a non-linear history.
+  Never a timestamp comparison.

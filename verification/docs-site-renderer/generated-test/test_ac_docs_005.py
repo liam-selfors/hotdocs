@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:4a4a3e0a39ce8e9c2d1a3fe8625c1e9f8d36f0e3876e2db649ea411bf7875c21
+# hotdocs-criterion: sha256:6f0ec9492ac79c302a496ef92d8912858b8d2e3b903d04917a37071f558424d9
 import json
 import shutil
 import subprocess
@@ -9,8 +9,34 @@ import pytest
 import docs_site_renderer
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def _corpus_graph():
+    return {
+        "nodes": {
+            "P-ZERO-EDIT": {"type": "capability"},
+            "comp-foo": {
+                "type": "component",
+                "verification": None,
+                "provenance": None,
+                "size_status": "ok",
+                "sealed": True,
+                "pinned_overrides": [],
+                "owners": ["pipeline-team"],
+                "documents": {
+                    "component.md": "# Foo\n\nA component.\n",
+                },
+            },
+            "VAR-FOO-URL": {"type": "var"},
+        },
+        "edges": [
+            {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
+            {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
+        ],
+        "aggregates": {
+            "orphan_capability_rate": 0.0,
+            "orphan_component_rate": 0.0,
+            "orphan_var_rate": 0.0,
+        },
+    }
 
 
 def _git(args, cwd):
@@ -23,120 +49,79 @@ def _git(args, cwd):
     )
 
 
-def _write_graph(repo_root):
-    graph = {
-        "nodes": {
-            "P-DEMO": {"type": "capability"},
-            "comp-foo": {
-                "type": "component",
-                "verification": None,
-                "provenance": None,
-                "size_status": "ok",
-                "sealed": True,
-                "pinned_overrides": [],
-                "owners": ["pipeline-team"],
-                "documents": {
-                    "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\nowners: [pipeline-team]\n---\n\n# Foo\n",
-                },
-            },
-            "comp-bar": {
-                "type": "component",
-                "verification": None,
-                "provenance": None,
-                "size_status": "unknown",
-                "sealed": True,
-                "pinned_overrides": [],
-                "owners": [],
-                "documents": {},
-            },
-            "VAR-FOO-URL": {"type": "var"},
-        },
-        "edges": [
-            {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
-            {"from": "comp-foo", "to": "comp-bar", "kind": "depends_on"},
-        ],
-        "aggregates": {
-            "orphan_capability_rate": 1.0,
-            "orphan_component_rate": 0.5,
-            "orphan_var_rate": 0.0,
-        },
-    }
-    verification = repo_root / "verification"
-    verification.mkdir(parents=True, exist_ok=True)
-    (verification / "corpus-graph.json").write_text(
-        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-    )
-
-
-def _tool_root():
-    pkg = Path(docs_site_renderer.__file__).resolve()
-    gen = next((p for p in pkg.parents if p.name == "gen"), None)
+def _tool_repo_root():
+    here = Path(docs_site_renderer.__file__).resolve()
+    gen = next((p for p in here.parents if p.name == "gen"), None)
     if gen is None:
-        return None
+        pytest.skip("docs_site_renderer is not under a gen/ directory")
     return gen.parent
 
 
-def test_ac_docs_005_rendered_output_absent_from_version_control(tmp_path, monkeypatch):
+def test_rendered_output_directory_is_not_committed(tmp_path, monkeypatch):
     if shutil.which("git") is None:
         pytest.skip("git is not available")
 
-    repo_root = (tmp_path / "repo").resolve()
-    repo_root.mkdir()
-    _write_graph(repo_root)
-
-    # A temporary repository holding the committed inputs.
-    assert _git(["init", "-q"], repo_root).returncode == 0
-    _git(["config", "user.email", "test@example.invalid"], repo_root)
-    _git(["config", "user.name", "test"], repo_root)
-    assert _git(["add", "-A"], repo_root).returncode == 0
-    commit = _git(["commit", "-q", "-m", "fixture"], repo_root)
-    assert commit.returncode == 0, commit.stderr
-
-    # A successful render to the default output location.
-    monkeypatch.chdir(repo_root)
-    rc = docs_site_renderer.main(["--repo-root=" + str(repo_root)])
-    assert rc == 0
-
-    out_dir = repo_root / "dist" / "docs-site"
-    assert out_dir.is_dir(), "default output dir dist/docs-site/ was not produced"
-    rendered = [p for p in out_dir.rglob("*") if p.is_file()]
-    assert rendered, "render produced no files"
-    index_html = out_dir / "index.html"
-    assert index_html.is_file()
-
-    # The render writes nothing under gen/ (a committed location).
-    assert not (repo_root / "gen").exists() or not any(
-        p.is_file() for p in (repo_root / "gen").rglob("*")
+    # Given a successful render (default --out, which is dist/docs-site/).
+    corpus_root = tmp_path / "corpus"
+    (corpus_root / "verification").mkdir(parents=True)
+    (corpus_root / "verification" / "corpus-graph.json").write_text(
+        json.dumps(_corpus_graph(), sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
     )
+    monkeypatch.chdir(corpus_root)
 
-    # The rendered output is not part of the committed files.
-    tracked = _git(["ls-files", "-z"], repo_root)
-    assert tracked.returncode == 0
-    tracked_paths = [p for p in tracked.stdout.split("\0") if p]
-    assert not any(p.startswith("dist/") for p in tracked_paths)
+    from docs_site_renderer import cli
 
-    # The tool's own repository commits no rendered site either.
-    tool_root = _tool_root()
-    if tool_root is None:
-        pytest.skip("docs_site_renderer is not under a gen/ directory")
+    code = cli.main(["--repo-root=" + str(corpus_root)])
+    assert code == 0
+
+    rendered_dir = corpus_root / "dist" / "docs-site"
+    assert rendered_dir.is_dir()
+    assert (rendered_dir / "index.html").is_file()
+
+    # When the repository's committed files are checked.
+    tool_root = _tool_repo_root()
     top = _git(["rev-parse", "--show-toplevel"], tool_root)
     if top.returncode != 0:
-        pytest.skip("the tool root is not a git working tree")
+        pytest.skip("the tool's repository is not a git working tree")
+    toplevel = Path(top.stdout.strip()).resolve()
 
-    in_dist = _git(["ls-files", "-z", "--", "dist/docs-site"], tool_root)
-    assert in_dist.returncode == 0
-    assert [p for p in in_dist.stdout.split("\0") if p] == [], (
-        "rendered output under dist/docs-site/ is committed"
+    listed = _git(["ls-files", "-z"], toplevel)
+    assert listed.returncode == 0, listed.stderr
+    tracked = [p for p in listed.stdout.split("\0") if p]
+
+    out_dir = (tool_root / "dist" / "docs-site").resolve()
+    try:
+        out_rel = out_dir.relative_to(toplevel).as_posix()
+    except ValueError:
+        out_rel = None
+
+    # Then the rendered output directory is absent from version control.
+    if out_rel is not None:
+        offending = [
+            p for p in tracked if p == out_rel or p.startswith(out_rel + "/")
+        ]
+        assert offending == [], offending
+
+    # The renderer's own generated directory holds no committed rendered site.
+    rendered_names = sorted(
+        p.relative_to(rendered_dir).as_posix()
+        for p in rendered_dir.rglob("*")
+        if p.is_file()
     )
-
-    all_tracked = _git(["ls-files", "-z"], tool_root)
-    assert all_tracked.returncode == 0
-    rendered_index = index_html.read_bytes()
-    for rel in [p for p in all_tracked.stdout.split("\0") if p]:
-        if not rel.endswith(".html"):
-            continue
-        candidate = tool_root / rel
-        if candidate.is_file():
-            assert candidate.read_bytes() != rendered_index, (
-                "a rendered page is committed at " + repr(rel)
-            )
+    assert rendered_names, "the render produced no files"
+    gen_rel_prefix = None
+    try:
+        gen_rel_prefix = (
+            (tool_root / "gen" / "docs-site-renderer").resolve().relative_to(toplevel).as_posix()
+        )
+    except ValueError:
+        gen_rel_prefix = None
+    if gen_rel_prefix is not None:
+        committed_index = [
+            p
+            for p in tracked
+            if p.startswith(gen_rel_prefix + "/") and p.endswith("/index.html")
+            or p == gen_rel_prefix + "/index.html"
+        ]
+        assert committed_index == [], committed_index

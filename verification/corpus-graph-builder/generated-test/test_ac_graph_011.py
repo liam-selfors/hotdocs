@@ -1,4 +1,7 @@
-# hotdocs-criterion: sha256:d11d97ccc57e7e78f644ad3a8e012e491fcea6f224f938968adf1f4bfd238e0b
+# hotdocs-criterion: sha256:c34333e39c3318f828dbdaac7500ca85e9d3d0e72fecae44dc06f4153a57e9cb
+"""AC-GRAPH-011 (covers R-GRAPH-003): a component node carries its owners
+and documents exactly as interface/data/CorpusGraph.md defines them."""
+
 from pathlib import Path
 
 import corpus_graph_builder
@@ -6,6 +9,11 @@ import corpus_graph_builder
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
 
 
 COMPONENT_MD = (
@@ -25,13 +33,13 @@ COMPONENT_MD = (
     "\n"
     "## Purpose\n"
     "\n"
-    "Component A exists to test the corpus graph builder.\n"
+    "A fixture component used to check owners and documents.\n"
 )
 
 REQUIREMENT_MD = (
     "# R-A-001\n"
     "\n"
-    "**R-A-001** \u2014 Component A MUST do one thing.\n"
+    "**R-A-001** \u2014 Component A MUST do its one thing.\n"
 )
 
 LIBRARY_MD = (
@@ -43,41 +51,44 @@ LIBRARY_MD = (
 )
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def test_ac_graph_011_component_node_owners_and_documents(tmp_path):
-    repo_root = tmp_path
+def test_ac_graph_011_owners_and_documents(tmp_path):
+    repo_root = tmp_path / "repo"
     comp_dir = repo_root / "specs" / "components" / "a"
     _write(comp_dir / "component.md", COMPONENT_MD)
     _write(comp_dir / "requirements" / "R-A-001.md", REQUIREMENT_MD)
     _write(comp_dir / "interface" / "library.md", LIBRARY_MD)
+    (repo_root / "specs" / "product").mkdir(parents=True, exist_ok=True)
+    (repo_root / "specs" / "vars").mkdir(parents=True, exist_ok=True)
 
-    graph = corpus_graph_builder.build_corpus_graph(Path(repo_root))
+    graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
     nodes = field(graph, "nodes")
     assert "comp-a" in nodes
     node = nodes["comp-a"]
 
-    owners = field(node, "owners")
-    assert list(owners) == ["team-x"]
+    assert list(field(node, "owners")) == ["team-x"]
 
     documents = field(node, "documents")
-    documents = dict(documents)
-    expected_keys = [
+    assert sorted(documents.keys()) == [
         "component.md",
         "interface/library.md",
         "requirements/R-A-001.md",
     ]
-    assert sorted(documents.keys()) == expected_keys
-    assert set(documents.keys()) == set(expected_keys)
+    assert set(documents.keys()) == {
+        "component.md",
+        "interface/library.md",
+        "requirements/R-A-001.md",
+    }
+    assert documents["component.md"] == COMPONENT_MD
+    assert documents["interface/library.md"] == LIBRARY_MD
+    assert documents["requirements/R-A-001.md"] == REQUIREMENT_MD
 
-    assert documents["component.md"] == (comp_dir / "component.md").read_text(encoding="utf-8")
-    assert documents["interface/library.md"] == (
-        comp_dir / "interface" / "library.md"
-    ).read_text(encoding="utf-8")
-    assert documents["requirements/R-A-001.md"] == (
-        comp_dir / "requirements" / "R-A-001.md"
-    ).read_text(encoding="utf-8")
+    # The serialized form carries the same owners and documents.
+    as_dict = graph.to_dict()
+    d_node = as_dict["nodes"]["comp-a"]
+    assert d_node["owners"] == ["team-x"]
+    assert d_node["documents"] == {
+        "component.md": COMPONENT_MD,
+        "interface/library.md": LIBRARY_MD,
+        "requirements/R-A-001.md": REQUIREMENT_MD,
+    }

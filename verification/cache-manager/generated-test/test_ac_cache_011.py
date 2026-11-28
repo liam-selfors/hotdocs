@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:f670ac4618ce30d6686000cf860921762390f190a275a079ac3d848ef25211ce
+# hotdocs-criterion: sha256:5137a18d95f5cdb4cfab2e5478efae78fce93e6baab6ab0ed46a8c8f1893d755
 import json
 
 import pytest
@@ -6,78 +6,61 @@ import pytest
 import cache_manager
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def _stdout_json(capsys):
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == 1, "expected exactly one line of stdout, got: " + repr(out)
+    return json.loads(lines[0])
 
 
-def _make_key(suffix):
+def _key(spec_hash):
     return cache_manager.CacheKey(
-        spec_bundle_hash="sha256:" + ("a" * 63) + suffix,
-        gate_inputs_hash="sha256:" + ("b" * 63) + suffix,
-        gate_version="license_scanner@4.0.3+9f2c41ab07de",
+        spec_bundle_hash=spec_hash,
+        gate_inputs_hash="sha256:" + "b" * 64,
+        gate_version="llm_judge@1.0.0",
         model_pin="claude-sonnet-5",
     )
 
 
-def _make_result():
+def _result():
     return cache_manager.CachedResult(
-        gate_type="license_scanner",
-        payload={
-            "component_id": "comp-foo",
-            "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
-            "similarity_score": 0.0,
-            "blocked": False,
-            "matches": [],
-        },
+        gate_type="llm_judge",
+        payload={"result": "pass", "rationale": "ok"},
         stored_at=cache_manager.now_iso(),
     )
 
 
-def _stdout_json(out):
-    lines = [line for line in out.splitlines() if line.strip()]
-    assert lines, "expected one line of JSON on stdout, got nothing"
-    return json.loads(lines[-1])
-
-
 @pytest.fixture(autouse=True)
-def _local_store_only(monkeypatch, tmp_path):
+def _no_remote_store(monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
 
 
-def test_stats_empty_repo_root_reports_zero(tmp_path, capsys):
+def test_stats_empty_repo_root_reports_zero(tmp_path, capsys, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    monkeypatch.chdir(tmp_path)
 
     code = cache_manager.main(["stats", "--repo-root=" + str(repo_root)])
-    captured = capsys.readouterr()
 
     assert code == 0
-    assert _stdout_json(captured.out) == {"entry_count": 0}
+    assert _stdout_json(capsys) == {"entry_count": 0}
 
 
-def test_stats_counts_distinct_keys_not_puts(tmp_path, capsys):
+def test_stats_counts_distinct_keys_once(tmp_path, capsys, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    monkeypatch.chdir(tmp_path)
 
-    key_one = _make_key("1")
-    key_two = _make_key("2")
+    key_a = _key("sha256:" + "a" * 64)
+    key_b = _key("sha256:" + "c" * 64)
 
-    cache_manager.put(key_one, _make_result(), repo_root=repo_root)
-    cache_manager.put(key_two, _make_result(), repo_root=repo_root)
-    cache_manager.put(key_two, _make_result(), repo_root=repo_root)
-
-    # Sanity: both entries are actually retrievable from this repo_root.
-    for key in (key_one, key_two):
-        got = cache_manager.get(key, repo_root=repo_root)
-        assert not isinstance(got, cache_manager.Miss)
-        assert field(got, "gate_type") == "license_scanner"
+    cache_manager.put(key_a, _result(), repo_root=repo_root)
+    cache_manager.put(key_b, _result(), repo_root=repo_root)
+    cache_manager.put(key_a, _result(), repo_root=repo_root)
 
     capsys.readouterr()
+
     code = cache_manager.main(["stats", "--repo-root", str(repo_root)])
-    captured = capsys.readouterr()
 
     assert code == 0
-    assert _stdout_json(captured.out) == {"entry_count": 2}
+    assert _stdout_json(capsys) == {"entry_count": 2}

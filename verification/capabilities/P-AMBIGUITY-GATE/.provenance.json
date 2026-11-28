@@ -12,8 +12,8 @@
       ]
     }
   },
-  "content_hash": "sha256:18ccf7cee4761340eb30c3b055fda15a4d5b5ab4a7414e28be62972f47a29ddf",
-  "gate_version": "capability_scenario_verifier@2.2.0",
+  "content_hash": "sha256:c3e9ad6d3292f3d2278ce0835b3febd9ee6097e92a6e2ee30acd69a463f3fab6",
+  "gate_version": "capability_scenario_verifier@3.0.0",
   "model": "claude-opus-5-5",
   "realizing_components": [
     "comp-capability-scenario-verifier",

@@ -1,5 +1,7 @@
-# hotdocs-criterion: sha256:da985b15f7550053b2c7825afc8214228d7838d2cac7c7ac6a624e2129003e67
+# hotdocs-criterion: sha256:ebd3f75a500270a63a1a1508adea17d4ae3f1a072281092030cb5bcf3e286ee8
 from pathlib import Path
+
+import duckdb
 
 import corpus_loader
 
@@ -8,79 +10,81 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root):
+def build_corpus(repo_root):
     specs = repo_root / "specs"
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n\n"
-        + "- **Widget** — a small fixture thing used only in tests.\n",
-    )
     comp = specs / "components" / "foo"
-    _write(
+    write(
         comp / "component.md",
         "---\n"
-        + "id: comp-foo\n"
-        + "title: Foo\n"
-        + "status: draft\n"
-        + "owners: [alice]\n"
-        + "sealed: true\n"
-        + "source_path: legacy/foo/\n"
-        + "---\n"
-        + "\n"
-        + "# Foo\n"
-        + "\n"
-        + "## Purpose\n"
-        + "\n"
-        + "Foo is a fixture component that does one small thing.\n",
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [alice]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "depends_on: []\n"
+        "---\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo does a small fixture thing.\n",
     )
-    _write(
+    write(
         comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n"
-        + "**R-FOO-001** — `foo()` MUST return the string `foo`.\n",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** — `foo` MUST return a value.\n",
     )
-    _write(
+    write(
         comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\n"
-        + "Covers: R-FOO-001\n"
-        + "Kind: generated-test\n\n"
-        + "```gherkin\n"
-        + "Given nothing\n"
-        + "When foo() runs\n"
-        + "Then it returns \"foo\"\n"
-        + "```\n",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given nothing\n"
+        "When foo runs\n"
+        "Then it returns a value\n"
+        "```\n",
     )
-    _write(
+    write(
         comp / "interface" / "library.md",
-        "# Library\n\n"
-        + "```\n"
-        + "foo() -> str\n"
-        + "```\n\n"
-        + "Returns `foo`.\n",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "foo() -> int\n"
+        "```\n",
     )
-    _write(
+    write(
         comp / "constraints.md",
-        "# Constraints\n\n"
-        + "None.\n",
+        "# Constraints\n"
+        "\n"
+        "None.\n",
+    )
+    write(
+        specs / "glossary.md",
+        "# Glossary\n"
+        "\n"
+        "- **Foo** — a fixture term.\n",
     )
 
 
-def test_ac_corpus_002_graph_is_duckdb_connection_with_one_component(tmp_path):
+def test_ac_corpus_002(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
+    build_corpus(repo_root)
 
     corpus = corpus_loader.load_corpus(repo_root)
-
     graph = field(corpus, "graph")
+
     assert graph is not None
-
-    import duckdb
-
     assert isinstance(graph, duckdb.DuckDBPyConnection)
 
     row = graph.execute(

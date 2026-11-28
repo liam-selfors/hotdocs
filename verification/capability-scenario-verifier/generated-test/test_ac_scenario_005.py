@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:69e92773192d76e0167f846ba750c3816e0c3a6ca7b3c1e0ac45894ff2efa8ba
+# hotdocs-criterion: sha256:dcea9f10a56db05c614e77a28131e6988d8bdf3e50b5a38e7219143d17c74023
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -9,46 +8,21 @@ import pytest
 import capability_scenario_verifier
 
 
-CAP = "P-ZERO-EDIT"
-
-KNOWN_REPORT = {
-    "P-ZERO-EDIT": {
-        "overall": "pass",
-        "scenarios": [
-            {"id": "CS-ZERO-EDIT-001", "kind": "generated-test", "result": "pass"}
-        ],
-    }
-}
+CAP_ID = "P-ZERO-EDIT"
+SCENARIO_ID = "CS-ZERO-EDIT-001"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def plain(result):
-    return {
-        "hit": field(result, "hit"),
-        "capability_scenario_report": field(result, "capability_scenario_report"),
-    }
-
-
 def write(path, text):
-    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
-def record_path(repo_root):
-    return repo_root / "verification" / "capabilities" / CAP / ".provenance.json"
-
-
-def build_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log = tmp_path / "calls.log"
-    log.write_text("")
-
-    # python adapter
+def build_repo(repo_root, log_path):
+    # planted python adapter
     write(
         repo_root / "gen" / "kind-python" / "kind_python.py",
         "import sys\n"
@@ -59,34 +33,30 @@ def build_repo(tmp_path):
         "            \"interpreter\": sys.executable}\n",
     )
 
-    # component realizing the capability
+    # a component realizing the capability
     write(
-        repo_root / "specs" / "components" / "zero-edit" / "component.md",
+        repo_root / "specs" / "components" / "zero" / "component.md",
         "---\n"
-        "id: comp-zero-edit\n"
-        "title: Zero Edit\n"
+        "id: comp-zero\n"
+        "title: Zero\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
+        "owners: [test-team]\n"
         "realizes: [P-ZERO-EDIT]\n"
         "sealed: false\n"
         "---\n"
         "\n"
-        "# Zero Edit\n",
+        "# Zero\n",
     )
-    write(
-        repo_root / "gen" / "zero-edit" / "zero_edit.py",
-        "def f():\n    return 1\n",
-    )
+    write(repo_root / "gen" / "zero" / "zero.py", "VALUE = 1\n")
 
-    # capability
+    # the capability
     write(
         repo_root / "specs" / "product" / "zero-edit.md",
         "---\n"
         "id: P-ZERO-EDIT\n"
         "title: Zero Edit\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
+        "owners: [test-team]\n"
         "---\n"
         "\n"
         "# Zero Edit\n"
@@ -97,133 +67,145 @@ def build_repo(tmp_path):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given an unchanged repository\n"
+        "Given an unchanged spec\n"
         "When verification runs\n"
         "Then nothing is regenerated\n"
         "```\n",
     )
 
-    # fake test-author
+    test_path = "verification/capabilities/P-ZERO-EDIT/generated-test/test_cs_zero_edit_001.py"
+    test_content = "def test_x():\n    assert True\n"
+
     write(
         repo_root / "gen" / "test-author" / "test_author.py",
-        "LOG = " + repr(str(log)) + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
         "\n"
         "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
         "    with open(LOG, 'a') as fh:\n"
         "        fh.write('author_test\\n')\n"
         "    return {\n"
-        "        'component_id': " + repr("comp-zero-edit") + ",\n"
+        "        'component_id': 'comp-zero',\n"
         "        'criterion_id': bundle['criterion_id'],\n"
         "        'model': model,\n"
         "        'seed': seed,\n"
         "        'prompt_version': 'v1',\n"
         "        'cache_hit': False,\n"
-        "        'file': {\n"
-        "            'path': " + repr("verification/capabilities/P-ZERO-EDIT/generated-test/test_cs_zero_edit_001.py") + ",\n"
-        "            'content': " + repr("def test_x():\n    assert True\n") + ",\n"
-        "        },\n"
+        "        'file': {'path': " + repr(test_path) + ", 'content': " + repr(test_content) + "},\n"
         "        'model_call_error': None,\n"
         "        'repair_attempts': 0,\n"
         "        'probe_findings': [],\n"
         "    }\n",
     )
 
-    # fake llm-endpoint
     write(
         repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        "LOG = " + repr(str(log)) + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
         "\n"
         "def complete(prompt, model, *, backend=None, **params):\n"
         "    with open(LOG, 'a') as fh:\n"
         "        fh.write('complete\\n')\n"
-        "    return {'text': 'PASS', 'model': model, 'backend': 'fake',\n"
+        "    return {'text': 'pass', 'model': model, 'backend': 'fake',\n"
         "            'model_call_error': None}\n",
     )
-    return repo_root, log
 
 
-def prime(repo_root, log):
-    """Produce a record with the current gate_version and content_hash,
-    then pin its report to a known passing one."""
-    capability_scenario_verifier.run_capability_gates(CAP, repo_root, "m")
-    rp = record_path(repo_root)
-    assert rp.is_file()
-    record = json.loads(rp.read_text())
-    assert record["gate_version"] == capability_scenario_verifier.GATE_VERSION
-    record["capability_scenario_report"] = KNOWN_REPORT
-    rp.write_text(json.dumps(record, indent=2))
-    log.write_text("")
-    return rp, record
-
-
-def snapshot(repo_root):
+def snapshot(root):
     snap = {}
-    for dirpath, dirnames, filenames in os.walk(repo_root):
-        for name in filenames:
-            p = Path(dirpath) / name
-            st = p.stat()
-            snap[str(p.relative_to(repo_root))] = (st.st_mtime_ns, st.st_size, p.read_bytes())
+    for p in sorted(root.rglob("*")):
+        rel = str(p.relative_to(root))
+        st = p.stat()
+        if p.is_dir():
+            snap[rel] = ("dir", None, st.st_mtime_ns)
+        else:
+            snap[rel] = ("file", p.read_bytes(), st.st_mtime_ns)
     return snap
 
 
-@pytest.fixture(autouse=True)
-def _no_bytecode(monkeypatch):
-    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+def log_lines(log_path):
+    if not log_path.exists():
+        return []
+    return [line for line in log_path.read_text().splitlines() if line.strip()]
 
 
-def test_hit_check_and_gates_reuse_record(tmp_path):
-    repo_root, log = build_repo(tmp_path)
-    prime(repo_root, log)
+def test_ac_scenario_005(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "calls.log"
+    build_repo(repo_root, log_path)
 
-    check = capability_scenario_verifier.check_capability_provenance(CAP, repo_root)
+    record_path = repo_root / "verification" / "capabilities" / CAP_ID / ".provenance.json"
+
+    # Produce a record carrying the current gate_version and content_hash.
+    fresh = capability_scenario_verifier.run_capability_gates(CAP_ID, repo_root, "m")
+    assert field(fresh, "hit") is False
+    assert record_path.is_file()
+
+    record = json.loads(record_path.read_text())
+    assert record["gate_version"] == capability_scenario_verifier.GATE_VERSION
+
+    # Make the committed report a known passing one; the key is unchanged.
+    passing_report = {
+        CAP_ID: {
+            "overall": "pass",
+            "scenarios": [{"id": SCENARIO_ID, "kind": "generated-test", "result": "pass"}],
+        }
+    }
+    record["capability_scenario_report"] = passing_report
+    record_path.write_text(json.dumps(record, indent=2))
+    good_record_bytes = record_path.read_bytes()
+
+    # Reset the fake call log.
+    if log_path.exists():
+        log_path.unlink()
+
+    # --- check hit ---
+    check = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
     assert field(check, "hit") is True
-    assert field(check, "capability_scenario_report") == KNOWN_REPORT
+    assert field(check, "capability_scenario_report") == passing_report
 
+    # --- run_capability_gates on a hit ---
     before = snapshot(repo_root)
-    log.write_text("")
+    result = capability_scenario_verifier.run_capability_gates(CAP_ID, repo_root, "m")
+    assert field(result, "hit") == field(check, "hit")
+    assert field(result, "capability_scenario_report") == field(check, "capability_scenario_report")
 
-    r1 = capability_scenario_verifier.run_capability_gates(CAP, repo_root, "m")
-    r2 = capability_scenario_verifier.run_capability_gates(CAP, repo_root)
-    r3 = capability_scenario_verifier.run_capability_gates(CAP, repo_root, None)
+    result_none = capability_scenario_verifier.run_capability_gates(CAP_ID, repo_root, None)
+    assert field(result_none, "hit") == field(check, "hit")
+    assert field(result_none, "capability_scenario_report") == field(check, "capability_scenario_report")
 
-    for r in (r1, r2, r3):
-        assert plain(r) == plain(check)
+    after = snapshot(repo_root)
+    assert after == before
+    assert log_lines(log_path) == []
 
-    assert log.read_text() == ""
-    assert snapshot(repo_root) == before
-
-
-def test_miss_cases(tmp_path):
-    repo_root, log = build_repo(tmp_path)
-
+    # --- misses ---
     # no record
-    res = capability_scenario_verifier.check_capability_provenance(CAP, repo_root)
-    assert field(res, "hit") is False
-    assert field(res, "capability_scenario_report") is None
-
-    rp, record = prime(repo_root, log)
+    record_path.unlink()
+    miss = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
+    assert field(miss, "hit") is False
+    assert field(miss, "capability_scenario_report") is None
 
     # not valid JSON
-    rp.write_text("{not json")
-    res = capability_scenario_verifier.check_capability_provenance(CAP, repo_root)
-    assert field(res, "hit") is False
-    assert field(res, "capability_scenario_report") is None
+    record_path.write_text("{ this is not json")
+    miss = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
+    assert field(miss, "hit") is False
+    assert field(miss, "capability_scenario_report") is None
 
     # different gate_version
-    stale = dict(record)
+    stale = json.loads(good_record_bytes.decode())
     stale["gate_version"] = "capability_scenario_verifier@0.0.1"
-    assert stale["gate_version"] != capability_scenario_verifier.GATE_VERSION
-    rp.write_text(json.dumps(stale, indent=2))
-    res = capability_scenario_verifier.check_capability_provenance(CAP, repo_root)
-    assert field(res, "hit") is False
-    assert field(res, "capability_scenario_report") is None
+    record_path.write_text(json.dumps(stale, indent=2))
+    miss = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
+    assert field(miss, "hit") is False
+    assert field(miss, "capability_scenario_report") is None
 
+    record_path.write_bytes(good_record_bytes)
 
-def test_unknown_capability_raises(tmp_path):
-    repo_root, log = build_repo(tmp_path)
+    # --- unknown capability ---
     with pytest.raises(capability_scenario_verifier.UnknownCapabilityError):
         capability_scenario_verifier.check_capability_provenance("P-NOPE", repo_root)
     with pytest.raises(capability_scenario_verifier.UnknownCapabilityError):
         capability_scenario_verifier.run_capability_gates("P-NOPE", repo_root, "m")
+
+    assert log_lines(log_path) == []

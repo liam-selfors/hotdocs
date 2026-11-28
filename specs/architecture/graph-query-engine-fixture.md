@@ -59,3 +59,4 @@ What the views return for it:
 | `edges` rows per `edge_type` | `depends_on` 1, `realizes` 2, `uses_var` 1, `depends_on_guarantees` 1, `covers` 3, `supersedes` 1, `builds_on` 1 |
 | `component_docs` | 2 rows; `comp-foo`'s `title` is `Foo`, `depends_on` is `["comp-bar"]` and `body` contains `one two three` |
 | `component_size` | `foo` 26, `bar` 2 |
+| `bundle_size` | `foo` `generator_words` 20, `criterion_words_max` 16; `bar` 2, 0 |

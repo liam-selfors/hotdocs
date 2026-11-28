@@ -1,4 +1,10 @@
-# hotdocs-criterion: sha256:72dcece7a7af160690308cef402114c43cb15df32886263750ee7c7ebb532d52
+# hotdocs-criterion: sha256:ff9a203f7d53e9ea2bb0e78afa23b385afb14294cd17b144669c0999c34fe88d
+"""AC-GQE-001: nodes view row counts per kind over the fixture corpus.
+
+Fixture: specs/architecture/graph-query-engine-fixture.md, written under a
+temporary repo_root, README.md files included.
+"""
+
 from pathlib import Path
 
 import duckdb
@@ -6,125 +12,136 @@ import duckdb
 import graph_query_engine
 
 
-def _write(repo_root, rel, text):
+def _write(repo_root, rel, lines):
     path = Path(repo_root) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
+    text = "\n".join(lines) + "\n"
     path.write_bytes(text.encode("utf-8"))
-
-
-def _frontmatter(lines):
-    return "---\n" + "\n".join(lines) + "\n---\n"
 
 
 def _build_fixture(repo_root):
     _write(
         repo_root,
         "specs/components/foo/component.md",
-        _frontmatter(
-            [
-                "id: comp-foo",
-                "title: Foo",
-                "status: draft",
-                "owners: [team]",
-                "depends_on: [comp-bar]",
-                "realizes: [P-X]",
-                "uses_var: [VAR-X]",
-                "depends_on_guarantees: [G-BAR-001]",
-            ]
-        )
-        + "\n# Foo\n\none two three\n",
+        [
+            "---",
+            "id: comp-foo",
+            "title: Foo",
+            "status: draft",
+            "owners: [team]",
+            "depends_on: [comp-bar]",
+            "realizes: [P-X]",
+            "uses_var: [VAR-X]",
+            "depends_on_guarantees: [G-BAR-001]",
+            "---",
+            "",
+            "# Foo",
+            "",
+            "one two three",
+        ],
     )
     _write(
         repo_root,
         "specs/components/bar/component.md",
-        _frontmatter(
-            [
-                "id: comp-bar",
-                "title: Bar",
-                "status: draft",
-                "owners: [team]",
-                "realizes: [P-X]",
-            ]
-        )
-        + "\n# Bar\n",
+        [
+            "---",
+            "id: comp-bar",
+            "title: Bar",
+            "status: draft",
+            "owners: [team]",
+            "realizes: [P-X]",
+            "---",
+            "",
+            "# Bar",
+        ],
     )
     _write(
         repo_root,
         "specs/components/foo/requirements/R-FOO-001.md",
-        "# R-FOO-001\n\nfoo MUST work.\n",
+        ["# R-FOO-001", "", "foo MUST work."],
     )
     _write(
         repo_root,
         "specs/components/foo/requirements/R-FOO-002.md",
-        "# R-FOO-002\n\nfoo MUST stop.\n",
+        ["# R-FOO-002", "", "foo MUST stop."],
     )
     _write(
         repo_root,
         "specs/components/foo/acceptance/AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
+        ["# AC-FOO-001", "", "Covers: R-FOO-001", "Kind: generated-test"],
     )
     _write(
         repo_root,
         "specs/components/foo/interface/guarantees/G-FOO-001.md",
-        "# G-FOO-001\n\nfoo never fails.\n",
+        ["# G-FOO-001", "", "foo never fails."],
     )
     _write(
         repo_root,
         "specs/product/x.md",
-        _frontmatter(
-            [
-                "id: P-X",
-                "title: X",
-                "status: draft",
-                "owners: [team]",
-            ]
-        )
-        + "\n# X\n\n### CS-X-001\nCovers: P-X\n\n### CS-X-002\nCovers: P-X\n",
+        [
+            "---",
+            "id: P-X",
+            "title: X",
+            "status: draft",
+            "owners: [team]",
+            "---",
+            "",
+            "# X",
+            "",
+            "### CS-X-001",
+            "Covers: P-X",
+            "",
+            "### CS-X-002",
+            "Covers: P-X",
+        ],
     )
     _write(
         repo_root,
         "specs/vars/x.md",
-        _frontmatter(
-            [
-                "id: VAR-X",
-                "title: V",
-                "status: draft",
-                "owners: [team]",
-            ]
-        )
-        + "\n# V\n",
+        [
+            "---",
+            "id: VAR-X",
+            "title: V",
+            "status: draft",
+            "owners: [team]",
+            "---",
+            "",
+            "# V",
+        ],
     )
     _write(
         repo_root,
         "specs/decisions/D1.md",
-        _frontmatter(
-            [
-                "id: D1",
-                "title: One",
-                "status: ratified",
-                "owners: [team]",
-                "last_ratified_commit: 0000000",
-            ]
-        )
-        + "\n# D1\n",
+        [
+            "---",
+            "id: D1",
+            "title: One",
+            "status: ratified",
+            "owners: [team]",
+            "last_ratified_commit: 0000000",
+            "---",
+            "",
+            "# D1",
+        ],
     )
     _write(
         repo_root,
         "specs/decisions/D2.md",
-        _frontmatter(
-            [
-                "id: D2",
-                "title: Two",
-                "status: draft",
-                "owners: [team]",
-                "supersedes: D1",
-                "builds_on: [D1]",
-            ]
-        )
-        + "\n# D2\n",
+        [
+            "---",
+            "id: D2",
+            "title: Two",
+            "status: draft",
+            "owners: [team]",
+            "supersedes: D1",
+            "builds_on: [D1]",
+            "---",
+            "",
+            "# D2",
+        ],
     )
     for d in ("specs/product", "specs/vars", "specs/decisions"):
-        _write(repo_root, d + "/README.md", "# Readme\n\nNotes.\n")
+        _write(repo_root, d + "/README.md", ["# Readme", "", "Notes."])
 
 
 def test_ac_gqe_001_nodes_row_count_per_kind(tmp_path):
@@ -140,7 +157,7 @@ def test_ac_gqe_001_nodes_row_count_per_kind(tmp_path):
         rows = con.execute(
             "SELECT kind, count(*) FROM nodes GROUP BY kind"
         ).fetchall()
-        counts = {kind: n for kind, n in rows}
+        counts = {kind: int(n) for kind, n in rows}
 
         expected = {
             "component": 2,
@@ -157,6 +174,6 @@ def test_ac_gqe_001_nodes_row_count_per_kind(tmp_path):
         null_ids = con.execute(
             "SELECT count(*) FROM nodes WHERE id IS NULL"
         ).fetchone()[0]
-        assert null_ids == 0
+        assert int(null_ids) == 0
     finally:
         con.close()

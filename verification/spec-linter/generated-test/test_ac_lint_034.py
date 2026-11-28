@@ -1,263 +1,266 @@
-# hotdocs-criterion: sha256:beb41619cbf1d208166cf360dcf260500dae40d5e18a2d61ed1f46eda0a78614
+# hotdocs-criterion: sha256:ac3486f591e6d28911df060a22958029275d9ef8fc9038a6998d503f18ea7a9c
 import json
-from pathlib import Path
 
 import spec_linter
 
 
-PRODUCT = """---
-id: P-FOO
-title: Foo works
-status: draft
-owners: [team-a]
----
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
 
-# Foo works
 
-## Purpose
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
-A foo can be made.
 
-### CS-FOO-001
-Covers: P-FOO
-Kind: generated-test
-
-```gherkin
-Given nothing
-When a foo is made
-Then it exists
-```
-"""
-
-COMPONENT = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [team-a]
-depends_on: []
-realizes: [P-FOO]
-sealed: false
----
-
-# Foo
-
-## Purpose
-
-Makes a foo.
-
-## Scope
-
-**In scope:** making a foo. **Out of scope:** everything else.
-
-## Definitions
-
-- **Widget** \u2014 here, a blue file kept on the local disk purely for caching purposes.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-None.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-None.
-
-## Change log
-
-- Initial draft.
-"""
-
-REQUIREMENT = """# R-FOO-001
-
-**R-FOO-001** \u2014 `make_foo()` MUST return the string `"foo"`.
-"""
-
-LIBRARY = """# Library
-
-One module file, `foo.py`.
-
-```
-make_foo() -> str
-```
-"""
-
-CLI = """# CLI
-
-```
-foo
-```
-"""
-
-ACCEPTANCE = """# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: generated-test
-
-```gherkin
-Given nothing
-When make_foo() is called
-Then the result is "foo"
-```
-"""
-
-CONSTRAINTS = """# Foo \u2014 Non-Functional Constraints
-
-- **Pure.** No I/O.
-"""
-
-GLOSSARY = """# Glossary
-
-Canonical vocabulary.
-
-- **Widget** \u2014 a reusable unit of frobnication that every component shares
-  through its published interface contract.
-"""
+COMPONENT_MD = 'specs/components/foo/component.md'
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(root, rel, text):
-    p = Path(root) / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+def as_dict(value):
+    if isinstance(value, (str, bytes)):
+        return json.loads(value)
+    return value
 
 
-def build_corpus(root):
-    write(root, "specs/product/foo.md", PRODUCT)
-    write(root, "specs/components/foo/component.md", COMPONENT)
-    write(root, "specs/components/foo/requirements/R-FOO-001.md", REQUIREMENT)
-    write(root, "specs/components/foo/interface/library.md", LIBRARY)
-    write(root, "specs/components/foo/interface/cli.md", CLI)
-    write(root, "specs/components/foo/acceptance/AC-FOO-001.md", ACCEPTANCE)
-    write(root, "specs/components/foo/constraints.md", CONSTRAINTS)
-    write(root, "specs/glossary.md", GLOSSARY)
+def changes():
+    glossary = (
+        '# Glossary\n'
+        '\n'
+        '- **Foo** — a made thing.\n'
+    )
+    old = 'No deltas from `specs/glossary.md`.\n'
+    original = CLEAN_CORPUS[COMPONENT_MD]
+    assert old in original
+    component = original.replace(
+        old, '- **Foo** — a widget the team sells by weight.\n'
+    )
+    cli = (
+        '# CLI\n'
+        '\n'
+        '```\n'
+        'foo [--x]\n'
+        '```\n'
+    )
+    return {
+        'specs/glossary.md': glossary,
+        COMPONENT_MD: component,
+        'specs/components/foo/interface/cli.md': cli,
+    }
 
 
-def as_json(value):
-    data = value.to_json()
-    if isinstance(data, (str, bytes)):
-        data = json.loads(data)
-    return data
+def build(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    write_corpus(repo_root, changes())
+    return repo_root
 
 
-def sev_count(report, severity):
-    return sum(1 for f in field(report, "findings") if field(f, "severity") == severity)
+def sev(finding):
+    return str(field(finding, "severity"))
 
 
-def r015(report):
-    return [f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-015"]
+def lint015(report):
+    return [f for f in field(report, "findings")
+            if field(f, "rule_id") == "R-LINT-015"]
 
 
-def r015_json(report):
-    data = as_json(report)
+def json_lint015(report):
+    data = as_dict(report.to_json())
     return [f for f in data["findings"] if f["rule_id"] == "R-LINT-015"]
 
 
-def test_no_judge_skipped_and_counts(tmp_path):
-    build_corpus(tmp_path)
-    report = spec_linter.lint(None, tmp_path)
+def test_no_judge_reports_skipped_and_counts(tmp_path):
+    repo_root = build(tmp_path)
+    report = spec_linter.lint(None, repo_root)
 
-    fails = sev_count(report, "fail")
-    warns = sev_count(report, "warn")
-    skipped = sev_count(report, "skipped")
-    assert fails == 0
-    assert warns >= 1
+    found = lint015(report)
+    assert len(found) == 1, found
+    assert sev(found[0]) == "skipped"
+    assert "component.md" in str(field(found[0], "file"))
 
-    found = r015(report)
-    assert len(found) == 1
-    assert field(found[0], "severity") == "skipped"
-    assert skipped >= 1
+    findings = field(report, "findings")
+    n_fail = sum(1 for f in findings if sev(f) == "fail")
+    n_warn = sum(1 for f in findings if sev(f) == "warn")
+    n_skip = sum(1 for f in findings if sev(f) == "skipped")
+    assert n_warn >= 1
+    assert n_skip >= 1
 
-    assert field(report, "hard_failures") == fails
-    assert field(report, "warnings") == warns
-    assert field(report, "skipped") == skipped
+    assert field(report, "hard_failures") == n_fail
+    assert field(report, "warnings") == n_warn
+    assert field(report, "skipped") == n_skip
 
-    summary = as_json(report)["summary"]
-    assert summary["hard_failures"] == fails
-    assert summary["warnings"] == warns
-    assert summary["skipped"] == skipped
+    data = as_dict(report.to_json())
+    summary = data["summary"]
+    assert summary["hard_failures"] == n_fail
+    assert summary["warnings"] == n_warn
+    assert summary["skipped"] == n_skip
 
 
 def test_strict_counts_warns_as_failures(tmp_path):
-    build_corpus(tmp_path)
-    plain = spec_linter.lint(None, tmp_path)
-    warns = sev_count(plain, "warn")
-    assert sev_count(plain, "fail") == 0
-    assert warns >= 1
-
-    strict = spec_linter.lint(None, tmp_path, strict=True)
-    assert field(strict, "hard_failures") == warns
+    repo_root = build(tmp_path)
+    report = spec_linter.lint(None, repo_root, strict=True)
+    findings = field(report, "findings")
+    n_warn = sum(1 for f in findings if sev(f) == "warn")
+    assert n_warn >= 1
+    assert field(report, "hard_failures") == n_warn
 
 
 def test_judge_conflict_is_fail_with_rationale(tmp_path):
-    build_corpus(tmp_path)
-    calls = []
+    repo_root = build(tmp_path)
 
     def judge(term, local_text, glossary_text):
-        calls.append((term, local_text, glossary_text))
         return (True, "contradicts the glossary")
 
-    report = spec_linter.lint(None, tmp_path, judge=judge)
-    assert calls
-    found = r015(report)
-    assert len(found) == 1
-    assert field(found[0], "severity") == "fail"
-    js = r015_json(report)
-    assert len(js) == 1
-    assert js[0]["severity"] == "fail"
-    assert js[0]["rationale"] == "contradicts the glossary"
-    if hasattr(found[0], "to_json"):
-        fj = as_json(found[0])
-        assert fj["rationale"] == "contradicts the glossary"
+    report = spec_linter.lint(None, repo_root, judge=judge)
+    found = lint015(report)
+    assert len(found) == 1, found
+    assert sev(found[0]) == "fail"
+
+    jfound = json_lint015(report)
+    assert len(jfound) == 1
+    assert jfound[0]["severity"] == "fail"
+    assert jfound[0]["rationale"] == "contradicts the glossary"
 
 
-def test_judge_consistent_gives_no_finding(tmp_path):
-    build_corpus(tmp_path)
-    calls = []
+def test_judge_consistent_reports_nothing(tmp_path):
+    repo_root = build(tmp_path)
 
     def judge(term, local_text, glossary_text):
-        calls.append(term)
         return (False, "consistent")
 
-    report = spec_linter.lint(None, tmp_path, judge=judge)
-    assert calls
-    assert r015(report) == []
-    assert r015_json(report) == []
+    report = spec_linter.lint(None, repo_root, judge=judge)
+    assert lint015(report) == []
+    assert json_lint015(report) == []
 
 
 def test_judge_none_is_skipped_without_rationale(tmp_path):
-    build_corpus(tmp_path)
-    calls = []
+    repo_root = build(tmp_path)
 
     def judge(term, local_text, glossary_text):
-        calls.append(term)
         return None
 
-    report = spec_linter.lint(None, tmp_path, judge=judge)
-    assert calls
-    found = r015(report)
-    assert len(found) == 1
-    assert field(found[0], "severity") == "skipped"
-    js = r015_json(report)
-    assert len(js) == 1
-    assert js[0]["severity"] == "skipped"
-    assert "rationale" not in js[0]
-    if hasattr(found[0], "to_json"):
-        assert "rationale" not in as_json(found[0])
+    report = spec_linter.lint(None, repo_root, judge=judge)
+    found = lint015(report)
+    assert len(found) == 1, found
+    assert sev(found[0]) == "skipped"
+
+    jfound = json_lint015(report)
+    assert len(jfound) == 1
+    assert jfound[0]["severity"] == "skipped"
+    assert "rationale" not in jfound[0]

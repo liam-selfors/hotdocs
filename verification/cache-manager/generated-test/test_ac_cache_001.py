@@ -1,6 +1,7 @@
-# hotdocs-criterion: sha256:8125ba687da6914acb6d59813041e4918660f937d416ce7518613312e8639aac
+# hotdocs-criterion: sha256:91a3cc50603220dfc3925ca0793ed1857802bc52b266153d127703584e8fa9da
+import io
 import json
-from dataclasses import replace
+import contextlib
 
 import pytest
 
@@ -23,24 +24,24 @@ def make_key(**overrides):
 
 
 @pytest.fixture
-def empty_repo(tmp_path, monkeypatch):
+def repo_root(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(tmp_path)
-    return tmp_path
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.chdir(root)
+    return root
 
 
-def test_get_on_empty_store_returns_miss(empty_repo):
-    key = make_key()
-
-    result = cache_manager.get(key, repo_root=empty_repo)
+def test_get_on_empty_store_returns_miss(repo_root):
+    result = cache_manager.get(make_key(), repo_root=repo_root)
 
     assert result is not None
     assert isinstance(result, cache_manager.Miss)
-    assert result == cache_manager.Miss()
     assert not isinstance(result, cache_manager.CachedResult)
+    assert result == cache_manager.Miss()
 
 
-def test_get_with_unstored_key_returns_miss_not_partial_match(empty_repo):
+def test_get_for_unstored_key_returns_miss_not_near_match(repo_root):
     stored_key = make_key()
     stored = cache_manager.CachedResult(
         gate_type="license_scanner",
@@ -53,39 +54,37 @@ def test_get_with_unstored_key_returns_miss_not_partial_match(empty_repo):
         },
         stored_at=cache_manager.now_iso(),
     )
-    cache_manager.put(stored_key, stored, repo_root=empty_repo)
+    cache_manager.put(stored_key, stored, repo_root=repo_root)
 
-    # Keys sharing every field but one with the stored entry: no entry is
-    # stored for any of them, so each must be a definitive Miss.
     near_keys = [
-        replace(stored_key, model_pin="claude-opus-5"),
-        replace(stored_key, spec_bundle_hash="sha256:" + "c" * 64),
-        replace(stored_key, gate_inputs_hash="sha256:" + "d" * 64),
-        replace(stored_key, gate_version="license_scanner@4.0.4+9f2c41ab07de"),
+        make_key(spec_bundle_hash="sha256:" + "c" * 64),
+        make_key(gate_inputs_hash="sha256:" + "d" * 64),
+        make_key(gate_version="license_scanner@4.0.4+9f2c41ab07de"),
+        make_key(model_pin="claude-sonnet-5-5"),
     ]
-    for near_key in near_keys:
-        result = cache_manager.get(near_key, repo_root=empty_repo)
+    for key in near_keys:
+        result = cache_manager.get(key, repo_root=repo_root)
         assert result is not None
-        assert isinstance(result, cache_manager.Miss), near_key
+        assert isinstance(result, cache_manager.Miss), key
+        assert not isinstance(result, cache_manager.CachedResult)
         assert result == cache_manager.Miss()
 
 
-def test_cli_inspect_on_empty_store_reports_miss(empty_repo, capsys):
-    argv = [
-        "inspect",
-        "--spec-bundle-hash=sha256:" + "a" * 64,
-        "--gate-inputs-hash=sha256:" + "b" * 64,
-        "--gate-version=license_scanner@4.0.3+9f2c41ab07de",
-        "--model-pin=claude-sonnet-5",
-        "--repo-root=" + str(empty_repo),
-    ]
-
-    code = cache_manager.main(argv)
+def test_cli_inspect_on_empty_store_reports_miss(repo_root):
+    out = io.StringIO()
+    err = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = cache_manager.main([
+            "inspect",
+            "--spec-bundle-hash=sha256:" + "a" * 64,
+            "--gate-inputs-hash=sha256:" + "b" * 64,
+            "--gate-version=license_scanner@4.0.3+9f2c41ab07de",
+            "--model-pin=claude-sonnet-5",
+            "--repo-root=" + str(repo_root),
+        ])
 
     assert code == 0
-    out = capsys.readouterr().out.strip()
-    lines = [line for line in out.splitlines() if line.strip()]
+    lines = [line for line in out.getvalue().splitlines() if line.strip()]
     assert len(lines) == 1
     doc = json.loads(lines[0])
-    assert field(doc, "result") == "miss"
-    assert "payload" not in doc
+    assert doc == {"result": "miss"}

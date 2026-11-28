@@ -4,8 +4,7 @@
   adapter behind `R-ENDPOINT-002`'s resolve/dispatch split: `claude-cli`
   (the `claude` command), `anthropic` (Messages API), `openai` (Chat
   Completions), `openai-compatible` (the same wire format at a required
-  `base_url`, covering OpenLLM, vLLM, LM Studio, LiteLLM, OpenRouter and
-  similar servers), `gemini` (`generateContent`), and `ollama`. The HTTP
+  `base_url`), `gemini` (`generateContent`), and `ollama`. The HTTP
   providers use the Python standard library only, adding no dependency.
   A further provider is one more adapter and `PROVIDERS` entry, never a
   plugin or registry, and never a change to `complete()`

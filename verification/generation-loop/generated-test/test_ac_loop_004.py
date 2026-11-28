@@ -1,6 +1,4 @@
-# hotdocs-criterion: sha256:f67a4f80893def18476ee671b0ae9b1f8e25e042ec85c29f11800b46c7fdce0b
-# AC-LOOP-004: the loop stops at the first pass or after max_attempts,
-# commits the cache only on a single-mode pass, never in agentic mode.
+# hotdocs-criterion: sha256:54a85b53e45ad7973343ec49e1ecf09bd0766b2244161c06467c2bc3ee28ac60
 import json
 from pathlib import Path
 
@@ -15,35 +13,21 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMMON = (
-    "import json\n"
-    "from pathlib import Path\n"
-    "\n"
-    "def _log(fn, **kw):\n"
-    "    entry = {'fn': fn}\n"
-    "    entry.update(kw)\n"
-    "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-    "        f.write(json.dumps(entry, default=repr) + '\\n')\n"
-    "\n"
-    "def _next(name):\n"
-    "    p = Path(STATE_DIR) / (name + '.count')\n"
-    "    n = int(p.read_text()) if p.exists() else 0\n"
-    "    n += 1\n"
-    "    p.write_text(str(n))\n"
-    "    return n\n"
-    "\n"
-)
+def _log_helper_source(log_path):
+    return (
+        "import json\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "def _log(entry):\n"
+        "    with open(LOG, 'a') as f:\n"
+        "        f.write(json.dumps(entry) + '\\n')\n"
+    )
 
 
-def _header(log_path, state_dir):
-    return "LOG = " + repr(str(log_path)) + "\n" + "STATE_DIR = " + repr(str(state_dir)) + "\n"
-
-
-def _gen_result_src(mode_value, transcript_expr):
+def _generation_result_source(mode_value, transcript_value):
     return (
         "    result = {\n"
-        "        'component_id': bundle['component_id'],\n"
-        "        'spec_bundle_hash': bundle['spec_bundle_hash'],\n"
+        "        'component_id': " + repr(COMPONENT_ID) + ",\n"
+        "        'spec_bundle_hash': 'sha256:' + '0' * 64,\n"
         "        'model': model,\n"
         "        'prompt_version': 'v12',\n"
         "        'cache_hit': False,\n"
@@ -52,7 +36,7 @@ def _gen_result_src(mode_value, transcript_expr):
         "        'refused': None,\n"
         "        'retry_feedback': retry_feedback,\n"
         "        'mode': " + repr(mode_value) + ",\n"
-        "        'transcript_sha256': " + transcript_expr + ",\n"
+        "        'transcript_sha256': " + repr(transcript_value) + ",\n"
         "        'turns': 1,\n"
         "        'tool_calls': 0,\n"
         "        'isolation': None,\n"
@@ -60,165 +44,160 @@ def _gen_result_src(mode_value, transcript_expr):
     )
 
 
-def write_stand_ins(tmp_path, overall_sequence):
-    repo_root = tmp_path / "repo"
-    state_dir = tmp_path / "state"
-    state_dir.mkdir(parents=True)
-    log_path = tmp_path / "calls.jsonl"
-    log_path.write_text("", encoding="utf-8")
-    head = _header(log_path, state_dir) + COMMON
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def make_repo(root, overall_sequence):
+    repo_root = root / "repo"
+    repo_root.mkdir(parents=True)
+    log_path = root / "calls.log"
+    helper = _log_helper_source(log_path)
 
     generator_src = (
-        head
-        + "def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):\n"
-        + "    n = _next('generate')\n"
-        + _gen_result_src("single", "None")
-        + "    _log('generate', n=n, obj_id=id(result), feedback=retry_feedback)\n"
-        + "    return result\n"
-        + "\n"
-        + "def commit_cache(result, repo_root=None):\n"
-        + "    files = result['files'] if isinstance(result, dict) else result.files\n"
-        + "    _log('commit_cache', obj_id=id(result), files=files)\n"
-        + "    return None\n"
+        helper
+        + "_results = []\n"
+        "def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):\n"
+        "    n = len(_results) + 1\n"
+        + _generation_result_source("single", None)
+        + "    _results.append(result)\n"
+        "    _log({'fn': 'generate', 'n': n, 'model': model, 'feedback': retry_feedback})\n"
+        "    return result\n"
+        "def commit_cache(result, repo_root=None):\n"
+        "    idx = None\n"
+        "    for i, r in enumerate(_results):\n"
+        "        if r is result:\n"
+        "            idx = i + 1\n"
+        "    _log({'fn': 'commit_cache', 'identity_index': idx, 'count': len(_results)})\n"
+        "    return None\n"
     )
+    _write(repo_root / "gen" / "generator" / "generator.py", generator_src)
 
     agentic_src = (
-        head
-        + "def generate_agentic(bundle, model, retry_feedback=None, *, repo_root=None,\n"
-        + "                     allow_unisolated_exec=False, max_turns=40, max_tool_calls=120,\n"
-        + "                     wall_seconds=1800.0, claude_command='claude'):\n"
-        + "    n = _next('generate_agentic')\n"
-        + _gen_result_src("agentic", "'sha256:' + ('0' * 63) + str(n % 10)")
-        + "    _log('generate_agentic', n=n, obj_id=id(result), feedback=retry_feedback)\n"
-        + "    return result\n"
+        helper
+        + "_results = []\n"
+        "def generate_agentic(bundle, model, retry_feedback=None, *, repo_root=None,\n"
+        "                     allow_unisolated_exec=False, max_turns=40, max_tool_calls=120,\n"
+        "                     wall_seconds=1800.0, claude_command='claude'):\n"
+        "    n = len(_results) + 1\n"
+        + _generation_result_source("agentic", "sha256:" + "1" * 64)
+        + "    _results.append(result)\n"
+        "    _log({'fn': 'generate_agentic', 'n': n, 'model': model, 'feedback': retry_feedback})\n"
+        "    return result\n"
     )
+    _write(repo_root / "gen" / "agentic-generator" / "agentic_generator.py", agentic_src)
 
     surface_src = (
-        head
+        helper
         + "def check_surface(component_id, repo_root, code_dir=None):\n"
-        + "    _log('check_surface', component_id=component_id)\n"
-        + "    return {'ok': True, 'findings': []}\n"
+        "    _log({'fn': 'check_surface', 'component_id': component_id})\n"
+        "    return {'ok': True, 'findings': []}\n"
     )
+    _write(repo_root / "gen" / "surface-checker" / "surface_checker.py", surface_src)
 
     verifier_src = (
-        head
-        + "SEQUENCE = " + repr(list(overall_sequence)) + "\n"
-        + "\n"
-        + "def verify(component_id, repo_root, judge=None, test_author=None):\n"
-        + "    n = _next('verify')\n"
-        + "    overall = SEQUENCE[min(n, len(SEQUENCE)) - 1]\n"
-        + "    _log('verify', n=n, overall=overall)\n"
-        + "    return {\n"
-        + "        'component_id': component_id,\n"
-        + "        'criteria': [],\n"
-        + "        'requirement_results': {},\n"
-        + "        'interface_drift': False,\n"
-        + "        'mutation_score': None,\n"
-        + "        'mutation_error': None,\n"
-        + "        'assets': [],\n"
-        + "        'overall': overall,\n"
-        + "    }\n"
+        helper
+        + "SEQ = " + repr(list(overall_sequence)) + "\n"
+        "_count = [0]\n"
+        "def verify(component_id, repo_root, judge=None, test_author=None):\n"
+        "    i = _count[0]\n"
+        "    _count[0] += 1\n"
+        "    overall = SEQ[min(i, len(SEQ) - 1)]\n"
+        "    _log({'fn': 'verify', 'n': i + 1, 'overall': overall})\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'criteria': [],\n"
+        "        'requirement_results': {},\n"
+        "        'interface_drift': False,\n"
+        "        'mutation_score': None,\n"
+        "        'mutation_error': None,\n"
+        "        'assets': [],\n"
+        "        'drivers': [],\n"
+        "        'overall': overall,\n"
+        "    }\n"
     )
+    _write(repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py", verifier_src)
 
     test_author_src = (
-        head
+        helper
         + "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        + "    _log('author_test')\n"
-        + "    return {\n"
-        + "        'component_id': bundle['component_id'],\n"
-        + "        'criterion_id': bundle['criterion_id'],\n"
-        + "        'model': model,\n"
-        + "        'seed': seed,\n"
-        + "        'prompt_version': 'v1',\n"
-        + "        'cache_hit': False,\n"
-        + "        'file': {'path': 'x.py', 'content': ''},\n"
-        + "        'model_call_error': None,\n"
-        + "        'repair_attempts': 0,\n"
-        + "        'probe_findings': [],\n"
-        + "    }\n"
+        "    _log({'fn': 'author_test'})\n"
+        "    return {\n"
+        "        'component_id': bundle['component_id'],\n"
+        "        'criterion_id': bundle['criterion_id'],\n"
+        "        'model': model,\n"
+        "        'seed': seed,\n"
+        "        'prompt_version': 'v1',\n"
+        "        'cache_hit': False,\n"
+        "        'file': {'path': 'verification/widget/generated-test/test_x.py', 'content': ''},\n"
+        "        'model_call_error': None,\n"
+        "        'repair_attempts': 0,\n"
+        "        'probe_findings': [],\n"
+        "    }\n"
     )
+    _write(repo_root / "gen" / "test-author" / "test_author.py", test_author_src)
 
-    endpoint_src = (
-        head
+    llm_src = (
+        helper
         + "def complete(prompt, model, *, backend=None, **params):\n"
-        + "    _log('complete')\n"
-        + "    return {'text': 'pass', 'model': model, 'backend': 'mock', 'model_call_error': None}\n"
+        "    _log({'fn': 'complete'})\n"
+        "    return {'text': 'pass', 'model': model, 'backend': 'mock', 'model_call_error': None}\n"
     )
+    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", llm_src)
 
-    files = {
-        "generator/generator.py": generator_src,
-        "agentic-generator/agentic_generator.py": agentic_src,
-        "surface-checker/surface_checker.py": surface_src,
-        "verifier-orchestrator/verifier_orchestrator.py": verifier_src,
-        "test-author/test_author.py": test_author_src,
-        "llm-endpoint/llm_endpoint.py": endpoint_src,
-    }
-    for rel, src in files.items():
-        p = repo_root / "gen" / rel
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(src, encoding="utf-8")
     return repo_root, log_path
 
 
-def read_calls(log_path):
-    lines = Path(log_path).read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
+def read_log(log_path):
+    if not log_path.exists():
+        return []
+    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def calls_of(calls, fn):
-    return [c for c in calls if c["fn"] == fn]
-
-
-def make_bundle():
-    return {
-        "component_id": COMPONENT_ID,
-        "spec_bundle_hash": "sha256:" + "a" * 64,
-        "hint_code": None,
-    }
+def calls(entries, fn):
+    return [e for e in entries if e["fn"] == fn]
 
 
 def test_always_failing_verification_stops_at_max_attempts(tmp_path):
-    repo_root, log_path = write_stand_ins(tmp_path, ["fail"])
-
+    repo_root, log_path = make_repo(tmp_path / "s1", ["fail"])
     result = generation_loop.run_attempts(
-        COMPONENT_ID, make_bundle(), repo_root, MODEL, max_attempts=2
+        COMPONENT_ID, {"component_id": COMPONENT_ID}, repo_root, MODEL, max_attempts=2
     )
-
-    calls = read_calls(log_path)
-    assert len(calls_of(calls, "generate")) == 2
+    entries = read_log(log_path)
+    assert len(calls(entries, "generate")) == 2
     assert field(result, "passed") is False
     assert field(result, "stop_reason") == "max_attempts"
-    assert calls_of(calls, "commit_cache") == []
+    assert calls(entries, "commit_cache") == []
 
 
-def test_single_mode_pass_on_second_attempt_commits_that_result(tmp_path):
-    repo_root, log_path = write_stand_ins(tmp_path, ["fail", "pass"])
-
+def test_fail_then_pass_single_mode_commits_second_result(tmp_path):
+    repo_root, log_path = make_repo(tmp_path / "s2", ["fail", "pass"])
     result = generation_loop.run_attempts(
-        COMPONENT_ID, make_bundle(), repo_root, MODEL, mode="single", max_attempts=3
+        COMPONENT_ID, {"component_id": COMPONENT_ID}, repo_root, MODEL,
+        mode="single", max_attempts=3,
     )
-
-    calls = read_calls(log_path)
-    generates = calls_of(calls, "generate")
-    commits = calls_of(calls, "commit_cache")
-    assert len(generates) == 2
+    entries = read_log(log_path)
+    assert len(calls(entries, "generate")) == 2
     assert field(result, "passed") is True
     assert field(result, "stop_reason") == "passed"
+    commits = calls(entries, "commit_cache")
     assert len(commits) == 1
-    second = generates[1]
-    assert second["n"] == 2
-    assert commits[0]["obj_id"] == second["obj_id"]
-    assert commits[0]["files"] == {"widget.py": "# generation 2\n"}
+    # commit_cache received the very object returned by the second generate call
+    assert commits[0]["identity_index"] == 2
+    assert commits[0]["count"] == 2
+    gen_result = field(result, "generation_result")
+    assert field(gen_result, "files") == {"widget.py": "# generation 2\n"}
 
 
-def test_agentic_mode_never_calls_generate_or_commit_cache(tmp_path):
-    repo_root, log_path = write_stand_ins(tmp_path, ["fail", "pass"])
-
-    generation_loop.run_attempts(
-        COMPONENT_ID, make_bundle(), repo_root, MODEL, mode="agentic"
+def test_fail_then_pass_agentic_mode_never_commits(tmp_path):
+    repo_root, log_path = make_repo(tmp_path / "s3", ["fail", "pass"])
+    result = generation_loop.run_attempts(
+        COMPONENT_ID, {"component_id": COMPONENT_ID}, repo_root, MODEL, mode="agentic"
     )
-
-    calls = read_calls(log_path)
-    assert len(calls_of(calls, "generate_agentic")) == 2
-    assert calls_of(calls, "generate") == []
-    assert calls_of(calls, "commit_cache") == []
+    entries = read_log(log_path)
+    assert len(calls(entries, "generate_agentic")) == 2
+    assert calls(entries, "generate") == []
+    assert calls(entries, "commit_cache") == []
+    assert field(result, "passed") is True
+    assert field(result, "stop_reason") == "passed"

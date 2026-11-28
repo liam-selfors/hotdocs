@@ -18,6 +18,4 @@
     NUL byte. A missing directory hashes as no files;
   - `verifier_version` is `verifier-orchestrator`'s `GATE_VERSION`.
 
-  It MUST NOT write anything. This is the one definition of a sealed
-  component's key, as `current_provenance_key` is of a generated
-  component's (`D163`, `D170`).
+  It MUST NOT write anything (`D170`).

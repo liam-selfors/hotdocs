@@ -39,5 +39,5 @@ packages' submodules.
 | `capability new` | `gen/spec-scaffolder` | `spec_scaffolder` | 0 | no | lay out a new capability |
 | `init` | `gen/hotdocs-init` | `hotdocs_init` | 1 | no | set up a new project |
 
-`init` is special (`R-CLI-005`). `cache` is documented by
-`cache-manager` but that component defines no `main`, so it has no row.
+`init` is special (`R-CLI-005`). `cache-manager`'s `main` is run
+as `python -m cache_manager`, never through a verb, so it has no row.

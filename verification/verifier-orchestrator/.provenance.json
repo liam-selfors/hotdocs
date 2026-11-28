@@ -1,5 +1,9 @@
 {
-  "spec_bundle_hash": "sha256:ce7feb8acc27f6c1ea18fe4eb4116449185fd6786cd7adeb4ec1151eaeb041a1",
+  "spec_bundle_hash": "sha256:58f6c965855d4af8247b0d4525c9b619175e1a86ce9a5d923e9d485434cb6285",
+  "spec_bundle_parts": {
+    "spec": "sha256:51dfb390b23f02246070c463cb7892b6de3b0a5117f78828246cddcd946543e6",
+    "dependency_code": "sha256:69c283862d2f60930e52b99edc178bcd5423e644a129ccc4838ee2ad0163f840"
+  },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -17,13 +21,13 @@
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
-    "verifier": "verifier-orchestrator@3.5.0",
+    "verifier": "verifier-orchestrator@4.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-24T08:40:11Z",
+  "generated_at": "2026-11-27T23:05:34Z",
   "verification_run_id": "verifier-orchestrator-attempt-1",
   "verification_report": {
     "component_id": "comp-verifier-orchestrator",
@@ -50,7 +54,13 @@
         "id": "AC-VERIFY-004",
         "covers": "R-VERIFY-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-VERIFY-005",
@@ -73,12 +83,6 @@
       {
         "id": "AC-VERIFY-008",
         "covers": "R-VERIFY-008",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-009",
-        "covers": "R-VERIFY-009",
         "kind": "generated-test",
         "result": "pass"
       },
@@ -113,18 +117,6 @@
         "result": "pass"
       },
       {
-        "id": "AC-VERIFY-015",
-        "covers": "R-VERIFY-006",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-016",
-        "covers": "R-VERIFY-014",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
         "id": "AC-VERIFY-017",
         "covers": "R-VERIFY-015",
         "kind": "generated-test",
@@ -143,44 +135,8 @@
         "result": "pass"
       },
       {
-        "id": "AC-VERIFY-020",
-        "covers": "R-VERIFY-006",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
         "id": "AC-VERIFY-021",
         "covers": "R-VERIFY-018",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-022",
-        "covers": "R-VERIFY-014",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-023",
-        "covers": "R-VERIFY-019",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-024",
-        "covers": "R-VERIFY-019",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-025",
-        "covers": "R-VERIFY-014",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
-        "id": "AC-VERIFY-026",
-        "covers": "R-VERIFY-006",
         "kind": "generated-test",
         "result": "pass"
       },
@@ -215,16 +171,22 @@
         "result": "pass"
       },
       {
-        "id": "AC-VERIFY-032",
-        "covers": "R-VERIFY-006",
-        "kind": "generated-test",
-        "result": "pass"
-      },
-      {
         "id": "AC-VERIFY-033",
         "covers": "R-VERIFY-020",
         "kind": "generated-test",
         "result": "pass"
+      },
+      {
+        "id": "AC-VERIFY-034",
+        "covers": "R-VERIFY-004",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -236,7 +198,6 @@
       "R-VERIFY-006": "pass",
       "R-VERIFY-007": "pass",
       "R-VERIFY-008": "pass",
-      "R-VERIFY-009": "pass",
       "R-VERIFY-010": "pass",
       "R-VERIFY-011": "pass",
       "R-VERIFY-012": "pass",
@@ -250,14 +211,14 @@
       "R-VERIFY-020": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8520408163265306,
+    "mutation_score": 0.8695652173913043,
     "mutation_error": null,
     "assets": [
       {
         "kind": "python",
         "path": ".",
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-        "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
+        "adapter_sha256": "sha256:8362b78ab748ac18bc698e12021205d61ddea2a28505ad934a6ba26d8c3a3b73",
         "versions": {
           "python": "3.14.10",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
@@ -265,6 +226,7 @@
         "lockfile_sha256": null
       }
     ],
+    "drivers": [],
     "overall": "pass"
   },
   "license_scan": {
@@ -487,12 +449,13 @@
       "kind": "python",
       "path": ".",
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-      "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
+      "adapter_sha256": "sha256:8362b78ab748ac18bc698e12021205d61ddea2a28505ad934a6ba26d8c3a3b73",
       "versions": {
         "python": "3.14.10",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
       },
       "lockfile_sha256": null
     }
-  ]
+  ],
+  "drivers": []
 }

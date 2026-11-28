@@ -1,4 +1,6 @@
-# hotdocs-criterion: sha256:6609704eef01d579a25a08ff465169d925abb1c0f665b57eec6f8d85b9f91776
+# hotdocs-criterion: sha256:4345764e740a6481f76b04806f66acd73d8c6cbd7479c3fa3bb524e883e7a6b9
+"""AC-VERIFY-012: verify invokes an llm-judge criterion's judge exactly once (R-VERIFY-003)."""
+
 from pathlib import Path
 
 import verifier_orchestrator
@@ -9,6 +11,7 @@ SLUG = "widget"
 MODULE = "widget"
 CRITERION_ID = "AC-WIDGET-001"
 REQUIREMENT_ID = "R-WIDGET-001"
+CAPABILITY_ID = "P-WIDGET"
 
 
 def field(value, name):
@@ -20,41 +23,58 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-ASSEMBLER_SOURCE = (
-    "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-    "    return {\n"
-    "        'component_id': component_id,\n"
-    "        'criterion_id': criterion_id,\n"
-    "        'covers': " + repr(REQUIREMENT_ID) + ",\n"
-    "        'criterion_text': 'The widget documentation is clear.',\n"
-    "        'requirement_text': 'The widget MUST be documented clearly.',\n"
-    "        'interface': 'widget_size(x) -> int',\n"
-    "        'glossary': '',\n"
-    "        'dependency_interfaces': {},\n"
-    "        'testing': '',\n"
-    "    }\n"
-)
+def assembler_source():
+    bundle = {
+        "component_id": COMPONENT_ID,
+        "criterion_id": CRITERION_ID,
+        "covers": REQUIREMENT_ID,
+        "criterion_text": "Given the widget spec\nWhen a reviewer reads it\nThen it is clear",
+        "requirement_text": "**" + REQUIREMENT_ID + "** - The widget spec MUST be clear.",
+        "interface": "# Library\n\nwidget_value() -> int",
+        "glossary": "# Glossary",
+        "dependency_interfaces": {},
+        "testing": "",
+    }
+    return (
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    bundle = dict(" + repr(bundle) + ")\n"
+        "    bundle['component_id'] = component_id\n"
+        "    bundle['criterion_id'] = criterion_id\n"
+        "    return bundle\n"
+    )
 
-PROBE_SOURCE = (
-    "class _Report:\n"
-    "    def __init__(self):\n"
-    "        self.ok = True\n"
-    "        self.findings = []\n"
-    "        self.tests_run = 0\n"
-    "        self.tests_reached = 0\n"
-    "\n"
-    "    def to_dict(self):\n"
-    "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-    "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
-    "\n"
-    "\n"
-    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-    "          interpreter=None, assets=None):\n"
-    "    return _Report()\n"
-)
+
+def probe_source():
+    return (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings)}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
+        "    return _Report()\n"
+    )
 
 
 def build_fixture(repo_root):
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** - a thing.\n")
+    write(
+        repo_root / "specs" / "product" / "widget.md",
+        "---\n"
+        "id: " + CAPABILITY_ID + "\n"
+        "title: Widget capability\n"
+        "status: draft\n"
+        "owners: [widget-team]\n"
+        "---\n"
+        "\n"
+        "# Widget capability\n"
+        "\n"
+        "The product offers a widget.\n",
+    )
     comp = repo_root / "specs" / "components" / SLUG
     write(
         comp / "component.md",
@@ -62,57 +82,30 @@ def build_fixture(repo_root):
         "id: " + COMPONENT_ID + "\n"
         "title: Widget\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "realizes: [P-WIDGET]\n"
+        "owners: [widget-team]\n"
+        "depends_on: []\n"
+        "realizes: [" + CAPABILITY_ID + "]\n"
         "---\n"
         "\n"
         "# Widget\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Reports the size of a widget.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: widget sizes.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial draft.\n",
+        "Provides a widget value.\n",
     )
     write(
         comp / "requirements" / (REQUIREMENT_ID + ".md"),
-        "**" + REQUIREMENT_ID + "** — The widget MUST be documented clearly.\n",
+        "# " + REQUIREMENT_ID + "\n"
+        "\n"
+        "**" + REQUIREMENT_ID + "** - The widget spec MUST be clear.\n",
     )
     write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\nwidget_size(x) -> int\n```\n",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "widget_value() -> int\n"
+        "```\n",
     )
     write(
         comp / "acceptance" / (CRITERION_ID + ".md"),
@@ -122,34 +115,26 @@ def build_fixture(repo_root):
         "Kind: llm-judge\n"
         "\n"
         "```gherkin\n"
-        "Given the widget documentation\n"
+        "Given the widget spec\n"
         "When a reviewer reads it\n"
         "Then it is clear\n"
         "```\n",
     )
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    write(
-        repo_root / "specs" / "product" / "widget.md",
-        "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget capability\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "---\n"
-        "\n"
-        "# Widget capability\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Widgets have sizes.\n",
-    )
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
     write(repo_root / "gen" / SLUG / (MODULE + ".py"), "")
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        ASSEMBLER_SOURCE,
+        assembler_source(),
     )
-    write(repo_root / "gen" / "test-probe" / "test_probe.py", PROBE_SOURCE)
+    write(repo_root / "gen" / "test-probe" / "test_probe.py", probe_source())
+
+
+def make_judge(log_path):
+    def judge(bundle):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("called\n")
+        return {"result": "pass", "rationale": "The spec is clear."}
+
+    return judge
 
 
 def test_llm_judge_called_exactly_once(tmp_path):
@@ -157,16 +142,15 @@ def test_llm_judge_called_exactly_once(tmp_path):
     repo_root.mkdir()
     build_fixture(repo_root)
 
-    calls = []
-
-    def judge(bundle):
-        calls.append(bundle)
-        return {"result": "pass", "rationale": "clear enough"}
+    log_path = tmp_path / "judge.log"
+    judge = make_judge(log_path)
 
     report = verifier_orchestrator.verify(COMPONENT_ID, repo_root, judge=judge)
+    assert report is not None
 
-    assert len(calls) == 1
+    calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
+    assert calls == ["called"], "judge was called " + repr(len(calls)) + " times, expected exactly 1"
 
     criteria = field(report, "criteria")
     ids = [field(c, "id") for c in criteria]
-    assert CRITERION_ID in ids
+    assert ids.count(CRITERION_ID) == 1

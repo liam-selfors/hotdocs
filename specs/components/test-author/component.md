@@ -45,8 +45,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All `kind: generated-test` (`D43`), with an injected mock model.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -57,5 +55,4 @@ None.
 
 ## Change log
 
-See the decisions, `D56` onward; `D343` specifies the CLI;
-`D370` removes the cache (`R-AUTHOR-030`).
+`D56`, `D343`, `D370`.

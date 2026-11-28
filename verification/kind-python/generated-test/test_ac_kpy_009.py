@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:994543918db773f3e5a4795dd8d4ff21401229a46c51779a77550b546e493616
+# hotdocs-criterion: sha256:b71932fa7235388d62273b84dee12f8dd10b4e0a8169bb4a07b21371c29cf325
 import kind_python
 
 
@@ -6,7 +6,7 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-CALC_PY = (
+CALC = (
     '"""Calculator: a < b and True are prose here."""\n' "\n" "\n"
     "def check(a, b, xs):\n"
     "    flags = [a == b, a != b, a < b, a >= b, a > b, a <= b]\n"
@@ -16,9 +16,9 @@ CALC_PY = (
     "    return (a and b) or inner(a + b - 1) // 3 % 2, True, False\n"
 )
 
-PKG_INIT_PY = "def sign(n):\n    return -1 if n < 0 else 1\n"
+PKG_INIT = "def sign(n):\n    return -1 if n < 0 else 1\n"
 
-JUNK_PY = "x = 1 == 2\n"
+JUNK = "x = 1 == 2\n"
 
 EXPECTED = [
     "calc.py:5: a == b -> a != b",
@@ -53,9 +53,9 @@ def _write(path, text):
 def test_ac_kpy_009_strength_sites_parity(tmp_path, monkeypatch):
     monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
     d = tmp_path / "calc"
-    _write(d / "calc.py", CALC_PY)
-    _write(d / "pkg" / "__init__.py", PKG_INIT_PY)
-    _write(d / "__pycache__" / "junk.py", JUNK_PY)
+    _write(d / "calc.py", CALC)
+    _write(d / "pkg" / "__init__.py", PKG_INIT)
+    _write(d / "__pycache__" / "junk.py", JUNK)
 
     sites = kind_python.strength_sites(d)
     sites = list(sites)

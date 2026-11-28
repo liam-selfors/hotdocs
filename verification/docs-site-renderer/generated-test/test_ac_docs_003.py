@@ -1,14 +1,23 @@
-# hotdocs-criterion: sha256:d9e1b8ccb752110ca4d8e5dcff89d49c411e904eeb388e0f124f97a293a44a54
+# hotdocs-criterion: sha256:52893afaeb4966aee811418bcc97f7c8d3244a137883b369e473fb1945a1f4b4
+"""AC-DOCS-003: the corpus-health dashboard displays corpus-graph.json's
+aggregates values exactly (R-DOCS-003)."""
+
 import json
-import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 import docs_site_renderer
 
 
+AGGREGATES = {
+    "orphan_capability_rate": 0.375,
+    "orphan_component_rate": 0.625,
+    "orphan_var_rate": 0.125,
+}
+
+
 class FakeCorpusGraph:
-    """Stand-in matching CorpusGraph's documented shape: attributes
-    nodes/edges/aggregates, to_dict() and to_json_bytes()."""
+    """Duck-typed stand-in carrying CorpusGraph's documented attributes."""
 
     def __init__(self, nodes, edges, aggregates):
         self.nodes = nodes
@@ -16,30 +25,22 @@ class FakeCorpusGraph:
         self.aggregates = aggregates
 
     def to_dict(self):
-        return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
+        return {
+            "nodes": self.nodes,
+            "edges": self.edges,
+            "aggregates": self.aggregates,
+        }
 
     def to_json_bytes(self):
         return (
-            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True)
+            + "\n"
         ).encode("utf-8")
 
-    def __getitem__(self, key):
-        return self.to_dict()[key]
 
-    def get(self, key, default=None):
-        return self.to_dict().get(key, default)
-
-
-AGGREGATES = {
-    "orphan_capability_rate": 0.375,
-    "orphan_component_rate": 0.625,
-    "orphan_var_rate": 0.875,
-}
-
-
-def _graph():
+def make_graph():
     nodes = {
-        "P-ALPHA": {"type": "capability"},
+        "P-HEALTH-DEMO": {"type": "capability"},
         "comp-alpha": {
             "type": "component",
             "verification": None,
@@ -48,50 +49,75 @@ def _graph():
             "sealed": True,
             "pinned_overrides": [],
             "owners": ["pipeline-team"],
-            "documents": {"component.md": "# Alpha\n\nAlpha component.\n"},
+            "documents": {
+                "component.md": "---\nid: comp-alpha\ntitle: Alpha\nstatus: draft\nowners: [pipeline-team]\n---\n\n# Alpha\n",
+            },
         },
         "comp-beta": {
             "type": "component",
             "verification": None,
             "provenance": None,
             "size_status": "unknown",
-            "sealed": False,
+            "sealed": True,
             "pinned_overrides": [],
             "owners": [],
-            "documents": {"component.md": "# Beta\n"},
+            "documents": {},
         },
-        "VAR-ALPHA-URL": {"type": "var"},
+        "VAR-DEMO-URL": {"type": "var"},
     }
     edges = [
-        {"from": "comp-alpha", "to": "P-ALPHA", "kind": "realizes"},
-        {"from": "comp-alpha", "to": "VAR-ALPHA-URL", "kind": "uses_var"},
-        {"from": "comp-beta", "to": "comp-alpha", "kind": "depends_on"},
+        {"from": "comp-alpha", "to": "VAR-DEMO-URL", "kind": "uses_var"},
+        {"from": "comp-alpha", "to": "comp-beta", "kind": "depends_on"},
     ]
     return FakeCorpusGraph(nodes, edges, dict(AGGREGATES))
 
 
-def _contains_number(text, value):
-    pattern = r"(?<![\d.])" + re.escape(repr(value)) + r"(?![\d])"
-    return re.search(pattern, text) is not None
+class _VisibleText(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("style", "script"):
+            self._skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in ("style", "script") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.parts.append(data)
 
 
-def test_ac_docs_003_dashboard_displays_exact_aggregate_values(tmp_path):
+def visible_text(html_text):
+    parser = _VisibleText()
+    parser.feed(html_text)
+    parser.close()
+    return " ".join(parser.parts)
+
+
+def test_dashboard_displays_exact_aggregate_values(tmp_path):
     out_dir = tmp_path / "site"
-    graph = _graph()
+    graph = make_graph()
 
     docs_site_renderer.render_docs_site(graph, out_dir)
 
-    assert out_dir.is_dir()
-    pages = sorted(p for p in out_dir.rglob("*") if p.is_file() and p.suffix in (".html", ".htm"))
+    pages = sorted(out_dir.rglob("*.html"))
     assert pages, "render_docs_site wrote no HTML pages"
+
+    expected = [repr(v) for v in AGGREGATES.values()]
 
     dashboard_pages = []
     for page in pages:
-        text = page.read_text(encoding="utf-8")
-        if all(_contains_number(text, v) for v in AGGREGATES.values()):
+        text = visible_text(page.read_text(encoding="utf-8"))
+        if all(value in text for value in expected):
             dashboard_pages.append(page)
 
     assert dashboard_pages, (
-        "no rendered page displays all aggregate values "
-        + repr(sorted(AGGREGATES.values()))
+        "no rendered page shows all aggregate values "
+        + repr(expected)
+        + " as visible text; pages: "
+        + repr([str(p.relative_to(out_dir)) for p in pages])
     )

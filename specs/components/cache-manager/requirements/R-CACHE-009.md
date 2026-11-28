@@ -7,17 +7,8 @@
   apply exactly the same way regardless of which backing is active, and
   `R-CACHE-004`'s fail-to-miss behavior on a backing-store error applies
   unconditionally to the local fallback too. `.hotdocs/cache/`'s data is
-  governed entirely by this component's own schema (`CacheKey`/
-  `CachedResult`) — it is colocated with `merge-tracker`'s `.hotdocs/`
-  subdirectories for convenience only, not governed by that component's
-  rules.
-
-  This fallback is correctness-neutral regardless of project size: since
-  `D30`, a `cache-manager` hit or miss only ever affects whether a model
-  gets called again, never whether verification is skipped (that
-  question moved to `provenance-checker`, which never consults this
-  store) — so a local-only backing carries no risk beyond its own
-  (single-machine) hit rate.
+  governed by this component's own schema (`CacheKey`/`CachedResult`),
+  not by `merge-tracker`'s rules.
 
   The store URL is read from the environment variable
   `VAR_CACHE_STORE_URL`. No client for a shared store exists yet, so

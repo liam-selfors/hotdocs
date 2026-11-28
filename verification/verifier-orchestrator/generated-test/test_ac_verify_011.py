@@ -1,5 +1,13 @@
-# hotdocs-criterion: sha256:56fb9097f281b756105334170aacbac73d1022379b5b8b37885b564515a3a871
-import hashlib
+# hotdocs-criterion: sha256:245a70a836943a4dca487b2adb9620fa606c30452bd553097a5a00776292506e
+"""AC-VERIFY-011: requirement_results projects criterion results onto R-ids.
+
+Two criteria cover R-FOO-001 (both pass), one covers R-FOO-002 (fails), and
+an llm-judge criterion covers R-FOO-003 and is skipped (no judge configured).
+requirement_results must be exactly
+{"R-FOO-001": "pass", "R-FOO-002": "fail", "R-FOO-003": "fail"} and hold
+nothing but R-id keys and pass/fail values.
+"""
+
 import json
 import re
 from pathlib import Path
@@ -11,54 +19,75 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+CRITERIA = [
+    # (criterion id, covers, kind, gherkin lines)
+    (
+        "AC-FOO-001",
+        "R-FOO-001",
+        "generated-test",
+        [
+            "Given a widget ledger holding the entries alpha and beta",
+            "When the ledger is summed",
+            "Then the widget total equals 3",
+        ],
+    ),
+    (
+        "AC-FOO-002",
+        "R-FOO-001",
+        "generated-test",
+        [
+            "Given a widget ledger holding the entry gamma",
+            "When the ledger is counted",
+            "Then the widget count equals 1",
+        ],
+    ),
+    (
+        "AC-FOO-003",
+        "R-FOO-002",
+        "generated-test",
+        [
+            "Given a widget ledger holding no entries",
+            "When the ledger is summed",
+            "Then the widget total equals 7",
+        ],
+    ),
+    (
+        "AC-FOO-004",
+        "R-FOO-003",
+        "llm-judge",
+        [
+            "Given the widget specification text",
+            "When a reviewer reads it",
+            "Then it states its rounding rule unambiguously",
+        ],
+    ),
+]
+
+REQUIREMENTS = {
+    "R-FOO-001": "The widget ledger MUST sum its entries.",
+    "R-FOO-002": "The widget ledger MUST report a zero total when empty.",
+    "R-FOO-003": "The widget specification MUST state its rounding rule.",
+}
+
+PASSING_TEST = "def test_passes():\n    assert 1 + 1 == 2\n"
+FAILING_TEST = "def test_fails():\n    assert 1 + 1 == 3\n"
+
+
 def write(path, text):
-    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-COVERS = {
-    "AC-FOO-001": "R-FOO-001",
-    "AC-FOO-002": "R-FOO-001",
-    "AC-FOO-003": "R-FOO-002",
-    "AC-FOO-004": "R-FOO-003",
-}
-
-KINDS = {
-    "AC-FOO-001": "generated-test",
-    "AC-FOO-002": "generated-test",
-    "AC-FOO-003": "generated-test",
-    "AC-FOO-004": "llm-judge",
-}
-
-GHERKIN_MARKER = "Given a widget is 1"
+def acceptance_text(criterion_id, covers, kind, lines):
+    return (
+        "# " + criterion_id + "\n\n"
+        "Covers: " + covers + "\n"
+        "Kind: " + kind + "\n\n"
+        "```gherkin\n" + "\n".join(lines) + "\n```\n"
+    )
 
 
 def build_fixture(repo_root):
-    repo_root = Path(repo_root)
-
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** — a thing.\n")
-
-    write(
-        repo_root / "specs" / "product" / "foo.md",
-        "---\n"
-        "id: P-FOO\n"
-        "title: Foo capability\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "---\n\n"
-        "# Foo capability\n\n"
-        "## Purpose\n\nProvide foo.\n\n"
-        "## Scope\n\n- In scope: foo.\n\n"
-        "### CS-FOO-001\n\n"
-        "Covers: P-FOO\n\n"
-        "```gherkin\n"
-        "Given a widget is 1\n"
-        "When compute_total is invoked with [widget]\n"
-        "Then result equals 1\n"
-        "```\n",
-    )
-
     comp = repo_root / "specs" / "components" / "foo"
     write(
         comp / "component.md",
@@ -66,127 +95,102 @@ def build_fixture(repo_root):
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team]\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
         "realizes: [P-FOO]\n"
         "---\n\n"
         "# Foo\n\n"
-        "## Purpose\n\nComputes totals.\n\n"
-        "## Scope\n\n- In scope: totals.\n\n"
-        "## Definitions\n\nNone.\n\n"
-        "## Behavior\n\nSee `requirements/`.\n\n"
-        "## Interfaces\n\nSee `interface/`.\n\n"
-        "## Data\n\nSee `interface/data/`.\n\n"
-        "## Acceptance criteria\n\nSee `acceptance/`.\n\n"
-        "## Non-functional constraints\n\nSee `constraints.md`.\n\n"
-        "## Open questions\n\n\n"
-        "## Change log\n\n- Initial.\n",
+        "## Purpose\n\n"
+        "A widget ledger used as a verifier fixture.\n",
     )
     write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `compute_total` MUST return its input.\n",
+        repo_root / "specs" / "product" / "foo.md",
+        "---\n"
+        "id: P-FOO\n"
+        "title: Foo capability\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "---\n\n"
+        "# P-FOO\n\n"
+        "A widget ledger capability.\n",
     )
     write(
-        comp / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002\n\n**R-FOO-002** — `compute_total` MUST reject negatives.\n",
-    )
-    write(
-        comp / "requirements" / "R-FOO-003.md",
-        "# R-FOO-003\n\n**R-FOO-003** — The interface MUST be clear.\n",
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a fixture term.\n",
     )
     write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\ncompute_total(x) -> int\n```\n",
+        "# Library\n\n```\nledger_total(entries)\n```\n",
     )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-
-    for cid in sorted(COVERS):
+    for rid, text in REQUIREMENTS.items():
+        write(
+            comp / "requirements" / (rid + ".md"),
+            "# " + rid + "\n\n**" + rid + "** — " + text + "\n",
+        )
+    for cid, covers, kind, lines in CRITERIA:
         write(
             comp / "acceptance" / (cid + ".md"),
-            "# " + cid + "\n\n"
-            "Covers: " + COVERS[cid] + "\n"
-            "Kind: " + KINDS[cid] + "\n\n"
-            "```gherkin\n"
-            + GHERKIN_MARKER + "\n"
-            "When compute_total is invoked with [widget]\n"
-            "Then result equals 1\n"
-            "```\n",
+            acceptance_text(cid, covers, kind, lines),
         )
 
-    # The component's code: empty module, so there are no mutation sites.
+    # Code under test: an empty module (the tests import nothing from it).
     write(repo_root / "gen" / "foo" / "foo.py", "")
 
     # spec-bundle-assembler stand-in.
-    assembler_src = (
-        "COVERS = " + repr(COVERS) + "\n"
-        "\n"
+    covers_map = {cid: covers for cid, covers, _k, _l in CRITERIA}
+    text_map = {
+        cid: "\n".join(lines) for cid, _c, _k, lines in CRITERIA
+    }
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        "COVERS = " + repr(covers_map) + "\n"
+        "TEXTS = " + repr(text_map) + "\n"
+        "REQS = " + repr(REQUIREMENTS) + "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    covers = COVERS.get(criterion_id, '')\n"
         "    return {\n"
         "        'component_id': component_id,\n"
         "        'criterion_id': criterion_id,\n"
-        "        'covers': COVERS.get(criterion_id, ''),\n"
-        "        'criterion_text': 'criterion ' + criterion_id,\n"
-        "        'requirement_text': 'requirement text',\n"
-        "        'interface': 'compute_total(x) -> int',\n"
-        "        'glossary': '',\n"
+        "        'covers': covers,\n"
+        "        'criterion_text': TEXTS.get(criterion_id, ''),\n"
+        "        'requirement_text': REQS.get(covers, ''),\n"
+        "        'interface': 'ledger_total(entries)',\n"
+        "        'glossary': 'Widget: a fixture term.',\n"
         "        'dependency_interfaces': {},\n"
         "        'testing': '',\n"
-        "    }\n"
-    )
-    write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_src,
+        "    }\n",
     )
 
-    # test-probe stand-in: always ok.
-    probe_src = (
+    # test-probe stand-in: always ok, no findings.
+    write(
+        repo_root / "gen" / "test-probe" / "test_probe.py",
         "class ProbeReport:\n"
         "    def __init__(self):\n"
         "        self.ok = True\n"
         "        self.findings = []\n"
-        "        self.tests_run = 1\n"
-        "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
-        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings)}\n"
         "\n"
-        "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None):\n"
-        "    return ProbeReport()\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
+        "    return ProbeReport()\n",
     )
-    write(repo_root / "gen" / "test-probe" / "test_probe.py", probe_src)
-
-
-def bundle_get(bundle, name):
-    if isinstance(bundle, dict):
-        return bundle[name]
-    try:
-        return bundle[name]
-    except Exception:
-        return getattr(bundle, name)
-
-
-def header_for(bundle):
-    payload = {
-        k: bundle_get(bundle, k)
-        for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")
-    }
-    text = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return "# hotdocs-criterion: sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def make_test_author(log_path):
-    def test_author_stand_in(bundle):
-        criterion_id = bundle_get(bundle, "criterion_id")
+    contents = {
+        "AC-FOO-001": PASSING_TEST,
+        "AC-FOO-002": PASSING_TEST,
+        "AC-FOO-003": FAILING_TEST,
+    }
+
+    def test_author(bundle):
+        criterion_id = field(bundle, "criterion_id")
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(str(criterion_id) + "\n")
-        if criterion_id == "AC-FOO-003":
-            body = "\n\ndef test_bad():\n    assert 1 == 2\n"
-        else:
-            body = "\n\ndef test_ok():\n    assert 1 == 1\n"
-        name = "test_" + str(criterion_id).lower().replace("-", "_") + ".py"
+            fh.write(criterion_id + "\n")
+        filename = "test_" + criterion_id.lower().replace("-", "_") + ".py"
         return {
             "component_id": "comp-foo",
             "criterion_id": criterion_id,
@@ -195,53 +199,71 @@ def make_test_author(log_path):
             "prompt_version": "v1",
             "cache_hit": False,
             "file": {
-                "path": "verification/foo/generated-test/" + name,
-                "content": header_for(bundle) + body,
+                "path": "verification/foo/generated-test/" + filename,
+                "content": contents[criterion_id],
             },
             "model_call_error": None,
             "repair_attempts": 0,
             "probe_findings": [],
         }
 
-    return test_author_stand_in
+    return test_author
 
 
-def test_requirement_results_projection_only_rids_and_verdicts(tmp_path):
+def test_requirement_results_projection(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
     log_path = tmp_path / "author.log"
 
     report = verifier_orchestrator.verify(
-        "comp-foo", repo_root, judge=None, test_author=make_test_author(log_path)
+        "comp-foo",
+        repo_root,
+        judge=None,
+        test_author=make_test_author(log_path),
     )
 
-    # Sanity check the Given: per-criterion outcomes.
-    criteria = field(report, "criteria")
-    results = {field(c, "id"): field(c, "result") for c in criteria}
-    assert results.get("AC-FOO-001") == "pass", results
-    assert results.get("AC-FOO-002") == "pass", results
-    assert results.get("AC-FOO-003") == "fail", results
-    assert results.get("AC-FOO-004") == "skipped", results
+    # Sanity-check the Given: criterion results as the scenario describes.
+    by_id = {field(c, "id"): field(c, "result") for c in field(report, "criteria")}
+    assert by_id.get("AC-FOO-001") == "pass", by_id
+    assert by_id.get("AC-FOO-002") == "pass", by_id
+    assert by_id.get("AC-FOO-003") == "fail", by_id
+    assert by_id.get("AC-FOO-004") == "skipped", by_id
+
+    called = set(log_path.read_text(encoding="utf-8").split())
+    assert called == {"AC-FOO-001", "AC-FOO-002", "AC-FOO-003"}
+
+    expected = {"R-FOO-001": "pass", "R-FOO-002": "fail", "R-FOO-003": "fail"}
 
     rr = field(report, "requirement_results")
     assert isinstance(rr, dict)
-    assert rr == {"R-FOO-001": "pass", "R-FOO-002": "fail", "R-FOO-003": "fail"}
+    assert rr == expected
 
-    for key, value in rr.items():
-        assert isinstance(key, str) and re.fullmatch(r"R-[A-Z0-9]+-\d+", key), key
-        assert value in ("pass", "fail"), value
-        assert not isinstance(value, (dict, list))
-
-    serialized = json.dumps(rr)
-    for forbidden in ("Given", "When ", "Then ", GHERKIN_MARKER, "rationale",
-                      "expected", "actual", "failure_detail", "criterion "):
-        assert forbidden not in serialized, forbidden
-
-    # The JSON form carries the same projection.
     as_dict = report.to_dict()
-    assert as_dict["requirement_results"] == {
-        "R-FOO-001": "pass",
-        "R-FOO-002": "fail",
-        "R-FOO-003": "fail",
-    }
+    rr_json = as_dict["requirement_results"]
+    assert rr_json == expected
+
+    # Only R-id keys and pass/fail string values, nothing nested.
+    for mapping in (rr, rr_json):
+        for key, value in mapping.items():
+            assert isinstance(key, str) and re.fullmatch(r"R-[A-Z0-9]+-[0-9]+", key), key
+            assert isinstance(value, str) and value in ("pass", "fail"), value
+
+    # No Gherkin text, rationale or expected/actual values anywhere in it.
+    dumped = json.dumps(rr_json, sort_keys=True)
+    for forbidden in (
+        "Given",
+        "When",
+        "Then",
+        "widget",
+        "ledger",
+        "rationale",
+        "expected",
+        "actual",
+        "failure_detail",
+        "AC-FOO",
+    ):
+        assert forbidden not in dumped, forbidden
+    for _cid, _covers, _kind, lines in CRITERIA:
+        for line in lines:
+            assert line not in dumped

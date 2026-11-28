@@ -6,5 +6,4 @@
   computed data.
 - **Readable by a human in the time it takes to review a spec diff.** Not a
   dump of every field every upstream component produced — organized into
-  the sections R-PACKET-001–008 name, in that order, so a reviewer always
-  finds the same kind of information in the same place.
+  the sections R-PACKET-001–008 name, in that order.

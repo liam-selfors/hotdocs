@@ -99,6 +99,8 @@ outside `<root>`, and reads of the repository's content:
   -D REPO=<repo_root real path> -D PREFIX=<prefix> <command>`
   with the profile, `<prefix>` being the real path of `<python>`'s own
   `sys.prefix`, printed by `<python> -I -c "import sys; print(sys.prefix)"`
+  (printed only when a run uses an OS sandbox: an unisolated run calls
+  `<python>` for nothing but its own command)
   (inside the repository when the environment is the project's)
 
   ```

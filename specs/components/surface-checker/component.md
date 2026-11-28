@@ -17,8 +17,7 @@ Rejects a generated candidate cheaply, before the long verification,
 when it cannot work in place: it does not import, it uses a name one of
 its dependencies does not have, or, for a component with a command
 line, it mishandles an unknown argument, or a declared asset lacks
-a name its interface states. These are the failures that
-otherwise surface only when a user first runs the tool.
+a name its interface states.
 
 ## Scope
 
@@ -53,8 +52,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All are `kind: generated-test` over a synthetic `repo_root`.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -65,13 +62,4 @@ None.
 
 ## Change log
 
-- `D311`: initial spec; the import and dependency checks come from
-  `tools/bootstrap_component.py`'s gates.
-- `D343`: `R-SURF-005`, `AC-SURF-005`, `AC-SURF-006`: declared assets'
-  surfaces are checked through their kinds' adapters; `R-SURF-004`
-  orders the new findings; `surface-checker@1.1.0`.
-- `D344`: `R-SURF-006`, `AC-SURF-007`: the candidate and its
-  dependencies are imported under the interpreter the `python` adapter's
-  `provision` reports, and a failed provision is one `environment`
-  finding; `surface-checker@1.2.0`.
-- `D362`: `R-SURF-002` reads uses from the syntax tree.
+`D311`, `D343`, `D344`, `D362`.

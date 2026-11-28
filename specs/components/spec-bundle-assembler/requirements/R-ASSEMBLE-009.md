@@ -15,9 +15,7 @@
   never more"** (`D100`): for each id in the target component's own
   `depends_on`, its full `interface/` content, exactly the same content
   and the same `R-ASSEMBLE-002` rule `SpecBundle.dependency_interfaces`
-  already follows. It is a dependency's public contract, never the
-  target's implementation, and lets a test's fake for a dependency match
-  its documented call shape instead of guessing.
+  already follows.
 
   **`testing` is the second exception**, and test-only: it says how a
   test builds fixtures, never what the component does, and `SpecBundle`

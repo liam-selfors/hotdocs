@@ -14,13 +14,11 @@ so a test may replace them.
 
 `hotdocs verify` (`R-TRACK-009`/`010`, `D88`/`D93`) answers "will a merge
 pass": without `--changed` it checks the whole corpus, with it that blast
-radius. Components are only checked against `provenance-checker`,
-read-only, never triggering `component-gate-runner` (`D93`); intersecting
-capabilities are checked-then-run against `capability-scenario-verifier`
+radius. Intersecting capabilities are checked-then-run against `capability-scenario-verifier`
 (`D89`/`D92`). `--model` is needed only for a capability that needs a fresh run;
 without it, that capability is reported not ready (`R-TRACK-010`). `--format=text` (default) prints `ready` or `not ready` and then each
 `not_ready_reasons` entry on its own line; `--format=json` prints the
-result as JSON, converted as `R-TRACK-007` converts its inputs. Nothing requires running it before a commit (`D87`).
+result as JSON, converted as `R-TRACK-007` converts its inputs.
 
 `track feedback` (`R-TRACK-008`, `D3`) prints the named component's most
 recent failing `R-id`s, comma-separated, ready for `hotdocs generate

@@ -29,7 +29,8 @@ This guide, `AUTHORING.md` and `agent-skills/` ship there too: `hotdocs
 init` ends by printing this guide's path, and the other two sit beside it.
 So do the documents they refer to that a project has no copy of
 (`SPEC_GUIDELINES.md`, and under `specs/architecture/` the asset-kind
-documents, `step-phrase-grammar.md` and `cli-conventions.md`), at those
+and test-driver documents, `step-phrase-grammar.md`, `cli-conventions.md`
+and the five rules documents the guide points to), at those
 paths from this guide's directory.
 
 To work on hotdocs itself, install a checkout instead:
@@ -187,7 +188,8 @@ sees only that criterion, its covered requirement and the interface:
 - every fact a test needs (a value, a file layout, an error) must be in the
   criterion, its requirement or the interface.
 
-A component's docs are capped at 4,000 words and each file at 500.
+What a component's generator reads is capped at 14,000 words, what one
+criterion's test author reads at 12,000, and each file at 500.
 `AUTHORING.md` covers all of this in depth: criterion kinds, writing
 testable criteria, shared rules in `specs/architecture/`, decision
 records, and when to split a component.

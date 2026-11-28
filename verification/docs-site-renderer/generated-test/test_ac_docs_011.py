@@ -1,4 +1,9 @@
-# hotdocs-criterion: sha256:dec5151bd8d7ef3c84d13c0787e17e20ab5444297f10d4c3e079d820d11df8cb
+# hotdocs-criterion: sha256:6de7d9de68cb40dd8ced1020e0ba862703097bfae2d9d7d42919c0c9459d9b55
+"""AC-DOCS-011: index.html inlines static/app.js exactly once as the page's
+only <script type="module"> element, followed by init(document); it holds the
+search field, the empty DAG svg and one li.node per node sorted by id; no
+other page carries a script."""
+
 import dataclasses
 import json
 from html.parser import HTMLParser
@@ -27,9 +32,8 @@ class CorpusGraph:
         ).encode("utf-8")
 
 
-def make_graph():
+def _graph():
     nodes = {
-        "P-FOO": {"type": "capability"},
         "comp-foo": {
             "type": "component",
             "verification": None,
@@ -37,12 +41,10 @@ def make_graph():
             "size_status": "unknown",
             "sealed": False,
             "pinned_overrides": [],
-            "owners": ["pipeline-team"],
-            "documents": {
-                "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\n"
-                "owners: [pipeline-team]\n---\n\n# Foo\n",
-            },
+            "owners": [],
+            "documents": {"component.md": "# Foo\n\nThe foo component.\n"},
         },
+        "P-FOO": {"type": "capability"},
     }
     edges = [{"from": "comp-foo", "to": "P-FOO", "kind": "realizes"}]
     aggregates = {
@@ -53,57 +55,64 @@ def make_graph():
     return CorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
-class Collector(HTMLParser):
+class _Collector(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.starts = []
+        self.elements = []
 
     def handle_starttag(self, tag, attrs):
-        self.starts.append((tag, dict(attrs)))
+        self.elements.append((tag, dict(attrs)))
 
     def handle_startendtag(self, tag, attrs):
-        self.starts.append((tag, dict(attrs)))
+        self.elements.append((tag, dict(attrs)))
+
+
+def _asset_text():
+    init_file = Path(docs_site_renderer.__file__).resolve()
+    asset = init_file.parent.parent / "static" / "app.js"
+    return asset.read_text(encoding="utf-8")
 
 
 def test_ac_docs_011(tmp_path):
     out_dir = tmp_path / "site"
-    docs_site_renderer.render_docs_site(make_graph(), out_dir)
+    docs_site_renderer.render_docs_site(_graph(), out_dir)
 
     index = out_dir / "index.html"
     assert index.is_file()
-    page = index.read_text(encoding="utf-8")
+    html = index.read_text(encoding="utf-8")
 
-    asset = (
-        Path(docs_site_renderer.__file__).resolve().parent.parent
-        / "static"
-        / "app.js"
-    )
-    a_text = asset.read_text(encoding="utf-8")
+    # Exactly one script element, and it is <script type="module">.
+    assert html.count("<script") == 1
+    opening = '<script type="module">'
+    assert html.count(opening) == 1
+    start = html.index(opening) + len(opening)
+    end = html.index("</script>", start)
+    script_text = html[start:end]
 
-    assert page.count("<script") == 1
-    opener = '<script type="module">'
-    assert page.count(opener) == 1
-    start = page.index(opener) + len(opener)
-    end = page.index("</script>", start)
-    assert page[start:end] == a_text + "\ninit(document);\n"
+    asset_text = _asset_text()
+    assert script_text == asset_text + "\ninit(document);\n"
 
-    collector = Collector()
-    collector.feed(page)
+    # Structural elements.
+    collector = _Collector()
+    collector.feed(html)
     collector.close()
-    starts = collector.starts
+    elements = collector.elements
 
-    assert any(attrs.get("id") == "search" for _tag, attrs in starts)
-    assert any(tag == "svg" and attrs.get("id") == "dag" for tag, attrs in starts)
+    assert any(attrs.get("id") == "search" for _tag, attrs in elements)
+    assert any(
+        tag == "svg" and attrs.get("id") == "dag" for tag, attrs in elements
+    )
 
     node_ids = [
         attrs.get("data-id")
-        for tag, attrs in starts
+        for tag, attrs in elements
         if tag == "li" and "node" in (attrs.get("class") or "").split()
     ]
     assert node_ids == ["P-FOO", "comp-foo"]
 
-    for html_file in out_dir.rglob("*.html"):
-        if html_file.resolve() == index.resolve():
-            continue
-        text = html_file.read_text(encoding="utf-8")
-        assert "<script" not in text, str(html_file)
+    # No other page carries a script.
+    others = [p for p in out_dir.rglob("*.html") if p.resolve() != index.resolve()]
+    assert others, "expected detail and dashboard pages besides index.html"
+    for page in others:
+        text = page.read_text(encoding="utf-8")
+        assert "<script" not in text, str(page)

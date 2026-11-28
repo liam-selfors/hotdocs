@@ -9,5 +9,5 @@
   `make_closures`, passing its own `model`, `seed`, `repo_root` and
   `llm_backend` unchanged, and pass the returned `test_author` and
   `judge` to `verify` as that document states, never building a
-  closure itself. This component does its own wiring
-  (`D86`): its parameters are the only place a model identifier enters.
+  closure itself. Its parameters are the only place a model identifier
+  enters (`D86`).

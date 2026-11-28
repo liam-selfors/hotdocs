@@ -6,4 +6,5 @@
   node and edge lists; clearing the field shows every node again. What
   is hidden is decided by the asset's pure `filterGraph(nodes, edges,
   query)` exactly as `interface/assets/app.js.md` defines it, and
-  `init(document)` only applies its result (`D343`).
+  `init(document)` only applies its result (`D343`), which criteria
+  check on the rendered page through the `browser` driver (`D373`).

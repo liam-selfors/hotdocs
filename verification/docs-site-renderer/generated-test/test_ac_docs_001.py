@@ -1,14 +1,18 @@
-# hotdocs-criterion: sha256:28a8efb40db58c6ab430fdff6d4853522493d53e866186b969e525bc8d3fff11
-import docs_site_renderer
+# hotdocs-criterion: sha256:76b7ab96e152a76965e69967e68d704777a9f76ff85dd58e8699234b6eb090f3
+"""AC-DOCS-001: a corpus graph with three nodes and two edges renders a DAG
+view holding three node elements and two edge elements (R-DOCS-001)."""
 
 import dataclasses
 import json
-from html.parser import HTMLParser
 from pathlib import Path
+
+import docs_site_renderer
 
 
 @dataclasses.dataclass
-class StandInCorpusGraph:
+class FakeCorpusGraph:
+    """Same attribute shape as corpus-graph-builder's CorpusGraph dataclass."""
+
     nodes: dict
     edges: list
     aggregates: dict
@@ -27,83 +31,71 @@ class StandInCorpusGraph:
         ).encode("utf-8")
 
 
-class DagParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.ul_stack = []
-        self.node_items = []
-        self.edge_items = []
-
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
-        if tag == "ul":
-            self.ul_stack.append(attrs.get("id"))
-            return
-        if tag == "li" and self.ul_stack:
-            classes = (attrs.get("class") or "").split()
-            current = self.ul_stack[-1]
-            if current == "nodes" and "node" in classes:
-                self.node_items.append(attrs)
-            elif current == "edges" and "edge" in classes:
-                self.edge_items.append(attrs)
-
-    def handle_endtag(self, tag):
-        if tag == "ul" and self.ul_stack:
-            self.ul_stack.pop()
-
-
-def make_graph():
+def _three_node_two_edge_graph():
     nodes = {
-        "P-ZERO-EDIT": {"type": "capability"},
-        "comp-foo": {
+        "P-ALPHA": {"type": "capability"},
+        "comp-beta": {
             "type": "component",
             "verification": None,
             "provenance": None,
-            "size_status": "ok",
+            "size_status": "unknown",
             "sealed": False,
             "pinned_overrides": [],
             "owners": ["pipeline-team"],
-            "documents": {"component.md": "# Foo\n"},
+            "documents": {},
         },
-        "VAR-FOO-URL": {"type": "var"},
+        "VAR-GAMMA": {"type": "var"},
     }
     edges = [
-        {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
-        {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
+        {"from": "comp-beta", "to": "P-ALPHA", "kind": "realizes"},
+        {"from": "comp-beta", "to": "VAR-GAMMA", "kind": "uses_var"},
     ]
     aggregates = {
         "orphan_capability_rate": 0.0,
         "orphan_component_rate": 0.0,
         "orphan_var_rate": 0.0,
     }
-    return StandInCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
+    return FakeCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
-def test_ac_docs_001_dag_view_has_three_nodes_and_two_edges(tmp_path):
-    graph = make_graph()
+def test_ac_docs_001_dag_view_has_three_nodes_and_two_edges(tmp_path, browser):
+    graph = _three_node_two_edge_graph()
     out_dir = tmp_path / "site"
-    out_dir.mkdir()
 
     docs_site_renderer.render_docs_site(graph, out_dir)
 
-    index = Path(out_dir) / "index.html"
+    index = out_dir / "index.html"
     assert index.is_file()
-    html_text = index.read_text(encoding="utf-8")
 
-    parser = DagParser()
-    parser.feed(html_text)
-    parser.close()
+    page = browser.open(index)
 
-    assert len(parser.node_items) == 3
-    assert len(parser.edge_items) == 2
+    assert page.find(css="#nodes .node").count() == 3
+    assert page.find(css="#edges .edge").count() == 2
 
-    assert [item.get("data-id") for item in parser.node_items] == sorted(
-        ["P-ZERO-EDIT", "comp-foo", "VAR-FOO-URL"]
-    )
-    assert [
-        (item.get("data-from"), item.get("data-to"), item.get("data-kind"))
-        for item in parser.edge_items
-    ] == [
-        ("comp-foo", "P-ZERO-EDIT", "realizes"),
-        ("comp-foo", "VAR-FOO-URL", "uses_var"),
-    ]
+    for node_id, node_type in (
+        ("P-ALPHA", "capability"),
+        ("comp-beta", "component"),
+        ("VAR-GAMMA", "var"),
+    ):
+        selector = (
+            '#nodes li.node[data-id="' + node_id + '"][data-type="' + node_type + '"]'
+        )
+        assert page.find(css=selector).count() == 1, selector
+
+    for frm, to, kind in (
+        ("comp-beta", "P-ALPHA", "realizes"),
+        ("comp-beta", "VAR-GAMMA", "uses_var"),
+    ):
+        selector = (
+            '#edges li.edge[data-from="'
+            + frm
+            + '"][data-to="'
+            + to
+            + '"][data-kind="'
+            + kind
+            + '"]'
+        )
+        assert page.find(css=selector).count() == 1, selector
+
+    assert page.find(css="svg#dag").count() == 1
+    assert page.console_errors() == []

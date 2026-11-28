@@ -1,10 +1,8 @@
 # R-ENDPOINT-009
 
 **R-ENDPOINT-009** — MUST expose the setup helpers `hotdocs init` builds
-  on, all in `interface/library.md`: `PROVIDERS` (per provider
-  `default_base_url`, `default_api_key_env`, `needs_base_url`,
-  `suggested_model`; the suggestion is a hint, never applied by
-  `complete()`); `save_config`, which validates exactly as
+  on, all in `interface/library.md`: `PROVIDERS` (its
+  `suggested_model` a hint, never applied by `complete()`); `save_config`, which validates exactly as
   `load_config` does, refuses an unknown provider or anything that looks
   like a secret, writes nothing then, keeps any other content of an
   existing file, and writes no secret; `detect_providers`, one entry per

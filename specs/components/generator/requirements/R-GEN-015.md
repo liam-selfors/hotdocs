@@ -8,10 +8,7 @@
   It names the real module, e.g. `widget_maker.py` or `widget_maker/`
   for `comp-widget-maker`, then each declared asset path
   (`interface/library.md`'s Assets) as a file the reply must also
-  write, and says no other non-`.py` file may be written (`D343`). This
-  is fixed scaffolding, not bundle content (`D38`).
-
-  The reply format is in `interface/library.md`.
+  write, and says no other non-`.py` file may be written (`D343`, `D38`).
 
   Before writing, generator MUST also strip one redundant leading
   `gen/<component>/` or `<component>/` from any returned file path, so

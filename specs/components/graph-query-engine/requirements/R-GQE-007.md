@@ -1,7 +1,7 @@
 # R-GQE-007
 
 **R-GQE-007** — MUST expose a `load_views(con, repo_root)` call that
-  creates all seven views (`R-GQE-001`–`006`, `R-GQE-008`) against a given DuckDB
+  creates all eight views (`R-GQE-001`–`006`, `R-GQE-008`, `R-GQE-009`) against a given DuckDB
   connection, substituting `repo_root` (an absolute path) for every
   `{repo_root}` placeholder in the generated SQL before executing each
   `CREATE VIEW` statement in dependency order (`component_context`
@@ -14,14 +14,11 @@
 
   `read_yaml_frontmatter` MUST NOT be allowed to raise merely because a
   glob it reads matches zero files (unlike `read_text`, which already
-  tolerates this natively — confirmed by hand, not assumed): a corpus
+  tolerates this natively): a corpus
   legitimately has no `specs/vars/*.md`, `specs/product/*.md`,
   `specs/decisions/*.md` or `specs/components/*/component.md` files yet in
   some states (a project `hotdocs init` set up without `--example` has no
-  component at all) (`graph-query-engine`'s own sparse test fixtures,
-  `spec-linter`'s, `D13`), and that is expected state, not an error, the
-  same posture `R-GQE-005` already requires for zero `.provenance.json`
-  files. `load_views` MUST pre-check each such glob and substitute a
+  component at all) (`D13`). `load_views` MUST pre-check each such glob and substitute a
   typed, always-empty relation for that one call site when it has zero
   matches, rather than letting the bind-time error propagate.
   Every view then still exists and returns zero rows.

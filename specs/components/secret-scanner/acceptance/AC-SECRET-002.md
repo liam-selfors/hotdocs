@@ -5,6 +5,6 @@ Kind: generated-test
 
 ```gherkin
 Given a full scan with at least one match
-When secret-scan completes
-Then flagged is true and the merge is reported as blocked
+When scan(repo_root) and main(["--repo-root", <repo_root>, "--format=json"]) run
+Then the result's flagged is true, and main exits 1
 ```

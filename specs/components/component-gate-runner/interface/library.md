@@ -36,11 +36,12 @@ are, in this order:
 
 1. `provenance-checker`'s `current_provenance_key(component_id,
    repo_root)`, then `check_provenance(component_id,
-   key.spec_bundle_hash, key.gate_versions, repo_root)` — on a
+   key.spec_bundle_hash, key.gate_versions, repo_root,
+   key.spec_bundle_parts)` — on a
    short-circuiting hit (`interface/data/ComponentPipelineResult.md`),
    nothing below is called; on a miss, `R-GATE-012`'s deletions come next
-1a. only on a miss whose `reason` is `"environment differs"`
-   (`R-GATE-011`): `make_closures` and `verify` as a sealed component's
+1a. only on a miss whose `reason` is `"environment differs"` or
+   `"dependency code differs"` (`R-GATE-011`): `make_closures` and `verify` as a sealed component's
    steps 1 and 2 below, then both scans as in 4. If they pass (`R-GATE-011`), read
    `<repo_root>/gen/<slug>/.provenance.json` as JSON (`<slug>` is
    `component_id` without `comp-`), call `write_provenance` as in 5
@@ -70,7 +71,8 @@ are, in this order:
    repo_root)`, `inputs` the plain dict `{component_id,
    generation_result, verification_report, license_scan_result,
    secret_scan_result, provenance_hit: false, attempts,
-   attempt_history, gate_versions: key.gate_versions}`: the loop's last
+   attempt_history, gate_versions: key.gate_versions, spec_bundle_parts:
+   key.spec_bundle_parts}`: the loop's last
    results, the two scans', `attempts` the file count above taken after
    the loop, and `attempt_history` the loop's `attempts`
 

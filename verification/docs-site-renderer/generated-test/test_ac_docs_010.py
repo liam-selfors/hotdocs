@@ -1,9 +1,11 @@
-# hotdocs-criterion: sha256:9ea97baf76d3618299190320ed45b8fae544ca79b03776b5ec4a42cd6e93bb4d
+# hotdocs-criterion: sha256:f6c76b619be8aeefad5171ab44afd5a9138df18a2518e5fecfd672938f86e68f
+"""AC-DOCS-010 (covers R-DOCS-009): filterGraph decides which nodes and edges are hidden."""
+
 import copy
 
 import pytest
 
-import docs_site_renderer
+import docs_site_renderer  # noqa: F401  (module under test)
 
 
 NODES = [
@@ -30,7 +32,7 @@ CASES = [
 
 
 @pytest.mark.parametrize(
-    "query,h_alpha,h_beta,h_cap,expected_edges",
+    "query, h_alpha, h_beta, h_cap, expected_edges",
     CASES,
     ids=[repr(c[0]) for c in CASES],
 )

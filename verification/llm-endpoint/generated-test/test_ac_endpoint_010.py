@@ -1,9 +1,7 @@
-# hotdocs-criterion: sha256:270fc0206695d747e153f207998cd123f36d8755593ee7f0da43ff1b9cdf3f80
-import email.message
+# hotdocs-criterion: sha256:cc73ed34e4281a992a8e3c282c01ff6f83fb62b10b0cc016adc2d05b4022b94d
 import io
 import json
 import os
-import socket
 import stat
 import urllib.error
 import urllib.request
@@ -17,177 +15,162 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _url_of(request):
-    if isinstance(request, str):
-        return request
-    return getattr(request, "full_url", None) or request.get_full_url()
+ENTRY_KEYS = ("provider", "available", "reason", "suggested_model", "api_key_env")
 
 
-def _timeout_of(args, kwargs):
-    if "timeout" in kwargs:
-        return kwargs["timeout"]
-    if len(args) >= 2:
-        return args[1]
-    return None
-
-
-class _FakeReply:
+class FakeResponse:
     def __init__(self, body):
         self._body = body
+        self.status = 200
+        self.code = 200
+        self.headers = {}
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, exc_type, exc, tb):
         return False
 
     def read(self, *args, **kwargs):
         return self._body
 
+    def getcode(self):
+        return 200
 
-def _make_claude_dir(tmp_path):
-    d = tmp_path / "with_claude"
-    d.mkdir()
-    script = d / "claude"
-    script.write_text("#!/bin/sh\nexit 0\n")
-    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    return d
+    def close(self):
+        pass
 
 
-def _by_provider(entries):
+def _raising_urlopen(*args, **kwargs):
+    raise urllib.error.URLError("connection refused")
+
+
+def _by_name(entries):
     out = {}
-    for e in entries:
-        out[field(e, "provider")] = e
+    for entry in entries:
+        out[field(entry, "provider")] = entry
     return out
 
 
-def test_detect_providers_entries_and_availability(tmp_path, monkeypatch):
-    calls = []
+def _check_entries(entries):
+    entries = list(entries)
+    names = [field(e, "provider") for e in entries]
+    assert sorted(names) == sorted(llm_endpoint.PROVIDERS.keys())
+    assert len(names) == len(set(names))
+    for entry in entries:
+        for key in ENTRY_KEYS:
+            field(entry, key)
+        assert isinstance(field(entry, "available"), bool)
+    return _by_name(entries)
 
-    def failing_urlopen(*args, **kwargs):
-        calls.append((_url_of(args[0]), _timeout_of(args, kwargs)))
-        raise urllib.error.URLError(ConnectionRefusedError("refused"))
 
-    monkeypatch.setattr(urllib.request, "urlopen", failing_urlopen)
+@pytest.fixture(autouse=True)
+def _isolate(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return work
 
-    empty_dir = tmp_path / "no_claude"
+
+def test_detect_providers_keys_path_and_failed_probe(tmp_path, monkeypatch):
+    monkeypatch.setattr(urllib.request, "urlopen", _raising_urlopen)
+    empty_dir = tmp_path / "empty_bin"
     empty_dir.mkdir()
     env = {"PATH": str(empty_dir), "OPENAI_API_KEY": "k", "GEMINI_API_KEY": " "}
 
     entries = llm_endpoint.detect_providers(env=env)
-    assert isinstance(entries, list)
-
-    provider_names = list(llm_endpoint.PROVIDERS.keys())
-    got_names = [field(e, "provider") for e in entries]
-    assert sorted(got_names) == sorted(provider_names)
-    assert len(got_names) == len(set(got_names))
-
-    for e in entries:
-        for key in ("provider", "available", "reason", "suggested_model", "api_key_env"):
-            field(e, key)  # must exist
-        assert isinstance(field(e, "available"), bool)
-
-    by = _by_provider(entries)
-    available = sorted(name for name, e in by.items() if field(e, "available"))
+    by_name = _check_entries(entries)
+    available = sorted(n for n, e in by_name.items() if field(e, "available"))
     assert available == ["openai"]
 
-    # With a claude executable on PATH, claude-cli is available too.
-    claude_dir = _make_claude_dir(tmp_path)
-    env2 = dict(env)
-    env2["PATH"] = str(claude_dir) + os.pathsep + str(empty_dir)
+    claude_dir = tmp_path / "claude_bin"
+    claude_dir.mkdir()
+    claude = claude_dir / "claude"
+    claude.write_text("#!/bin/sh\nexit 0\n")
+    claude.chmod(claude.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    env2 = {"PATH": str(claude_dir), "OPENAI_API_KEY": "k", "GEMINI_API_KEY": " "}
+
     entries2 = llm_endpoint.detect_providers(env=env2)
-    by2 = _by_provider(entries2)
-    assert sorted(by2.keys()) == sorted(provider_names)
-    available2 = sorted(name for name, e in by2.items() if field(e, "available"))
+    by_name2 = _check_entries(entries2)
+    available2 = sorted(n for n, e in by_name2.items() if field(e, "available"))
     assert available2 == ["claude-cli", "openai"]
 
 
-def test_detect_providers_ollama_answering(tmp_path, monkeypatch):
+def test_detect_providers_ollama_answering_with_short_timeout(tmp_path, monkeypatch):
     calls = []
 
     def answering_urlopen(*args, **kwargs):
-        calls.append((_url_of(args[0]), _timeout_of(args, kwargs)))
-        return _FakeReply(b'{"models": []}')
+        timeout = kwargs.get("timeout")
+        if timeout is None and len(args) > 2:
+            timeout = args[2]
+        calls.append(timeout)
+        return FakeResponse(json.dumps({"models": []}).encode("utf-8"))
 
     monkeypatch.setattr(urllib.request, "urlopen", answering_urlopen)
-
-    empty_dir = tmp_path / "no_claude"
+    empty_dir = tmp_path / "empty_bin"
     empty_dir.mkdir()
     env = {"PATH": str(empty_dir)}
 
     entries = llm_endpoint.detect_providers(env=env)
-    by = _by_provider(entries)
-    assert "ollama" in by
-    assert field(by["ollama"], "available") is True
-
-    probe_calls = [c for c in calls if c[0] and "/api/tags" in c[0]]
-    assert probe_calls, "Ollama probe did not request /api/tags"
-    for _, timeout in probe_calls:
+    by_name = _check_entries(entries)
+    assert field(by_name["ollama"], "available") is True
+    assert calls, "the Ollama probe did not call urlopen"
+    for timeout in calls:
         assert timeout is not None
         assert 0 < float(timeout) <= 1.5
 
 
-def test_check_connection_ok_then_auth_failure(tmp_path, monkeypatch):
-    secret = "sk-test-secret-value-1234567890"
-    monkeypatch.setenv("OPENAI_API_KEY", secret)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.chdir(tmp_path)
+def _openai_reply():
+    body = {
+        "id": "chatcmpl-1",
+        "object": "chat.completion",
+        "model": "m",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    return json.dumps(body).encode("utf-8")
 
-    reply_body = json.dumps(
-        {
-            "id": "x",
-            "object": "chat.completion",
-            "model": "m",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "ok"},
-                    "finish_reason": "stop",
-                }
-            ],
-            "output_text": "ok",
-            "output": [
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "ok"}],
-                }
-            ],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        }
-    ).encode("utf-8")
+
+def test_check_connection_ok_then_auth_no_log_unknown_provider(_isolate, monkeypatch):
+    secret = "sk-test-secret-value-123456"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
 
     def ok_urlopen(*args, **kwargs):
-        return _FakeReply(reply_body)
+        return FakeResponse(_openai_reply())
 
     monkeypatch.setattr(urllib.request, "urlopen", ok_urlopen)
-    result_ok = llm_endpoint.check_connection("openai", "m")
-    assert field(result_ok, "ok") is True
-    assert field(result_ok, "error") is None
+    ok = llm_endpoint.check_connection("openai", "m")
+    assert field(ok, "ok") is True
+    assert field(ok, "error") is None
 
     def unauthorized_urlopen(*args, **kwargs):
-        url = _url_of(args[0])
-        hdrs = email.message.Message()
+        request = args[0] if args else kwargs.get("url")
+        url = getattr(request, "full_url", str(request))
         raise urllib.error.HTTPError(
-            url,
-            401,
-            "Unauthorized",
-            hdrs,
-            io.BytesIO(b'{"error": {"message": "Incorrect API key provided"}}'),
+            url, 401, "Unauthorized", {}, io.BytesIO(b'{"error": {"message": "bad key"}}')
         )
 
     monkeypatch.setattr(urllib.request, "urlopen", unauthorized_urlopen)
-    result_bad = llm_endpoint.check_connection("openai", "m")
-    assert field(result_bad, "ok") is False
-    error = field(result_bad, "error")
+    bad = llm_endpoint.check_connection("openai", "m")
+    assert field(bad, "ok") is False
+    error = field(bad, "error")
     assert error is not None
     assert field(error, "category") == "auth"
     message = field(error, "message")
     assert isinstance(message, str)
     assert secret not in message
+    assert secret not in json.dumps(bad, default=str) if isinstance(bad, dict) else True
 
-    calls_dir = tmp_path / ".hotdocs" / "calls"
-    assert not calls_dir.exists() or not any(calls_dir.iterdir())
+    calls_dir = _isolate / ".hotdocs" / "calls"
+    if calls_dir.exists():
+        assert list(calls_dir.iterdir()) == []
 
     with pytest.raises(ValueError):
         llm_endpoint.check_connection("no-such-provider", "m")

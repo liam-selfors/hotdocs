@@ -1,39 +1,44 @@
-# hotdocs-criterion: sha256:7f7b0c334d6ef672934b46e3e5ad81815e86c1c638dd52ed80b1dc45f3a3d64f
+# hotdocs-criterion: sha256:3a1bd2099a8e337c7086f6be968da60f36f9992881d3810d2fb608404e2c5302
 import hashlib
 import json
 import re
+from pathlib import Path
 
 import pytest
 
 import license_scanner
 
 
-FOO_SOURCE = (
-    "def add(a, b):\n"
-    "    return a + b\n"
-    "\n"
-    "class Thing:\n"
-    "    value = 42\n"
-    "\n"
-    "    def run(self, x, y, z):\n"
-    "        total = x + y + z\n"
-    "        scaled = total * self.value\n"
-    "        return add(scaled, 7)\n"
-    "\n"
-    "def main(items):\n"
-    "    result = 0\n"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+FOO_PY = (
+    "def compute_total(items, factor):\n"
+    "    total = 0\n"
     "    for item in items:\n"
-    "        result = add(result, item)\n"
+    "        value = item * factor\n"
+    "        if value > 10:\n"
+    "            total = total + value\n"
+    "        else:\n"
+    "            total = total - 1\n"
+    "    return total\n"
+    "\n"
+    "\n"
+    "def scale_values(values, ratio):\n"
+    "    result = []\n"
+    "    for entry in values:\n"
+    "        result.append(entry * ratio + 3)\n"
     "    return result\n"
 )
 
 
 FAKE_CACHE_MANAGER = (
-    "import dataclasses\n"
-    "import datetime\n"
+    "from dataclasses import dataclass\n"
+    "from datetime import datetime, timezone\n"
     "\n"
     "\n"
-    "@dataclasses.dataclass\n"
+    "@dataclass\n"
     "class CacheKey:\n"
     "    spec_bundle_hash: str\n"
     "    gate_inputs_hash: str\n"
@@ -41,10 +46,10 @@ FAKE_CACHE_MANAGER = (
     "    model_pin: str\n"
     "\n"
     "\n"
-    "@dataclasses.dataclass\n"
+    "@dataclass\n"
     "class CachedResult:\n"
     "    gate_type: str\n"
-    "    payload: dict\n"
+    "    payload: object\n"
     "    stored_at: str\n"
     "\n"
     "\n"
@@ -69,7 +74,7 @@ FAKE_CACHE_MANAGER = (
     "\n"
     "\n"
     "def now_iso():\n"
-    "    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+    "    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
     "\n"
     "\n"
     "def stats(*, repo_root=None):\n"
@@ -77,127 +82,115 @@ FAKE_CACHE_MANAGER = (
 )
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def _tokens(text):
+    return [t.lower() for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", text)]
 
 
-def strip_comments(text):
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
-    text = re.sub(r'""".*?"""', " ", text, flags=re.S)
-    text = re.sub(r"'''.*?'''", " ", text, flags=re.S)
-    text = re.sub(r"//[^\n]*", " ", text)
-    text = re.sub(r"#[^\n]*", " ", text)
-    return text
+def _window_hashes(text):
+    toks = _tokens(text)
+    out = set()
+    for i in range(len(toks) - 8):
+        joined = "\x1f".join(toks[i:i + 9])
+        out.add(hashlib.sha256(joined.encode("utf-8")).hexdigest())
+    return out
 
 
-def window_hashes(text):
-    tokens = [t.lower() for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", strip_comments(text))]
-    hashes = set()
-    for i in range(len(tokens) - 9 + 1):
-        joined = "\x1f".join(tokens[i:i + 9])
-        hashes.add(hashlib.sha256(joined.encode("utf-8")).hexdigest())
-    return sorted(hashes)
-
-
-def prose(n_words, seed):
+def _prose(n_words, seed):
     vocab = [
-        "meadow", "river", "lantern", "harbor", "orchard", "pebble", "willow",
-        "summit", "canyon", "breeze", "thimble", "marble", "falcon", "garden",
-        "copper", "velvet", "glacier", "ember", "quarry", "saddle", "tundra",
+        "meadow", "lantern", "harbor", "velvet", "orchard", "glacier",
+        "thimble", "sparrow", "copper", "willow", "nebula", "quarry",
     ]
     words = []
     for i in range(n_words):
-        words.append(vocab[(i * 7 + seed) % len(vocab)] + "w" + str(i))
-    lines = []
-    for i in range(0, len(words), 12):
-        lines.append(" ".join(words[i:i + 12]))
-    return "\n".join(lines) + "\n"
+        words.append(vocab[i % len(vocab)] + seed + str(i))
+    return " ".join(words) + "\n"
 
 
-def make_repo(root, monkeypatch, extra_files=None):
-    root.mkdir(parents=True, exist_ok=True)
-    foo_dir = root / "gen" / "foo"
-    foo_dir.mkdir(parents=True, exist_ok=True)
-    (foo_dir / "foo.py").write_text(FOO_SOURCE, encoding="utf-8")
+def _setup_repo(repo_root, monkeypatch):
+    # Fake cache-manager that always misses, so every scan is fresh.
+    cm = repo_root / "gen" / "cache-manager"
+    cm.mkdir(parents=True)
+    (cm / "cache_manager.py").write_text(FAKE_CACHE_MANAGER, encoding="utf-8")
 
-    cm_dir = root / "gen" / "cache-manager"
-    cm_dir.mkdir(parents=True, exist_ok=True)
-    (cm_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER, encoding="utf-8")
+    comp_spec = repo_root / "specs" / "components" / "foo"
+    comp_spec.mkdir(parents=True)
+    (comp_spec / "component.md").write_text(
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n",
+        encoding="utf-8",
+    )
 
-    hashes = window_hashes(FOO_SOURCE)
-    assert len(hashes) > 5
+    foo = repo_root / "gen" / "foo"
+    foo.mkdir(parents=True)
+    (foo / "foo.py").write_text(FOO_PY, encoding="utf-8")
+
+    hashes = sorted(_window_hashes(FOO_PY))
+    assert len(hashes) > 0
     corpus = {
         "corpus_version": 1,
-        "block_threshold": 0.70,
+        "block_threshold": 0.7,
         "entries": [
             {
-                "reference_id": "ref-foo",
+                "reference_id": "ref-001",
                 "license_family": "GPL",
-                "risk_tier": "medium",
+                "risk_tier": "low",
                 "hashes": hashes,
             }
         ],
     }
-    corpus_path = root / "corpus.json"
+    corpus_path = repo_root / "corpus.json"
     corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
 
     monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-    for rel, content in (extra_files or {}).items():
-        p = foo_dir / rel
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
-    return root
-
-
-def add_excluded_files(root):
-    foo_dir = root / "gen" / "foo"
-    (foo_dir / ".provenance.json").write_text(prose(3000, 1), encoding="utf-8")
-    (foo_dir / ".overrides.json").write_text("{}", encoding="utf-8")
-    pyc = foo_dir / "__pycache__" / "foo.cpython-314.pyc"
-    pyc.parent.mkdir(parents=True, exist_ok=True)
-    pyc.write_text(prose(3000, 2), encoding="utf-8")
-    cached = foo_dir / ".cache" / "x.py"
-    cached.parent.mkdir(parents=True, exist_ok=True)
-    cached.write_text(prose(3000, 3), encoding="utf-8")
+    return foo
 
 
 def test_excluded_files_do_not_change_score(tmp_path, monkeypatch):
-    root = make_repo(tmp_path / "repo", monkeypatch)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    foo = _setup_repo(repo_root, monkeypatch)
 
-    before = license_scanner.scan("comp-foo", root)
+    before = license_scanner.scan("comp-foo", repo_root)
     assert field(before, "evaluated") is True
-    assert field(before, "similarity_score") == 1.0
+    assert abs(field(before, "similarity_score") - 1.0) < 1e-9
     assert field(before, "blocked") is True
 
-    add_excluded_files(root)
+    (foo / ".provenance.json").write_text(_prose(3000, "p"), encoding="utf-8")
+    (foo / ".overrides.json").write_text("{}", encoding="utf-8")
+    (foo / "__pycache__").mkdir()
+    (foo / "__pycache__" / "foo.cpython-314.pyc").write_text(
+        _prose(3000, "c"), encoding="utf-8"
+    )
+    (foo / ".cache").mkdir()
+    (foo / ".cache" / "x.py").write_text(_prose(3000, "x"), encoding="utf-8")
 
-    after = license_scanner.scan("comp-foo", root)
+    after = license_scanner.scan("comp-foo", repo_root)
     assert field(after, "evaluated") is True
     assert field(after, "blocked") is True
-    assert field(after, "similarity_score") == 1.0
-
-
-def test_excluded_files_fresh_repo_scores_one(tmp_path, monkeypatch):
-    root = make_repo(tmp_path / "repo2", monkeypatch)
-    add_excluded_files(root)
-
-    result = license_scanner.scan("comp-foo", root)
-    assert field(result, "evaluated") is True
-    assert field(result, "blocked") is True
-    assert field(result, "similarity_score") == 1.0
+    assert abs(field(after, "similarity_score") - 1.0) < 1e-9
+    assert field(after, "blocked") == field(before, "blocked")
+    assert field(after, "similarity_score") == field(before, "similarity_score")
 
 
 def test_declared_asset_is_content(tmp_path, monkeypatch):
-    root = make_repo(
-        tmp_path / "repo3",
-        monkeypatch,
-        extra_files={"static/app.js": prose(300, 5)},
-    )
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    foo = _setup_repo(repo_root, monkeypatch)
 
-    result = license_scanner.scan("comp-foo", root)
+    (foo / "static").mkdir()
+    (foo / "static" / "app.js").write_text(_prose(300, "s"), encoding="utf-8")
+
+    result = license_scanner.scan("comp-foo", repo_root)
     assert field(result, "evaluated") is True
     score = field(result, "similarity_score")
     assert score is not None

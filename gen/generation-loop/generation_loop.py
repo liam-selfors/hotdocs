@@ -4,8 +4,10 @@ import dataclasses
 import hashlib
 import importlib.util
 import json
+import re
 import sys
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 
 RETRIED_CATEGORIES = ("truncated_response", "missing_module", "empty_response",
@@ -14,21 +16,25 @@ RETRIED_CATEGORIES = ("truncated_response", "missing_module", "empty_response",
 
 
 def _get(obj, name):
-    """Dual dict-or-attribute access; an absent field reads as None."""
     if isinstance(obj, dict):
         return obj.get(name)
     return getattr(obj, name, None)
 
 
 def _tool_root():
-    return next(d.parent for d in Path(__file__).resolve().parents if d.name == "gen")
+    here = Path(__file__).resolve()
+    for d in here.parents:
+        if d.name == "gen":
+            return d.parent
+    return here.parent.parent
 
 
-def _load(repo_root, slug, module):
-    directory = Path(repo_root) / "gen" / slug
-    if not directory.is_dir():
-        directory = _tool_root() / "gen" / slug
-    path = directory / f"{module}.py"
+def _load(repo_root, slug):
+    module = slug.replace("-", "_")
+    d = Path(repo_root) / "gen" / slug
+    if not d.is_dir():
+        d = _tool_root() / "gen" / slug
+    path = d / f"{module}.py"
     name = f"_generation_loop_dep_{module}_{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
@@ -46,11 +52,11 @@ def _plain(value):
     return value
 
 
-@dataclasses.dataclass
+@dataclass
 class AttemptLoopResult:
     passed: bool
     stop_reason: str
-    attempts: list
+    attempts: list = field(default_factory=list)
     generation_result: object = None
     verification_report: object = None
     surface_report: object = None
@@ -66,190 +72,146 @@ class AttemptLoopResult:
         }
 
 
-def _unfence(text):
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.split("\n")[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines)
-    return stripped
-
-
-def make_closures(model, seed, repo_root, llm_backend=None):
-    repo_root = Path(repo_root)
-    loaded = {}
-
-    def _dep(slug, module):
-        if slug not in loaded:
-            loaded[slug] = _load(repo_root, slug, module)
-        return loaded[slug]
-
-    def test_author(bundle):
-        mod = _dep("test-author", "test_author")
-        return mod.author_test(bundle, model, seed=seed, repo_root=repo_root,
-                               llm_backend=llm_backend)
-
-    def judge(bundle):
-        component_id = bundle["component_id"]
-        slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-        code_dir = repo_root / "gen" / slug
-        file_parts = []
-        for path in sorted(code_dir.rglob("*")):
-            if path.is_file() and "__pycache__" not in path.relative_to(code_dir).parts:
-                rel = path.relative_to(code_dir).as_posix()
-                content = path.read_text(encoding="utf-8", errors="replace")
-                file_parts.append(f"### File: {rel}\n\n{content}")
-        prompt = (
-            "You are judging whether a component's implementation satisfies one "
-            "acceptance criterion.\n\n"
-            "## Criterion\n\n" + str(bundle["criterion_text"]) + "\n\n"
-            "## Requirement\n\n" + str(bundle["requirement_text"]) + "\n\n"
-            "## Interface\n\n" + str(bundle["interface"]) + "\n\n"
-            "## Implementation files\n\n" + "\n\n".join(file_parts) + "\n\n"
-            "Reply with JSON only, exactly of the form "
-            '{"result": "pass" | "fail", "rationale": "..."}.\n'
-        )
-        mod = _dep("llm-endpoint", "llm_endpoint")
-        response = mod.complete(prompt, model, backend=llm_backend)
-        error = _get(response, "model_call_error")
-        if error:
-            return {"result": "fail",
-                    "rationale": f"judge unavailable: model call error ({_get(error, 'category')})"}
-        text = _get(response, "text") or ""
-        try:
-            data = json.loads(_unfence(text))
-        except ValueError:
-            return {"result": "fail", "rationale": "judge unavailable: unparseable reply"}
-        if not isinstance(data, dict) or data.get("result") not in ("pass", "fail"):
-            return {"result": "fail", "rationale": "judge unavailable: invalid result"}
-        return {"result": data["result"], "rationale": data.get("rationale")}
-
-    return (test_author, judge)
-
-
-def _test_file(repo_root, slug, criterion_id):
+def _test_path(repo_root, slug, criterion_id):
     name = "test_" + str(criterion_id).lower().replace("-", "_") + ".py"
     return Path(repo_root) / "verification" / slug / "generated-test" / name
+
+
+def _impl_failed_test_hashes(report, repo_root, slug):
+    hashes = {}
+    for c in _get(report, "criteria") or []:
+        if (_get(c, "kind") == "generated-test" and _get(c, "result") == "fail"
+                and _get(c, "failure_origin") == "implementation"):
+            cid = _get(c, "id")
+            p = _test_path(repo_root, slug, cid)
+            if p.is_file():
+                hashes[cid] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return hashes
 
 
 def run_attempts(component_id, bundle, repo_root, model, *, mode="single",
                  max_attempts=3, retry_feedback=None, seed=0, llm_backend=None,
                  allow_unisolated_exec=False, on_attempt=None):
-    if mode not in ("single", "agentic") or max_attempts < 1:
-        raise ValueError("invalid mode or max_attempts")
-
+    if mode not in ("single", "agentic"):
+        raise ValueError(f"unknown mode: {mode}")
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+    repo_root = Path(repo_root)
     slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-    deps = {}
 
-    def dep(dep_slug, module):
-        if dep_slug not in deps:
-            deps[dep_slug] = _load(repo_root, dep_slug, module)
-        return deps[dep_slug]
+    loaded = {}
+
+    def dep(name):
+        if name not in loaded:
+            loaded[name] = _load(repo_root, name)
+        return loaded[name]
 
     test_author, judge = make_closures(model, seed, repo_root, llm_backend)
 
     feedback = sorted(set(retry_feedback or []))
     attempts = []
-    passed = False
-    stop_reason = None
     gen_result = None
     ver_report = None
     surf_report = None
+    passed = False
+    stop_reason = "max_attempts"
     prev_hashes = {}
-    reauthored_done = set()
+    reauthored_once = set()
 
     for number in range(1, max_attempts + 1):
-        fb_arg = list(feedback) if feedback else None
+        fb_arg = list(feedback) or None
         if mode == "single":
-            gen_result = dep("generator", "generator").generate(
-                bundle, model, fb_arg, repo_root=repo_root, llm_backend=llm_backend)
+            gr = dep("generator").generate(bundle, model, fb_arg, repo_root=repo_root,
+                                           llm_backend=llm_backend)
         else:
-            gen_result = dep("agentic-generator", "agentic_generator").generate_agentic(
+            gr = dep("agentic-generator").generate_agentic(
                 bundle, model, fb_arg, repo_root=repo_root,
                 allow_unisolated_exec=allow_unisolated_exec)
+        gen_result = gr
         ver_report = None
         surf_report = None
-        cur_hashes = {}
-        stop = None
-        entry = {
-            "number": number,
-            "outcome": None,
-            "retry_feedback": list(feedback),
-            "error_category": None,
-            "surface_ok": None,
-            "overall": None,
-            "failed_requirements": [],
-            "transcript_sha256": _get(gen_result, "transcript_sha256"),
-            "reauthored_tests": [],
-        }
-        files = _get(gen_result, "files") or {}
 
-        if _get(gen_result, "refused"):
-            entry["outcome"] = "refused"
+        error_category = None
+        surface_ok = None
+        overall = None
+        failed = []
+        stop = None
+        hashes = {}
+
+        mce = _get(gr, "model_call_error")
+        if _get(gr, "refused"):
+            outcome = "refused"
             stop = "refused"
-        elif not files:
-            entry["outcome"] = "generation_failed"
-            category = _get(_get(gen_result, "model_call_error"), "category")
-            entry["error_category"] = category
-            if category == "environment":
+        elif mce:
+            outcome = "generation_failed"
+            error_category = _get(mce, "category")
+            if error_category == "environment":
                 stop = "environment"
-            elif category not in RETRIED_CATEGORIES:
+            elif error_category not in RETRIED_CATEGORIES:
                 stop = "not_retried"
         else:
-            surf_report = dep("surface-checker", "surface_checker").check_surface(
-                component_id, repo_root)
-            if not _get(surf_report, "ok"):
-                entry["outcome"] = "surface_failed"
-                entry["surface_ok"] = False
+            sr = dep("surface-checker").check_surface(component_id, repo_root)
+            surf_report = sr
+            if not _get(sr, "ok"):
+                outcome = "surface_failed"
+                surface_ok = False
             else:
-                entry["surface_ok"] = True
-                ver_report = dep("verifier-orchestrator", "verifier_orchestrator").verify(
+                surface_ok = True
+                vr = dep("verifier-orchestrator").verify(
                     component_id, repo_root, judge=judge, test_author=test_author)
-                overall = _get(ver_report, "overall")
-                entry["overall"] = overall
-                criteria = _get(ver_report, "criteria") or []
+                ver_report = vr
+                overall = _get(vr, "overall")
+                criteria = _get(vr, "criteria") or []
+                failed = sorted({
+                    _get(c, "covers") for c in criteria
+                    if _get(c, "result") == "fail"
+                    and _get(c, "failure_origin") not in ("test", "environment")
+                })
+                hashes = _impl_failed_test_hashes(vr, repo_root, slug)
                 if overall == "pass":
-                    entry["outcome"] = "passed"
-                    passed = True
+                    outcome = "passed"
                     stop = "passed"
-                    if mode == "single":
-                        dep("generator", "generator").commit_cache(gen_result, repo_root=repo_root)
                 else:
-                    entry["outcome"] = "verification_failed"
-                    entry["failed_requirements"] = sorted({
-                        _get(c, "covers") for c in criteria
-                        if _get(c, "result") == "fail"
-                        and _get(c, "failure_origin") not in ("test", "environment")
-                    })
+                    outcome = "verification_failed"
                     if any(_get(c, "failure_origin") == "environment" for c in criteria):
                         stop = "environment"
-                    for c in criteria:
-                        if (_get(c, "kind") == "generated-test" and _get(c, "result") == "fail"
-                                and _get(c, "failure_origin") == "implementation"):
-                            path = _test_file(repo_root, slug, _get(c, "id"))
-                            if path.is_file():
-                                cur_hashes[_get(c, "id")] = hashlib.sha256(
-                                    path.read_bytes()).hexdigest()
 
         if stop is None and number == max_attempts:
             stop = "max_attempts"
 
-        if stop is None:
-            repeated = sorted(
-                cid for cid, digest in cur_hashes.items()
-                if prev_hashes.get(cid) == digest and cid not in reauthored_done
-            )
-            for cid in repeated:
-                _test_file(repo_root, slug, cid).unlink()
-                reauthored_done.add(cid)
-            entry["reauthored_tests"] = repeated
-        prev_hashes = cur_hashes
+        reauthored = []
+        if outcome == "verification_failed" and stop is None:
+            for cid, h in hashes.items():
+                if cid not in reauthored_once and prev_hashes.get(cid) == h:
+                    _test_path(repo_root, slug, cid).unlink()
+                    reauthored_once.add(cid)
+                    reauthored.append(cid)
+            reauthored.sort()
+        prev_hashes = hashes
 
-        feedback = sorted(set(feedback) | set(entry["failed_requirements"]))
+        entry = {
+            "number": number,
+            "outcome": outcome,
+            "retry_feedback": list(feedback),
+            "error_category": error_category,
+            "surface_ok": surface_ok,
+            "overall": overall,
+            "failed_requirements": failed,
+            "transcript_sha256": _get(gr, "transcript_sha256"),
+            "reauthored_tests": reauthored,
+        }
         attempts.append(entry)
+
+        if outcome == "passed":
+            passed = True
+            if mode == "single":
+                dep("generator").commit_cache(gr, repo_root=repo_root)
+
         if on_attempt is not None:
-            on_attempt(entry, gen_result, ver_report)
+            on_attempt(entry, gr, ver_report)
+
+        feedback = sorted(set(feedback) | set(failed))
+
         if stop is not None:
             stop_reason = stop
             break
@@ -262,3 +224,60 @@ def run_attempts(component_id, bundle, repo_root, model, *, mode="single",
         verification_report=ver_report,
         surface_report=surf_report,
     )
+
+
+_FENCE = re.compile(r"^```[^\n]*\n(.*?)\n?```\s*$", re.S)
+
+
+def _unavailable(reason):
+    return {"result": "fail", "rationale": f"judge unavailable: {reason}"}
+
+
+def make_closures(model, seed, repo_root, llm_backend=None):
+    repo_root = Path(repo_root)
+
+    def test_author(bundle):
+        mod = _load(repo_root, "test-author")
+        return mod.author_test(bundle, model, seed=seed, repo_root=repo_root,
+                               llm_backend=llm_backend)
+
+    def judge(bundle):
+        component_id = bundle["component_id"]
+        slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+        code_dir = repo_root / "gen" / slug
+        file_parts = []
+        for p in sorted(code_dir.rglob("*")):
+            if "__pycache__" in p.relative_to(code_dir).parts or not p.is_file():
+                continue
+            rel = p.relative_to(code_dir).as_posix()
+            text = p.read_text(encoding="utf-8", errors="replace")
+            file_parts.append(f"### File: {rel}\n\n{text}")
+        prompt = (
+            "You are judging whether a component's generated code satisfies one "
+            "acceptance criterion.\n\n"
+            "## Criterion\n\n" + str(bundle["criterion_text"]) + "\n\n"
+            "## Requirement\n\n" + str(bundle["requirement_text"]) + "\n\n"
+            "## Interface\n\n" + str(bundle["interface"]) + "\n\n"
+            "## Generated code\n\n" + "\n\n".join(file_parts) + "\n\n"
+            "Reply with JSON only: "
+            '{"result": "pass" | "fail", "rationale": "..."}\n'
+        )
+        mod = _load(repo_root, "llm-endpoint")
+        resp = mod.complete(prompt, model, backend=llm_backend)
+        err = _get(resp, "model_call_error")
+        if err:
+            return _unavailable(f"model call error: {_get(err, 'category')}")
+        text = (_get(resp, "text") or "").strip()
+        m = _FENCE.match(text)
+        if m:
+            text = m.group(1).strip()
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return _unavailable("unparseable reply")
+        result = data.get("result") if isinstance(data, dict) else None
+        if result not in ("pass", "fail"):
+            return _unavailable(f"invalid result: {result!r}")
+        return {"result": result, "rationale": data.get("rationale")}
+
+    return (test_author, judge)

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:830e7b1cd651fb5019bc4a4e18ebefe9350eb632773f32ce94f63936e5885800
+# hotdocs-criterion: sha256:807cd99f3060c75d45e1d7c6c80c11a21cccdb793e62dfa3402cafbf6625f1f0
 import json
 from pathlib import Path
 
@@ -9,12 +9,12 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root):
+def build_fixture(repo_root):
     component_md = (
         "---\n"
         "id: comp-a\n"
@@ -32,40 +32,43 @@ def _build_fixture(repo_root):
         "\n"
         "## Purpose\n"
         "\n"
-        "A small fixture component.\n"
+        "A fixture component for the corpus graph.\n"
     )
-    _write(repo_root / "specs" / "components" / "a" / "component.md", component_md)
+    write(repo_root / "specs" / "components" / "a" / "component.md", component_md)
 
     manifest = {
         "license_scan": {"blocked": True, "findings": ["GPL-3.0 in x.c"]},
         "verification_report": {"overall": "pass"},
     }
-    _write(
+    write(
         repo_root / "verification" / "a" / ".provenance.json",
         json.dumps(manifest, indent=2) + "\n",
     )
 
 
-def test_ac_graph_009_provenance_license_scan_read_from_manifest(tmp_path):
-    repo_root = Path(tmp_path)
-    _build_fixture(repo_root)
+def test_ac_graph_009_provenance_license_scan_read_from_manifest_file(tmp_path):
+    repo_root = tmp_path
+    build_fixture(repo_root)
 
     assert not (repo_root / "gen" / "license-scanner").exists()
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
     nodes = field(graph, "nodes")
-    assert "comp-a" in nodes
     node = nodes["comp-a"]
-
     provenance = field(node, "provenance")
     assert provenance is not None
-    license_scan = (
-        provenance["license_scan"]
-        if isinstance(provenance, dict)
-        else getattr(provenance, "license_scan")
-    )
+    license_scan = provenance["license_scan"] if isinstance(provenance, dict) else getattr(provenance, "license_scan")
+
     assert license_scan == {"blocked": True, "findings": ["GPL-3.0 in x.c"]}
-    assert type(license_scan["blocked"]) is bool
-    assert license_scan["findings"] == ["GPL-3.0 in x.c"]
+    assert isinstance(license_scan, dict)
     assert set(license_scan.keys()) == {"blocked", "findings"}
+    assert license_scan["blocked"] is True
+    assert license_scan["findings"] == ["GPL-3.0 in x.c"]
+
+    # The serialized form carries the file's own JSON as well.
+    as_dict = graph.to_dict()
+    assert as_dict["nodes"]["comp-a"]["provenance"]["license_scan"] == {
+        "blocked": True,
+        "findings": ["GPL-3.0 in x.c"],
+    }

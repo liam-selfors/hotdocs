@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c17479418d98efa23c946f361bc322a7644b4419b186e95ac7359b9457a25b06
+# hotdocs-criterion: sha256:f9c0c386a73c964c6232a520b57f4630c427832757b4ee33d92bf78b86284c2f
 import json
 from pathlib import Path
 
@@ -9,214 +9,196 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_ID = "comp-widget"
+def write_module(repo_root, slug, source):
+    module_name = slug.replace("-", "_")
+    d = Path(repo_root) / "gen" / slug
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (module_name + ".py")).write_text(source, encoding="utf-8")
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def build_generator(repo_root, log_path):
-    src = (
+def build_fixture(repo_root, log_path, counter_path, reports):
+    gen_src = (
         "import json\n"
-        "from dataclasses import dataclass, field\n"
-        "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
-        "@dataclass\n"
-        "class GenerationResult:\n"
-        "    component_id: str = ''\n"
-        "    spec_bundle_hash: str = ''\n"
-        "    model: str = ''\n"
-        "    prompt_version: str = ''\n"
-        "    cache_hit: bool = False\n"
-        "    files: dict = field(default_factory=dict)\n"
-        "    model_call_error: object = None\n"
-        "    refused: object = None\n"
-        "    retry_feedback: object = None\n"
-        "    mode: str = 'single'\n"
-        "    transcript_sha256: object = None\n"
-        "    turns: int = 1\n"
-        "    tool_calls: int = 0\n"
-        "    isolation: object = None\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
         "def _log(entry):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps(entry) + '\\n')\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write(json.dumps(entry) + '\\n')\n"
         "\n"
         "def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):\n"
-        "    fb = None if retry_feedback is None else list(retry_feedback)\n"
-        "    _log({'call': 'generate', 'feedback': fb,\n"
-        "          'args': repr((bundle, model, retry_feedback, repo_root, llm_backend))})\n"
-        "    return GenerationResult(\n"
-        "        component_id=bundle['component_id'],\n"
-        "        spec_bundle_hash=bundle['spec_bundle_hash'],\n"
-        "        model=model,\n"
-        "        prompt_version='v12',\n"
-        "        cache_hit=False,\n"
-        "        files={'widget.py': 'X = 1\\n'},\n"
-        "        model_call_error=None,\n"
-        "        refused=None,\n"
-        "        retry_feedback=fb,\n"
-        "    )\n"
+        "    _log({'call': 'generate', 'feedback': retry_feedback,\n"
+        "          'repr': repr((bundle, model, retry_feedback, repo_root, llm_backend))})\n"
+        "    return {\n"
+        "        'component_id': 'comp-w',\n"
+        "        'spec_bundle_hash': 'sha256:' + '0' * 64,\n"
+        "        'model': model,\n"
+        "        'prompt_version': 'v12',\n"
+        "        'cache_hit': False,\n"
+        "        'files': {'w.py': 'x = 1\\n'},\n"
+        "        'model_call_error': None,\n"
+        "        'refused': None,\n"
+        "        'retry_feedback': retry_feedback,\n"
+        "        'mode': 'single',\n"
+        "        'transcript_sha256': None,\n"
+        "        'turns': 1,\n"
+        "        'tool_calls': 0,\n"
+        "        'isolation': None,\n"
+        "    }\n"
         "\n"
         "def commit_cache(result, repo_root=None):\n"
-        "    _log({'call': 'commit_cache', 'args': repr(repo_root)})\n"
-        "\n"
-        "def check_write_allowed(bundle, repo_root=None):\n"
-        "    return None\n"
-        "\n"
-        "def render_prompt_sections(bundle, retry_feedback=None):\n"
-        "    return [('Spec', 'SPEC TEXT'), ('Component interface', 'IFACE TEXT')]\n"
-        "\n"
-        "def write_files(component_id, files, repo_root=None):\n"
-        "    return None\n"
-        "\n"
-        "def check_assets(component_id, files, repo_root=None):\n"
-        "    return (None, [])\n"
-        "\n"
-        "def check_asset_environment(component_id, repo_root=None):\n"
-        "    return (None, [])\n"
+        "    _log({'call': 'commit_cache'})\n"
     )
-    write(repo_root / "gen" / "generator" / "generator.py", src)
+    write_module(repo_root, "generator", gen_src)
 
-
-def build_surface_checker(repo_root, log_path):
-    src = (
+    agentic_src = (
         "import json\n"
-        "from dataclasses import dataclass, field, asdict\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "def generate_agentic(bundle, model, retry_feedback=None, *, repo_root=None,\n"
+        "                     allow_unisolated_exec=False, max_turns=40, max_tool_calls=120,\n"
+        "                     wall_seconds=1800.0, claude_command='claude'):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write(json.dumps({'call': 'generate_agentic', 'feedback': retry_feedback,\n"
+        "                            'repr': repr((bundle, model, retry_feedback))}) + '\\n')\n"
+        "    return {\n"
+        "        'component_id': 'comp-w', 'spec_bundle_hash': 'sha256:' + '0' * 64,\n"
+        "        'model': model, 'prompt_version': 'agent-v2', 'cache_hit': False,\n"
+        "        'files': {'w.py': 'x = 1\\n'}, 'model_call_error': None, 'refused': None,\n"
+        "        'retry_feedback': retry_feedback, 'mode': 'agentic',\n"
+        "        'transcript_sha256': None, 'turns': 1, 'tool_calls': 0, 'isolation': None,\n"
+        "    }\n"
+    )
+    write_module(repo_root, "agentic-generator", agentic_src)
+
+    surface_src = (
+        "import json\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "GATE_VERSION = 'surface-checker@1.2.0'\n"
         "\n"
-        "@dataclass\n"
-        "class SurfaceReport:\n"
-        "    ok: bool = True\n"
-        "    findings: list = field(default_factory=list)\n"
-        "    def to_dict(self):\n"
-        "        return asdict(self)\n"
-        "\n"
         "def check_surface(component_id, repo_root, code_dir=None):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'call': 'check_surface', 'component_id': component_id}) + '\\n')\n"
-        "    return SurfaceReport(ok=True, findings=[])\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write(json.dumps({'call': 'check_surface'}) + '\\n')\n"
+        "    return {'ok': True, 'findings': []}\n"
     )
-    write(repo_root / "gen" / "surface-checker" / "surface_checker.py", src)
+    write_module(repo_root, "surface-checker", surface_src)
 
-
-REPORTS = [
-    {
-        "overall": "fail",
-        "criteria": [
-            {"id": "AC-W-3", "covers": "R-W-3", "kind": "generated-test", "result": "fail",
-             "failure_origin": "implementation"},
-            {"id": "AC-W-1", "covers": "R-W-1", "kind": "generated-test", "result": "fail",
-             "failure_origin": "test"},
-            {"id": "AC-W-2", "covers": "R-W-2", "kind": "generated-test", "result": "pass"},
-        ],
-    },
-    {
-        "overall": "fail",
-        "criteria": [
-            {"id": "AC-W-2", "covers": "R-W-2", "kind": "generated-test", "result": "fail",
-             "failure_origin": "implementation",
-             "failure_detail": {"message": "secret detail"}},
-        ],
-    },
-    {
-        "overall": "pass",
-        "criteria": [],
-    },
-]
-
-
-def build_verifier(repo_root, log_path, counter_path):
-    src = (
+    verify_src = (
         "import json\n"
-        "import copy\n"
-        "from dataclasses import dataclass, field, asdict\n"
-        "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "COUNTER_PATH = " + repr(str(counter_path)) + "\n"
-        "REPORTS = " + repr(REPORTS) + "\n"
-        "GATE_VERSION = 'verifier-orchestrator@3.5.0'\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "COUNTER = " + repr(str(counter_path)) + "\n"
+        "REPORTS = " + repr(reports) + "\n"
+        "GATE_VERSION = 'verifier-orchestrator@4.0.0'\n"
         "DEFAULT_TEST_TIMEOUT = 300.0\n"
-        "\n"
-        "@dataclass\n"
-        "class VerificationReport:\n"
-        "    component_id: str = ''\n"
-        "    criteria: list = field(default_factory=list)\n"
-        "    requirement_results: dict = field(default_factory=dict)\n"
-        "    interface_drift: bool = False\n"
-        "    mutation_score: object = None\n"
-        "    mutation_error: object = None\n"
-        "    assets: list = field(default_factory=list)\n"
-        "    overall: str = 'pass'\n"
-        "    def to_dict(self):\n"
-        "        return asdict(self)\n"
         "\n"
         "def verify(component_id, repo_root, judge=None, test_author=None):\n"
         "    try:\n"
-        "        with open(COUNTER_PATH, 'r', encoding='utf-8') as fh:\n"
-        "            n = int(fh.read().strip() or '0')\n"
+        "        with open(COUNTER, 'r', encoding='utf-8') as f:\n"
+        "            n = int(f.read().strip() or '0')\n"
         "    except FileNotFoundError:\n"
         "        n = 0\n"
-        "    with open(COUNTER_PATH, 'w', encoding='utf-8') as fh:\n"
-        "        fh.write(str(n + 1))\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'call': 'verify', 'n': n}) + '\\n')\n"
-        "    spec = copy.deepcopy(REPORTS[min(n, len(REPORTS) - 1)])\n"
-        "    rr = {}\n"
-        "    for c in spec['criteria']:\n"
-        "        rr[c['covers']] = c['result']\n"
-        "    return VerificationReport(\n"
-        "        component_id=component_id,\n"
-        "        criteria=spec['criteria'],\n"
-        "        requirement_results=rr,\n"
-        "        interface_drift=False,\n"
-        "        mutation_score=None,\n"
-        "        mutation_error=None,\n"
-        "        assets=[],\n"
-        "        overall=spec['overall'],\n"
-        "    )\n"
+        "    with open(COUNTER, 'w', encoding='utf-8') as f:\n"
+        "        f.write(str(n + 1))\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write(json.dumps({'call': 'verify', 'n': n}) + '\\n')\n"
+        "    return REPORTS[min(n, len(REPORTS) - 1)]\n"
     )
-    write(repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py", src)
+    write_module(repo_root, "verifier-orchestrator", verify_src)
+
+    author_src = (
+        "import json\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "GATE_VERSION = 'generated_test@3.0.0'\n"
+        "\n"
+        "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write(json.dumps({'call': 'author_test'}) + '\\n')\n"
+        "    return {\n"
+        "        'component_id': 'comp-w', 'criterion_id': 'AC-W-1', 'model': model,\n"
+        "        'seed': seed, 'prompt_version': 'v1', 'cache_hit': False,\n"
+        "        'file': {'path': 'verification/w/generated-test/test_ac_w_1.py',\n"
+        "                 'content': 'def test_x():\\n    pass\\n'},\n"
+        "        'model_call_error': None, 'repair_attempts': 0, 'probe_findings': [],\n"
+        "    }\n"
+    )
+    write_module(repo_root, "test-author", author_src)
+
+    endpoint_src = (
+        "import json\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "\n"
+        "def complete(prompt, model, *, backend=None, **params):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write(json.dumps({'call': 'complete'}) + '\\n')\n"
+        "    return {'text': 'pass', 'model': model, 'backend': 'mock',\n"
+        "            'model_call_error': None}\n"
+    )
+    write_module(repo_root, "llm-endpoint", endpoint_src)
 
 
-def read_log(path):
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+def make_report(criteria, overall):
+    return {
+        "component_id": "comp-w",
+        "criteria": criteria,
+        "requirement_results": {c["covers"]: c["result"] for c in criteria},
+        "interface_drift": False,
+        "mutation_score": None,
+        "mutation_error": None,
+        "assets": [],
+        "drivers": [],
+        "overall": overall,
+    }
 
 
-def test_ac_loop_003_feedback_accumulates_only_failed_requirement_ids(tmp_path):
+def test_ac_loop_003_feedback_accumulates_failed_requirement_ids_only(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    gen_log = logs / "generator.log"
-    surf_log = logs / "surface.log"
-    ver_log = logs / "verify.log"
-    counter = logs / "verify_counter.txt"
+    log_path = tmp_path / "calls.log"
+    counter_path = tmp_path / "verify_counter.txt"
 
-    build_generator(repo_root, gen_log)
-    build_surface_checker(repo_root, surf_log)
-    build_verifier(repo_root, ver_log, counter)
-
-    bundle = {"component_id": COMPONENT_ID, "spec_bundle_hash": "sha256:abc", "hint_code": None}
+    reports = [
+        make_report(
+            [
+                {"id": "AC-W-3", "covers": "R-W-3", "kind": "generated-test",
+                 "result": "fail", "failure_origin": "implementation",
+                 "failure_detail": {"message": "w3 failed"}},
+                {"id": "AC-W-1", "covers": "R-W-1", "kind": "generated-test",
+                 "result": "fail", "failure_origin": "test",
+                 "failure_detail": {"message": "w1 failed"}},
+                {"id": "AC-W-2", "covers": "R-W-2", "kind": "generated-test",
+                 "result": "pass"},
+            ],
+            "fail",
+        ),
+        make_report(
+            [
+                {"id": "AC-W-2", "covers": "R-W-2", "kind": "generated-test",
+                 "result": "fail", "failure_origin": "implementation",
+                 "failure_detail": {"message": "secret detail"}},
+            ],
+            "fail",
+        ),
+        make_report(
+            [
+                {"id": "AC-W-2", "covers": "R-W-2", "kind": "generated-test",
+                 "result": "pass"},
+            ],
+            "pass",
+        ),
+    ]
+    build_fixture(repo_root, log_path, counter_path, reports)
 
     result = generation_loop.run_attempts(
-        COMPONENT_ID,
-        bundle,
+        "comp-w",
+        {"component_id": "comp-w"},
         repo_root,
-        "mock:model",
-        mode="single",
-        max_attempts=3,
+        "mock-model",
         retry_feedback=["R-W-9", "R-W-9"],
     )
 
-    gen_entries = [e for e in read_log(gen_log) if e["call"] == "generate"]
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    entries = [json.loads(line) for line in lines if line.strip()]
+    gen_entries = [e for e in entries if e.get("call") == "generate"]
+
     feedbacks = [e["feedback"] for e in gen_entries]
     assert feedbacks == [
         ["R-W-9"],
@@ -225,11 +207,12 @@ def test_ac_loop_003_feedback_accumulates_only_failed_requirement_ids(tmp_path):
     ]
 
     attempts = field(result, "attempts")
-    assert len(attempts) == 3
-    failed = [list(field(a, "failed_requirements")) for a in attempts]
-    assert failed == [["R-W-3"], ["R-W-2"], []]
+    assert [field(a, "failed_requirements") for a in attempts] == [
+        ["R-W-3"],
+        ["R-W-2"],
+        [],
+    ]
 
-    for entry in gen_entries:
-        assert "secret detail" not in entry["args"]
-        assert "secret detail" not in json.dumps(entry["feedback"])
-    assert "secret detail" not in gen_log.read_text(encoding="utf-8")
+    for e in gen_entries:
+        assert "secret detail" not in json.dumps(e)
+        assert "secret detail" not in e["repr"]

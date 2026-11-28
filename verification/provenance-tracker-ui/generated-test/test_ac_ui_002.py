@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:a3ab9150f1ef9d2fce7997c9f2a0508ce3c097f7bb903b36a021516424ea14d9
+# hotdocs-criterion: sha256:94629966a3534cf519f48d4c1d7f0e1590314aadde3a733759d2a2ce10c686ad
 import json
-from html.parser import HTMLParser
 from pathlib import Path
 
 import provenance_tracker_ui
@@ -11,39 +10,40 @@ def field(value, name):
 
 
 def _verification_report(component_id, overall):
-    result = "pass" if overall == "pass" else "fail"
     return {
         "component_id": component_id,
         "criteria": [
-            {"id": "AC-X-001", "covers": "R-X-001", "kind": "compiled", "result": result},
+            {
+                "id": "AC-X-001",
+                "covers": "R-X-001",
+                "kind": "compiled",
+                "result": "pass" if overall == "pass" else "fail",
+            }
         ],
-        "requirement_results": {"R-X-001": result},
+        "requirement_results": {"R-X-001": "pass" if overall == "pass" else "fail"},
         "interface_drift": False,
         "mutation_score": 0.9,
         "mutation_error": None,
-        "assets": [
-            {
-                "kind": "python",
-                "path": ".",
-                "definition_sha256": None,
-                "adapter_sha256": "sha256:00",
-                "versions": {"python": "3.12.4"},
-                "lockfile_sha256": None,
-            }
-        ],
+        "assets": [],
+        "drivers": [],
         "overall": overall,
     }
 
 
 def _license_scan(blocked):
-    return {"blocked": blocked, "matches": [], "notified": False}
+    return {"blocked": blocked, "matches": [], "gate_version": "license_scanner@1.0.0"}
 
 
 def _secret_scan(flagged):
     matches = []
     if flagged:
         matches = [
-            {"rule_id": "AWS Access Key", "risk_tier": "high", "file": "gen/zed/config.py", "line": 1}
+            {
+                "rule_id": "AWS Access Key",
+                "risk_tier": "high",
+                "file": "gen/zed/config.py",
+                "line": 3,
+            }
         ]
     return {
         "scope": "full",
@@ -86,7 +86,7 @@ def _verify_report():
                 },
             }
         },
-        "secret_scan": None,
+        "secret_scan": _secret_scan(False),
         "not_ready_reasons": [
             "comp-bar: verification failed",
             "comp-qux: license scan blocked",
@@ -95,47 +95,47 @@ def _verify_report():
     }
 
 
-def _component_node():
-    return {
-        "type": "component",
-        "verification": None,
-        "provenance": None,
-        "size_status": "ok",
-        "sealed": True,
-        "pinned_overrides": [],
-        "owners": ["pipeline-team"],
-        "documents": {},
-    }
-
-
-def _write_fixture(repo_root, log_path):
+def _write_fake_tracker(repo_root, log_path):
     fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True)
+    fake_dir.mkdir(parents=True, exist_ok=True)
     source = (
         "import json\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "REPORT = " + repr(_verify_report()) + "\n"
+        "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "_REPORT = " + repr(_verify_report()) + "\n"
         "\n"
         "def _log(line):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
         "        fh.write(line + '\\n')\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
         "    _log('check_readiness')\n"
-        "    return json.loads(json.dumps(REPORT))\n"
+        "    return json.loads(json.dumps(_REPORT))\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    _log('last_requirement_failures ' + str(component_id))\n"
         "    return []\n"
         "\n"
         "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
-        "    raise NotImplementedError('not used in this test')\n"
-        "\n"
-        "def main(argv=None):\n"
-        "    return 2\n"
+        "    raise NotImplementedError('not used by this test')\n"
     )
     (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
 
+
+def _component_node():
+    return {
+        "type": "component",
+        "verification": None,
+        "provenance": None,
+        "size_status": "ok",
+        "sealed": False,
+        "pinned_overrides": [],
+        "owners": ["pipeline-team"],
+        "documents": {},
+    }
+
+
+def _write_corpus_graph(repo_root):
     graph = {
         "nodes": {
             "P-ZERO-EDIT": {"type": "capability"},
@@ -153,37 +153,30 @@ def _write_fixture(repo_root, log_path):
             "orphan_var_rate": 0.0,
         },
     }
-    verification = repo_root / "verification"
-    verification.mkdir(parents=True)
-    (verification / "corpus-graph.json").write_text(
-        json.dumps(graph, sort_keys=True, indent=2), encoding="utf-8"
+    vdir = repo_root / "verification"
+    vdir.mkdir(parents=True, exist_ok=True)
+    (vdir / "corpus-graph.json").write_text(
+        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
 
 
-class _NodeCollector(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.nodes = {}
-
-    def handle_starttag(self, tag, attrs):
-        attr_map = {}
-        for key, value in attrs:
-            attr_map[key] = value if value is not None else ""
-        if "data-node-id" in attr_map and "data-status" in attr_map:
-            classes = attr_map.get("class", "").split()
-            self.nodes.setdefault(attr_map["data-node-id"], []).append(
-                {"tag": tag, "status": attr_map["data-status"], "classes": classes}
-            )
-
-    handle_startendtag = handle_starttag
+EXPECTED = {
+    "comp-foo": "passing",
+    "comp-bar": "failing",
+    "comp-qux": "failing",
+    "comp-zed": "passing",
+    "P-ZERO-EDIT": "failing",
+}
 
 
-def test_ac_ui_002_statuses_map_report_fields(tmp_path):
+def test_ac_ui_002_statuses_map_directly_from_verify_report(tmp_path, browser):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     out_dir = tmp_path / "out"
     log_path = tmp_path / "fake_calls.log"
-    _write_fixture(repo_root, log_path)
+
+    _write_fake_tracker(repo_root, log_path)
+    _write_corpus_graph(repo_root)
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
@@ -191,36 +184,30 @@ def test_ac_ui_002_statuses_map_report_fields(tmp_path):
     calls = log_path.read_text(encoding="utf-8").splitlines()
     assert calls.count("check_readiness") == 1
 
-    expected = {
-        "comp-foo": "passing",
-        "comp-bar": "failing",
-        "comp-qux": "failing",
-        "comp-zed": "passing",
-        "P-ZERO-EDIT": "failing",
-    }
-
     nodes = field(snapshot, "nodes")
     statuses = {field(n, "id"): field(n, "status") for n in nodes}
-    for node_id, status in expected.items():
-        assert statuses.get(node_id) == status, (node_id, statuses)
+    for node_id, status in EXPECTED.items():
+        assert node_id in statuses, node_id
+        assert statuses[node_id] == status, (node_id, statuses[node_id])
 
-    html_text = (out_dir / "index.html").read_text(encoding="utf-8")
-    collector = _NodeCollector()
-    collector.feed(html_text)
+    index = out_dir / "index.html"
+    assert index.is_file()
+    page = browser.open(index)
 
-    for node_id, status in statuses.items():
-        elements = collector.nodes.get(node_id)
-        assert elements, "no node element for " + node_id
-        li_nodes = [e for e in elements if e["tag"] == "li" and "node" in e["classes"]]
-        candidates = li_nodes if li_nodes else elements
-        for element in candidates:
-            assert element["status"] == status, (node_id, element)
-            assert ("status-" + status) in element["classes"], (node_id, element)
-            other = [
-                c for c in element["classes"]
-                if c.startswith("status-") and c != "status-" + status
-            ]
-            assert other == [], (node_id, element)
+    for node_id, status in EXPECTED.items():
+        snap_status = statuses[node_id]
+        matching = page.find(
+            css='li.node[data-node-id="' + node_id + '"][data-status="'
+            + snap_status + '"].status-' + snap_status
+        )
+        assert matching.count() == 1, (node_id, snap_status)
+        any_node = page.find(css='li.node[data-node-id="' + node_id + '"]')
+        assert any_node.count() == 1, node_id
+        assert any_node.attribute("data-status") == snap_status
+        classes = (any_node.attribute("class") or "").split()
+        assert "status-" + snap_status in classes
+        for other in ("passing", "failing", "missing", "not-attempted"):
+            if other != snap_status:
+                assert "status-" + other not in classes, (node_id, other)
 
-    for node_id, status in expected.items():
-        assert node_id in collector.nodes
+    assert page.console_errors() == []

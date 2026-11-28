@@ -15,6 +15,3 @@
   naming every lint finding's `rule_id`, every predicted-blast-radius
   component with its count of `criterion_reviews` findings, and, when
   not null, a line `completeness_score: <str(value)>`.
-
-  Covered from the start, unlike CLIs found uncovered by mutation
-  testing (`D130`, `D160`).

@@ -1,5 +1,4 @@
-# hotdocs-criterion: sha256:fc33d969719299478d1853d255645024e7f5b970db5cee55072fbe4a4a9e3494
-import re
+# hotdocs-criterion: sha256:4a144481c9792ffe662b1d5e965646e8025271745b9bc3d4748df446390d01c4
 from pathlib import Path
 
 import size_checker
@@ -9,123 +8,101 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [a]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo does a small thing.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "- In scope: the small thing.\n"
-    "\n"
-    "## Definitions\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Behavior\n"
-    "\n"
-    "See `requirements/`.\n"
-    "\n"
-    "## Interfaces\n"
-    "\n"
-    "See `interface/`.\n"
-    "\n"
-    "## Data\n"
-    "\n"
-    "See `interface/data/`.\n"
-    "\n"
-    "## Acceptance criteria\n"
-    "\n"
-    "See `acceptance/`.\n"
-    "\n"
-    "## Non-functional constraints\n"
-    "\n"
-    "See `constraints.md`.\n"
-    "\n"
-    "## Open questions\n"
-    "\n"
-    "## Change log\n"
-    "\n"
-    "- Initial.\n"
-)
-
-REQUIREMENT_MD = (
-    "# R-FOO-001\n"
-    "\n"
-    "**R-FOO-001** — Foo MUST do the small thing.\n"
-)
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def acceptance_text(total_words):
-    header = "Covers: R-FOO-001\nKind: compiled\n\n"
-    header_words = len(header.split())
-    filler = " ".join(["word"] * (total_words - header_words))
-    text = header + filler + "\n"
+def acceptance_text(ac_id, req_id, total_words):
+    head = "# " + ac_id + "\n\nCovers: " + req_id + "\n\n"
+    head_words = len(head.split())
+    filler_count = total_words - head_words
+    lines = []
+    chunk = []
+    for i in range(filler_count):
+        chunk.append("word")
+        if len(chunk) == 12:
+            lines.append(" ".join(chunk))
+            chunk = []
+    if chunk:
+        lines.append(" ".join(chunk))
+    text = head + "\n".join(lines) + "\n"
     assert len(text.split()) == total_words
     return text
 
 
 def build_fixture(repo_root):
     comp = repo_root / "specs" / "components" / "foo"
-    (comp / "requirements").mkdir(parents=True)
-    (comp / "acceptance").mkdir(parents=True)
-    (comp / "interface").mkdir(parents=True)
-    (comp / "component.md").write_text(COMPONENT_MD)
-    (comp / "requirements" / "R-FOO-001.md").write_text(REQUIREMENT_MD)
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(acceptance_text(300))
-    (comp / "acceptance" / "AC-FOO-002.md").write_text(acceptance_text(520))
-    (comp / "constraints.md").write_text("# Constraints\n\nNone.\n")
-    (repo_root / "specs" / "glossary.md").write_text(
-        "# Glossary\n\n- **Thing** — a thing.\n"
+    write(
+        comp / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A small fixture component used for size checks.\n",
+    )
+    write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — The component MUST do one thing.\n",
+    )
+    write(
+        comp / "requirements" / "R-FOO-002.md",
+        "# R-FOO-002\n\n**R-FOO-002** — The component MUST do another thing.\n",
+    )
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+    )
+    write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        acceptance_text("AC-FOO-001", "R-FOO-001", 300),
+    )
+    write(
+        comp / "acceptance" / "AC-FOO-002.md",
+        acceptance_text("AC-FOO-002", "R-FOO-002", 520),
     )
 
 
-def norm(path):
-    return str(path).replace("\\", "/")
-
-
-def test_ac_size_007_per_file_word_count_warn_and_fail(tmp_path):
+def test_ac_size_007_per_file_warn_and_fail(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
 
+    findings = size_checker.check(repo_root)
+
     first = "specs/components/foo/acceptance/AC-FOO-001.md"
     second = "specs/components/foo/acceptance/AC-FOO-002.md"
 
-    findings = size_checker.check(repo_root)
     size3 = [f for f in findings if field(f, "rule_id") == "R-SIZE-003"]
 
-    first_findings = [f for f in size3 if norm(field(f, "file")) == first]
-    second_findings = [f for f in size3 if norm(field(f, "file")) == second]
+    first_findings = [f for f in size3 if field(f, "file") == first]
+    second_findings = [f for f in size3 if field(f, "file") == second]
 
     assert len(first_findings) == 1, size3
     assert len(second_findings) == 1, size3
 
     f1 = first_findings[0]
-    f2 = second_findings[0]
-
     assert field(f1, "severity") == "warn"
-    assert field(f2, "severity") == "fail"
-
-    assert re.search(r"\b300\b", field(f1, "message")), field(f1, "message")
-    assert re.search(r"\b520\b", field(f2, "message")), field(f2, "message")
-
     assert isinstance(field(f1, "line"), int)
-    assert isinstance(field(f2, "line"), int)
+    assert "300" in field(f1, "message")
+    assert field(f1, "message") == (
+        first + " has 300 words, above the per-file warn threshold of 250"
+    )
 
-    # No R-SIZE-003 finding for any other file (e.g. the short requirement).
-    others = [
-        f for f in size3 if norm(field(f, "file")) not in (first, second)
-    ]
-    assert others == []
+    f2 = second_findings[0]
+    assert field(f2, "severity") == "fail"
+    assert isinstance(field(f2, "line"), int)
+    assert "520" in field(f2, "message")
+    assert field(f2, "message") == (
+        second + " has 520 words, above the per-file fail threshold of 500"
+    )

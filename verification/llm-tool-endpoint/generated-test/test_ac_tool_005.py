@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:3be74145c807893e5fb54ea1e0e62949754641ab895dd5062809211580a9598b
+# hotdocs-criterion: sha256:e3f8762228df5bf19e036f8d3c36785f6cd308b1c1315cdf1248723b097a3b5f
 import json
 import urllib.request
 
@@ -7,21 +7,23 @@ import pytest
 import llm_tool_endpoint
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+MODEL = "anthropic:claude-opus-5-5"
 
+TOOLS = [{"name": "t", "description": "d", "input_schema": {"type": "object"}}]
 
 REPLY = {
     "content": [{"type": "tool_use", "id": "u1", "name": "t", "input": {}}],
     "stop_reason": "tool_use",
 }
 
-TOOLS = [{"name": "t", "description": "d", "input_schema": {"type": "object"}}]
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 class _FakeResponse:
-    def __init__(self, doc):
-        self._data = json.dumps(doc).encode("utf-8")
+    def __init__(self, payload):
+        self._data = json.dumps(payload).encode("utf-8")
 
     def __enter__(self):
         return self
@@ -34,7 +36,7 @@ class _FakeResponse:
 
 
 @pytest.fixture
-def setup(tmp_path, monkeypatch):
+def setup(monkeypatch, tmp_path):
     workdir = tmp_path / "work"
     workdir.mkdir()
     monkeypatch.chdir(workdir)
@@ -43,17 +45,17 @@ def setup(tmp_path, monkeypatch):
 
     requests = []
 
-    def fake_urlopen(request, timeout=None, *args, **kwargs):
-        body = request.data
-        if isinstance(body, (bytes, bytearray)):
-            body = body.decode("utf-8")
-        parsed = json.loads(body) if body else None
+    def fake_urlopen(request, *args, **kwargs):
+        data = request.data
+        if isinstance(data, bytes):
+            data = data.decode("utf-8")
+        body = json.loads(data) if data else None
         requests.append(
             {
                 "url": request.full_url,
                 "headers": dict(request.header_items()),
-                "body": parsed,
-                "timeout": timeout,
+                "body": body,
+                "timeout": kwargs.get("timeout"),
             }
         )
         return _FakeResponse(REPLY)
@@ -72,35 +74,28 @@ def setup(tmp_path, monkeypatch):
 def test_max_turns_budget(setup):
     requests, calls, execute = setup
     result = llm_tool_endpoint.run_tool_loop(
-        "sys", "go", "anthropic:claude-opus-5-5", TOOLS, execute, max_turns=3
+        "sys", "go", MODEL, TOOLS, execute, max_turns=3
     )
     assert len(requests) == 3
     assert field(result, "turns") == 3
     assert field(result, "tool_calls") == 3
-    assert len(calls) == 3
     assert field(result, "stop") == "budget_exhausted"
 
 
 def test_max_tool_calls_budget(setup):
     requests, calls, execute = setup
     result = llm_tool_endpoint.run_tool_loop(
-        "sys",
-        "go",
-        "anthropic:claude-opus-5-5",
-        TOOLS,
-        execute,
-        max_turns=10,
-        max_tool_calls=2,
+        "sys", "go", MODEL, TOOLS, execute, max_turns=10, max_tool_calls=2
     )
     assert len(calls) == 2
     assert field(result, "tool_calls") == 2
     assert field(result, "stop") == "budget_exhausted"
 
 
-def test_wall_seconds_zero_budget(setup):
+def test_wall_seconds_zero(setup):
     requests, calls, execute = setup
     result = llm_tool_endpoint.run_tool_loop(
-        "sys", "go", "anthropic:claude-opus-5-5", TOOLS, execute, wall_seconds=0
+        "sys", "go", MODEL, TOOLS, execute, wall_seconds=0
     )
     assert len(requests) == 0
     assert field(result, "stop") == "budget_exhausted"

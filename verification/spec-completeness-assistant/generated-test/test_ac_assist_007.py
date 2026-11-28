@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:95a05f418b546be04e4638c29512b6d81678dd9b5606f104878dbfcaf11cfa25
+# hotdocs-criterion: sha256:e59ff001285edf17e15ea0f8972d93f0d922934cdca484318733c314dfff09a2
 import json
 from pathlib import Path
 
@@ -10,17 +10,29 @@ def field(value, name):
 
 
 WARN_FINDING = {
-    "rule_id": "R-LINT-010",
+    "rule_id": "R-LINT-009",
     "severity": "warn",
-    "file": "specs/components/foo/requirements/R-FOO-001.md",
+    "file": "specs/components/foo/component.md",
     "line": 3,
-    "message": "a stand-in warning",
+    "message": "a warning about foo",
 }
 
 
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _log_prelude(log_path):
+    return (
+        "import json\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "\n"
+        "def _log(rec):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(rec) + '\\n')\n"
+        "\n"
+    )
 
 
 def _build_corpus(repo_root):
@@ -31,7 +43,7 @@ def _build_corpus(repo_root):
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [test-team]\n"
+        "owners: [foo-team]\n"
         "depends_on: []\n"
         "sealed: true\n"
         "source_path: legacy/foo/\n"
@@ -39,13 +51,15 @@ def _build_corpus(repo_root):
         "\n"
         "# Foo\n"
         "\n"
-        "A fixture component.\n",
+        "## Purpose\n"
+        "\n"
+        "Foo does foo things.\n",
     )
     _write(
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** \u2014 `foo` MUST return its input unchanged.\n",
+        "**R-FOO-001** — `foo()` MUST return 1.\n",
     )
     _write(
         comp / "acceptance" / "AC-FOO-001.md",
@@ -55,77 +69,65 @@ def _build_corpus(repo_root):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given an input x\n"
-        "When foo(x) runs\n"
-        "Then it returns x\n"
+        "Given nothing\n"
+        "When foo() runs\n"
+        "Then it returns 1\n"
         "```\n",
     )
 
 
-LOG_HELPER = (
-    "import json\n"
-    "\n"
-    "def _log(entry):\n"
-    "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-    "        fh.write(json.dumps(entry) + '\\n')\n"
-    "\n"
-)
-
-
-def _write_stand_ins(repo_root, log_path):
-    header = "LOG_PATH = " + repr(str(log_path)) + "\n" + LOG_HELPER
+def _write_fakes(repo_root, log_path):
     gen = repo_root / "gen"
 
-    _write(
-        gen / "spec-linter" / "spec_linter.py",
-        header
-        + "WARN_FINDING = " + repr(WARN_FINDING) + "\n"
-        + "\n"
-        + "def lint(paths, repo_root, strict=False, judge=None):\n"
-        + "    _log({'call': 'lint', 'paths': None if paths is None else [str(p) for p in paths],\n"
-        + "          'repo_root': str(repo_root), 'strict': strict,\n"
-        + "          'judge_is_none': judge is None, 'judge_repr': repr(judge)})\n"
-        + "    return {'findings': [dict(WARN_FINDING)],\n"
-        + "            'summary': {'hard_failures': 0, 'warnings': 1, 'skipped': 0}}\n",
+    linter_src = (
+        _log_prelude(log_path)
+        + "FINDING = " + repr(WARN_FINDING) + "\n"
+        "\n"
+        "def lint(paths, repo_root, strict=False, judge=None):\n"
+        "    _log({'fn': 'lint', 'paths_is_none': paths is None,\n"
+        "          'strict': bool(strict), 'judge_is_none': judge is None})\n"
+        "    return {'findings': [dict(FINDING)],\n"
+        "            'summary': {'hard_failures': 0, 'warnings': 1, 'skipped': 0}}\n"
     )
+    _write(gen / "spec-linter" / "spec_linter.py", linter_src)
 
-    _write(
-        gen / "impact-analyzer" / "impact_analyzer.py",
-        header
+    impact_src = (
+        _log_prelude(log_path)
         + "def compute_blast_radius(changed_ids, repo_root):\n"
-        + "    _log({'call': 'compute_blast_radius', 'changed_ids': list(changed_ids),\n"
-        + "          'repo_root': str(repo_root)})\n"
-        + "    return {'impacted': [{'component_id': 'comp-foo', 'reason': 'direct', 'via': None}],\n"
-        + "            'precondition_error': None}\n",
+        "    _log({'fn': 'compute_blast_radius', 'changed_ids': list(changed_ids)})\n"
+        "    return {'impacted': [{'component_id': 'comp-foo', 'reason': 'direct',\n"
+        "                          'via': None, 'guarantee_ids': None}],\n"
+        "            'precondition_error': None}\n"
     )
+    _write(gen / "impact-analyzer" / "impact_analyzer.py", impact_src)
 
-    _write(
-        gen / "spec-reviewer" / "spec_reviewer.py",
-        header
+    reviewer_src = (
+        _log_prelude(log_path)
         + "class _Report:\n"
-        + "    def to_dict(self):\n"
-        + "        return {'findings': []}\n"
-        + "\n"
-        + "def check(targets, repo_root, model=None, *, llm_backend=None, write_proposals=False):\n"
-        + "    _log({'call': 'check', 'targets': list(targets), 'repo_root': str(repo_root),\n"
-        + "          'model': model, 'llm_backend_is_none': llm_backend is None,\n"
-        + "          'write_proposals': write_proposals})\n"
-        + "    return _Report()\n"
-        + "\n"
-        + "def glossary_judge(model, llm_backend=None):\n"
-        + "    _log({'call': 'glossary_judge', 'model': model})\n"
-        + "    def judge(term, local_text, glossary_text):\n"
-        + "        return None\n"
-        + "    return judge\n",
+        "    def to_dict(self):\n"
+        "        return {'findings': []}\n"
+        "\n"
+        "def check(targets, repo_root, model=None, *, llm_backend=None, write_proposals=False):\n"
+        "    _log({'fn': 'check', 'targets': list(targets), 'model_is_none': model is None})\n"
+        "    return _Report()\n"
+        "\n"
+        "def glossary_judge(model, llm_backend=None):\n"
+        "    _log({'fn': 'glossary_judge'})\n"
+        "    def judge(term, local_text, glossary_text):\n"
+        "        _log({'fn': 'judge_call'})\n"
+        "        return None\n"
+        "    return judge\n"
     )
+    _write(gen / "spec-reviewer" / "spec_reviewer.py", reviewer_src)
 
-    _write(
-        gen / "llm-endpoint" / "llm_endpoint.py",
-        header
+    endpoint_src = (
+        _log_prelude(log_path)
         + "def complete(prompt, model, backend=None, **params):\n"
-        + "    _log({'call': 'complete', 'model': model})\n"
-        + "    return {'text': '{}', 'model': model, 'backend': 'mock', 'model_call_error': None}\n",
+        "    _log({'fn': 'complete'})\n"
+        "    return {'text': '{}', 'model': model, 'backend': 'mock',\n"
+        "            'model_call_error': None}\n"
     )
+    _write(gen / "llm-endpoint" / "llm_endpoint.py", endpoint_src)
 
 
 def _read_log(log_path):
@@ -138,44 +140,40 @@ def _read_log(log_path):
     ]
 
 
-def test_ac_assist_007_no_model_degraded_run(tmp_path):
+def test_ac_assist_007_degraded_mode_makes_no_model_call(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
-    log_path = log_dir / "calls.log"
+    log_path = tmp_path / "calls.log"
 
     _build_corpus(repo_root)
-    _write_stand_ins(repo_root, log_path)
+    _write_fakes(repo_root, log_path)
 
     report = spec_completeness_assistant.assist(["R-FOO-001"], repo_root)
 
-    findings = list(field(report, "lint_findings"))
-    assert len(findings) == 1
-    assert findings[0] == WARN_FINDING
-    assert field(findings[0], "severity") == "warn"
+    # R-ASSIST-001: lint findings passed through unchanged
+    lint_findings = list(field(report, "lint_findings"))
+    assert lint_findings == [WARN_FINDING]
 
+    # R-ASSIST-002: predicted blast radius
     assert list(field(report, "predicted_blast_radius")) == ["comp-foo"]
 
+    # R-ASSIST-003: criterion reviews
     reviews = field(report, "criterion_reviews")
     assert "comp-foo" in reviews
 
+    # R-ASSIST-004/005 reported as skipped
     assert field(report, "degraded") is True
     assert field(report, "completeness_score") is None
     assert field(report, "completeness_rationale") is None
     assert list(field(report, "redundancy_flags")) == []
 
-    entries = _read_log(log_path)
-    calls = [e["call"] for e in entries]
+    calls = _read_log(log_path)
+    fns = [c["fn"] for c in calls]
 
-    lint_calls = [e for e in entries if e["call"] == "lint"]
-    assert lint_calls, "lint stand-in was never called: " + repr(calls)
-    for entry in lint_calls:
-        assert entry["judge_is_none"] is True, entry
+    lint_calls = [c for c in calls if c["fn"] == "lint"]
+    assert len(lint_calls) >= 1
+    assert all(c["judge_is_none"] for c in lint_calls)
 
-    assert "compute_blast_radius" in calls
-    check_calls = [e for e in entries if e["call"] == "check"]
-    assert any(e["targets"] == ["comp-foo"] for e in check_calls), check_calls
-
-    assert "complete" not in calls, calls
-    assert "glossary_judge" not in calls, calls
+    assert "complete" not in fns
+    assert "glossary_judge" not in fns
+    assert "judge_call" not in fns

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:26532f687c72f0c78dab45ca1d1c4f2f4f78a46435b077b4892e9fc712304df0
+# hotdocs-criterion: sha256:758f217f863894745e21e97e0ebb2d21387c1eff7d1aec1c1e8c657f093c2225
 import hashlib
 import importlib.util
 import json
@@ -11,13 +11,36 @@ import pytest
 import generator
 
 
-MODEL = "mock-model"
 COMPONENT_ID = "comp-widget-maker"
 SLUG = "widget-maker"
-BUNDLE_HASH = "sha256:" + "a" * 64
-HINT_FILES = {"widget_maker.py": "def make():\n    return 1\n"}
-NEW_FILES = {"widget_maker.py": "def make():\n    return 2\n"}
-CACHED_FILES = {"widget_maker.py": "def make():\n    return 3\n"}
+MODEL = "mock-model"
+
+FAKE_PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-widget-maker\n"
+    "title: Widget Maker\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Widget Maker\n"
+)
 
 
 def field(value, name):
@@ -40,98 +63,69 @@ def load_cache_manager():
     return load_module(path, "cache_manager")
 
 
-class Bundle(dict):
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+class Bundle:
+    """A SpecBundle-shaped object readable by attribute and as a mapping."""
+
+    _FIELDS = (
+        "component_id", "spec_bundle_hash", "spec", "interface", "constraints",
+        "dependency_interfaces", "dependency_context", "dependency_usage",
+        "vars", "glossary", "hint_code", "spec_bundle_parts",
+    )
+
+    def __init__(self, **kwargs):
+        for name in self._FIELDS:
+            setattr(self, name, kwargs.get(name))
+
+    def __getitem__(self, key):
+        if key not in self._FIELDS:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def get(self, key, default=None):
+        return getattr(self, key) if key in self._FIELDS else default
+
+    def keys(self):
+        return list(self._FIELDS)
+
+    def __iter__(self):
+        return iter(self._FIELDS)
+
+    def __len__(self):
+        return len(self._FIELDS)
+
+    def __contains__(self, key):
+        return key in self._FIELDS
+
+
+SPEC_HASH = "sha256:" + "ab" * 32
 
 
 def make_bundle(hint_code):
     return Bundle(
         component_id=COMPONENT_ID,
-        spec_bundle_hash=BUNDLE_HASH,
+        spec_bundle_hash=SPEC_HASH,
         spec="# Widget Maker\n\nMakes widgets.",
         interface="make() -> int",
-        constraints="None.",
+        constraints="",
         dependency_interfaces={},
         dependency_context={},
         dependency_usage={},
         vars={},
         glossary="",
         hint_code=hint_code,
+        spec_bundle_parts={"spec": SPEC_HASH, "dependency_code": "sha256:" + "cd" * 32},
     )
 
 
-PYTHON_ADAPTER = (
-    "from pathlib import Path\n"
-    "\n"
-    "KIND = " + repr("python") + "\n"
-    "\n"
-    "\n"
-    "def layout_errors(code_dir):\n"
-    "    return [" + repr("bad.py:1: SyntaxError: x") + "] if (Path(code_dir) / " + repr("bad.py") + ").exists() else []\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("") + ", "
-    + repr("versions") + ": {" + repr("python") + ": " + repr("3.12") + "}, "
-    + repr("lockfile_sha256") + ": None, " + repr("interpreter") + ": " + repr("/fake/python") + "}\n"
-)
-
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-widget-maker\n"
-    "title: Widget Maker\n"
-    "status: draft\n"
-    "owners: [pipeline-team]\n"
-    "depends_on: []\n"
-    "sealed: false\n"
-    "---\n"
-    "\n"
-    "# Widget Maker\n"
-)
-
-
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    root = tmp_path / "repo"
-    comp_dir = root / "specs" / "components" / SLUG
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    adapter_dir = root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True)
-    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
-    code_dir = root / "gen" / SLUG
-    code_dir.mkdir(parents=True)
-    for rel, content in HINT_FILES.items():
-        (code_dir / rel).write_text(content, encoding="utf-8")
-    monkeypatch.chdir(root)
-    return root
-
-
-def snapshot(repo_root):
-    code_dir = repo_root / "gen" / SLUG
-    if not code_dir.exists():
-        return None
-    return {
-        str(p.relative_to(code_dir)): p.read_bytes()
-        for p in sorted(code_dir.rglob("*"))
-        if p.is_file()
-    }
-
-
-def make_backend(log_path, files):
+def make_mock(log_path, files):
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write("call\n")
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = ""
-        for rel, content in files.items():
-            text += "-----BEGIN FILE " + nonce + ": " + rel + "-----\n"
-            text += content
+        for path in sorted(files):
+            text += "-----BEGIN FILE " + nonce + ": " + path + "-----\n"
+            text += files[path]
             text += "-----END FILE " + nonce + "-----\n"
         text += "-----END REPLY " + nonce + "-----\n"
         return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
@@ -139,108 +133,122 @@ def make_backend(log_path, files):
     return backend
 
 
-def calls(log_path):
+def call_count(log_path):
     if not log_path.exists():
         return 0
     return len([l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()])
 
 
-def normalize(files):
-    prefix = "gen/" + SLUG + "/"
-    return {(k[len(prefix):] if k.startswith(prefix) else k): v for k, v in dict(files).items()}
+def snapshot(directory):
+    if not directory.exists():
+        return None
+    return {
+        str(p.relative_to(directory)): p.read_bytes()
+        for p in sorted(directory.rglob("*"))
+        if p.is_file()
+    }
 
 
-def cache_key(cache_manager):
-    digest = hashlib.sha256(json.dumps(sorted([]), sort_keys=True).encode("utf-8")).hexdigest()
-    return cache_manager.CacheKey(
-        spec_bundle_hash=BUNDLE_HASH,
-        gate_inputs_hash="sha256:" + digest,
+def cache_key(cm):
+    gate_inputs_hash = "sha256:" + hashlib.sha256(
+        json.dumps(sorted([]), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return cm.CacheKey(
+        spec_bundle_hash=SPEC_HASH,
+        gate_inputs_hash=gate_inputs_hash,
         gate_version=generator.GATE_VERSION,
         model_pin=MODEL,
     )
 
 
-def test_hint_mode_miss_writes_nothing(repo_root, tmp_path):
-    cache_manager = load_cache_manager()
-    log_path = tmp_path / "model_calls.log"
-    before = snapshot(repo_root)
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True)
+    adapter.write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
+    comp = repo_root / "specs" / "components" / SLUG / "component.md"
+    comp.parent.mkdir(parents=True)
+    comp.write_text(COMPONENT_MD, encoding="utf-8")
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.chdir(tmp_path)
+    return repo_root, log_dir
 
+
+OLD_FILES = {"widget_maker.py": "def make():\n    return 0\n"}
+NEW_FILES = {"widget_maker.py": "def make():\n    return 1\n"}
+
+
+def plant_existing_gen(repo_root):
+    gen_dir = repo_root / "gen" / SLUG
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    for path, content in OLD_FILES.items():
+        (gen_dir / path).write_text(content, encoding="utf-8")
+    return gen_dir
+
+
+def test_hint_mode_miss_returns_candidate_without_writing(env):
+    repo_root, log_dir = env
+    cm = load_cache_manager()
+    gen_dir = plant_existing_gen(repo_root)
+    before = snapshot(gen_dir)
+    log_path = log_dir / "hint_calls.txt"
+
+    assert isinstance(cm.get(cache_key(cm), repo_root=repo_root), cm.Miss)
+
+    bundle = make_bundle(dict(OLD_FILES))
     result = generator.generate(
-        make_bundle(dict(HINT_FILES)),
-        MODEL,
-        repo_root=repo_root,
-        llm_backend=make_backend(log_path, NEW_FILES),
+        bundle, MODEL, repo_root=repo_root, llm_backend=make_mock(log_path, NEW_FILES)
     )
 
-    assert calls(log_path) == 1
+    assert call_count(log_path) == 1
     assert field(result, "model_call_error") is None
     assert field(result, "refused") is None
     assert field(result, "cache_hit") is False
-    assert normalize(field(result, "files")) == NEW_FILES
+    files = field(result, "files")
+    assert files == NEW_FILES
 
-    assert snapshot(repo_root) == before
-
-    generator.commit_cache(result, repo_root=repo_root)
-
-    assert snapshot(repo_root) == before
-    hit = cache_manager.get(cache_key(cache_manager), repo_root=repo_root)
-    assert isinstance(hit, cache_manager.Miss)
-    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 0
+    # gen/<component>/ untouched
+    assert snapshot(gen_dir) == before
+    # nothing written to the cache
+    assert isinstance(cm.get(cache_key(cm), repo_root=repo_root), cm.Miss)
+    assert field(cm.stats(repo_root=repo_root), "entry_count") == 0
 
 
-def test_hint_mode_cache_hit_returns_cached_without_model_call(repo_root, tmp_path):
-    cache_manager = load_cache_manager()
-    key = cache_key(cache_manager)
+def test_hint_mode_hit_returns_cached_cold_result_without_model_call(env):
+    repo_root, log_dir = env
+    cm = load_cache_manager()
 
-    if hasattr(generator, "GenerationResult"):
-        cold = generator.GenerationResult(
-            component_id=COMPONENT_ID,
-            spec_bundle_hash=BUNDLE_HASH,
-            model=MODEL,
-            prompt_version=generator.PROMPT_VERSION,
-            cache_hit=False,
-            files=dict(CACHED_FILES),
-            model_call_error=None,
-            refused=None,
-            retry_feedback=None,
-            mode="single",
-            transcript_sha256=None,
-            turns=1,
-            tool_calls=0,
-            isolation=None,
-        )
-        generator.commit_cache(cold, repo_root=repo_root)
-    else:
-        cache_manager.put(
-            key,
-            cache_manager.CachedResult(
-                gate_type="generator",
-                payload={
-                    "component_id": COMPONENT_ID,
-                    "model": MODEL,
-                    "prompt_version": generator.PROMPT_VERSION,
-                    "files": dict(CACHED_FILES),
-                },
-                stored_at=cache_manager.now_iso(),
-            ),
-            repo_root=repo_root,
-        )
+    # Produce and commit a cold-mode result for this exact spec state.
+    cold_log = log_dir / "cold_calls.txt"
+    cold = generator.generate(
+        make_bundle(None), MODEL, repo_root=repo_root, llm_backend=make_mock(cold_log, NEW_FILES)
+    )
+    assert call_count(cold_log) == 1
+    assert field(cold, "files") == NEW_FILES
+    generator.commit_cache(cold, repo_root=repo_root)
+    assert not isinstance(cm.get(cache_key(cm), repo_root=repo_root), cm.Miss)
+    entries_before = field(cm.stats(repo_root=repo_root), "entry_count")
 
-    assert not isinstance(cache_manager.get(key, repo_root=repo_root), cache_manager.Miss)
+    # Make gen/<component>/ distinct from the cached files, then snapshot it.
+    gen_dir = plant_existing_gen(repo_root)
+    before = snapshot(gen_dir)
 
-    log_path = tmp_path / "model_calls.log"
-    before = snapshot(repo_root)
-
+    hint_log = log_dir / "hint_calls.txt"
+    other_files = {"widget_maker.py": "def make():\n    return 2\n"}
     result = generator.generate(
-        make_bundle(dict(HINT_FILES)),
-        MODEL,
-        repo_root=repo_root,
-        llm_backend=make_backend(log_path, NEW_FILES),
+        make_bundle(dict(OLD_FILES)), MODEL, repo_root=repo_root,
+        llm_backend=make_mock(hint_log, other_files),
     )
 
-    assert calls(log_path) == 0
+    assert call_count(hint_log) == 0
     assert field(result, "cache_hit") is True
     assert field(result, "model_call_error") is None
     assert field(result, "refused") is None
-    assert normalize(field(result, "files")) == CACHED_FILES
-    assert snapshot(repo_root) == before
+    assert field(result, "files") == NEW_FILES
+
+    assert snapshot(gen_dir) == before
+    assert field(cm.stats(repo_root=repo_root), "entry_count") == entries_before

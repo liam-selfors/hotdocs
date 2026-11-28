@@ -1,9 +1,7 @@
 # R-PACKET-009
 
 **R-PACKET-009** — A packet MUST be produced for every merge, including a
-  fully clean one with no flags or warnings — never skipped, so the review
-  habit stays consistent merge to merge rather than only appearing when
-  something is wrong.
+  fully clean one with no flags or warnings — never skipped.
 
   This MUST hold even when `repo_root` is not a git repository at
   all, not only when it is one with zero commits — every git call

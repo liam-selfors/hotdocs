@@ -1,11 +1,15 @@
-# hotdocs-criterion: sha256:b741f5edaff00b3caa31eeba0b118477eef66c6f2dd626715837307151207581
+# hotdocs-criterion: sha256:e3f247e6d8ad758aa034083757f505ab18c7b5995405dc9eb7831db3ca7c1bea
 import subprocess
 from pathlib import Path
 
 import decision_drift_detector
 
 
-GIT_CFG = ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+GIT_CFG = [
+    "-c", "user.name=t",
+    "-c", "user.email=t@t",
+    "-c", "commit.gpgsign=false",
+]
 
 
 def field(value, name):
@@ -32,8 +36,8 @@ def write(path, text):
     path.write_text(text)
 
 
-def normalize(repo_root, p):
-    p = Path(str(p))
+def normalize_path(repo_root, value):
+    p = Path(str(value))
     if p.is_absolute():
         try:
             p = p.resolve().relative_to(Path(repo_root).resolve())
@@ -42,12 +46,12 @@ def normalize(repo_root, p):
     return p.as_posix()
 
 
-def test_ac_drift_003_impact_reports_dependent_and_every_citation(tmp_path):
+def test_ac_drift_003_impact_reports_dependents_and_all_citations(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     git(repo_root, "init", "-q")
 
-    # First decision.
+    # First decision, D1.
     write(
         repo_root / "specs" / "decisions" / "D1.md",
         "---\n"
@@ -57,12 +61,10 @@ def test_ac_drift_003_impact_reports_dependent_and_every_citation(tmp_path):
         "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# D1\n"
-        "\n"
-        "The first decision.\n",
+        "# D1\n",
     )
 
-    # A live spec component whose requirement cites D1.
+    # A live component whose requirement file cites D1.
     comp_dir = repo_root / "specs" / "components" / "foo"
     write(
         comp_dir / "component.md",
@@ -80,30 +82,25 @@ def test_ac_drift_003_impact_reports_dependent_and_every_citation(tmp_path):
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo does foo things.\n",
+        "A fixture component.\n",
     )
+    citing_rel = "specs/components/foo/requirements/R-FOO-001.md"
     write(
-        comp_dir / "requirements" / "R-FOO-001.md",
+        repo_root / citing_rel,
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** — Foo MUST do the thing, as decided in `D1`.\n",
+        "**R-FOO-001** - Foo MUST behave as decided in `D1`.\n",
     )
     write(
         comp_dir / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
         "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given foo\n"
-        "When it runs\n"
-        "Then it does the thing\n"
-        "```\n",
+        "Kind: generated-test\n",
     )
-    commit_all(repo_root, "first decision and citing spec")
+    commit_all(repo_root, "D1 and citing spec")
 
-    # Superseding decision, created only after the citation was committed.
+    # Second decision, D2, superseding D1, committed after the citation.
     write(
         repo_root / "specs" / "decisions" / "D2.md",
         "---\n"
@@ -114,18 +111,16 @@ def test_ac_drift_003_impact_reports_dependent_and_every_citation(tmp_path):
         "supersedes: D1\n"
         "---\n"
         "\n"
-        "# D2\n"
-        "\n"
-        "Supersedes the first decision.\n",
+        "# D2\n",
     )
-    commit_all(repo_root, "superseding decision")
+    commit_all(repo_root, "D2 supersedes D1")
 
     report = decision_drift_detector.find_decision_impact(repo_root, "D1")
 
-    assert field(report, "decision_id") == "D1"
+    assert str(field(report, "decision_id")) == "D1"
 
     dependents = [str(d) for d in field(report, "dependent_decisions")]
     assert "D2" in dependents
 
-    citing = {normalize(repo_root, f) for f in field(report, "citing_files")}
-    assert "specs/components/foo/requirements/R-FOO-001.md" in citing
+    citing = [normalize_path(repo_root, f) for f in field(report, "citing_files")]
+    assert citing_rel in citing

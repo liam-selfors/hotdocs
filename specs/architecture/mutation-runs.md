@@ -10,16 +10,16 @@ depends_on: []
 
 ## Purpose
 
-How `verifier-orchestrator` runs a component's generated tests against
-mutants (`R-VERIFY-006`, `R-VERIFY-014`), so that a mutant's run sees
+How `mutation-scorer` runs a component's generated tests against
+mutants (`R-MUT-001`, `D383`), so that a mutant's run sees
 the same layout as the criterion run and a score is only ever computed
 from tests that pass on the unmutated code (`D324`).
 
 ## Rules
 
 **The tests.** Mutation runs use the `generated-test` files of the
-criteria whose `result` is `pass`, and no other file. With no such file,
-no baseline or mutant runs.
+criteria whose `result` is `pass`, and no other file: `verifier-orchestrator`
+passes exactly those. With no such file, no baseline or mutant runs.
 
 **The sandbox.** A fresh temporary directory `<tmp>` holds
 `<tmp>/gen/<slug>/`, a copy of `<repo_root>/gen/<slug>/` without
@@ -41,7 +41,7 @@ a docstring (the first statement of a module, class or function body).
 The first constant at least 200 characters long that matches
 `\bfunction\s*[\w$]*\s*\(|=>|\b(const|let)\s` and contains `;` or `{`
 holds JavaScript no mutant reaches: no baseline or mutant runs,
-`mutation_score` is `null`, `overall` is `fail`, and `mutation_error`
+`mutation_score` is `null`, and `mutation_error`
 is exactly
 
     javascript in a string at <file>:<line>; declare it as an asset (specs/architecture/asset-kinds.md)
@@ -52,8 +52,8 @@ with `<file>` the file's path relative to `<tmp>/gen/<slug>/`, using
 **The baseline.** Before any mutant, and even when there is none, the
 tests run once on the unmutated copy, with the 300-second timeout. If that run passes, each
 mutant's timeout is 2 seconds or 10 times the baseline's own run time,
-whichever is larger. If it exits nonzero or times out, no mutant runs:
-`mutation_score` is `null`, `overall` is `fail`, and the report's
+whichever is larger. If it exits nonzero or times out, no mutant runs
+(but see "Faulty tests"): `mutation_score` is `null`, and
 `mutation_error` is exactly one of
 
     mutation baseline failed in the sandbox: pytest exited <code>
@@ -62,9 +62,9 @@ whichever is larger. If it exits nonzero or times out, no mutant runs:
 with `<code>` pytest's exit status. `mutation_error` is `null` in every case
 this document does not name.
 
-**The `asset_runner` plugin.** Every baseline and mutant run gets the
-plugin `specs/architecture/verifier-fixtures.md` describes, its asset
-files those of the copy, `<tmp>/gen/<slug>/<path>`.
+**The plugin.** Every baseline and mutant run gets the plugin
+`specs/architecture/run-environment.md` describes, its asset files
+those of the copy, `<tmp>/gen/<slug>/<path>`.
 
 **The sites.** Each site gives exactly one mutant, applied alone to the
 copy, in this order:
@@ -88,7 +88,7 @@ restored to its original bytes before the next mutant.
 
 **An adapter failure.** When a kind's `strength_sites` or `apply_site`
 raises, `python`'s included, no further mutant runs, `mutation_score`
-is `null`, `overall` is `fail`, and `mutation_error` is exactly
+is `null`, and `mutation_error` is exactly
 
     <kind> adapter failed: <ExceptionType>: <message>
 
@@ -96,13 +96,25 @@ with `<ExceptionType>` the exception's class `__name__` and `<message>`
 its `str()`.
 
 **The interpreter.** The baseline and every mutant run under the
-`interpreter` the `python` adapter's `provision` reported for this
-`verify` call (`D344`), never `sys.executable` unless that is what it
-reported.
+`RunEnvironment`'s `interpreter`, the one the `python` adapter's
+`provision` reported (`D344`), never `sys.executable` unless that is
+what it reported.
 
 **The score.** Killed mutants over all mutants, Python and asset alike,
 one score for the component (`D124`), `1.0` when there are no mutants;
 a mutant is killed when its run exits nonzero or times out.
+
+**Faulty tests.** When the baseline fails, each test file runs alone in
+the same sandbox with the same 300-second timeout. Each file that fails
+alone is a faulty test: it depends on where it runs, not on the code
+(`specs/architecture/test-reuse.md`). It is reported, and the baseline
+runs again without it. With no file left, nothing more runs and
+`mutation_score` and `mutation_error` are both null. When no file fails
+alone, or the second baseline also fails, `mutation_error` is reported
+as above. `verifier-orchestrator` fails each faulty test's criterion
+with `failure_origin` `"test"` and `failure_detail.message`
+`test fails in the mutation sandbox`, and has `test-supply` discard its
+committed file.
 
 Test fixtures: a fixture making a component's code load a dependency
 by path writes the dependency as `<repo_root>/gen/<dependency-slug>/<module>.py`

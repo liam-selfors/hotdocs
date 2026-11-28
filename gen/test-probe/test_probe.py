@@ -1,6 +1,8 @@
-"""Static and stub-run checks of one generated test's source."""
+"""Test probe: checks a generated test file for defects of its own."""
 
 import ast
+import dataclasses
+import importlib.util
 import json
 import os
 import re
@@ -8,17 +10,16 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import importlib.util
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 
 import pyflakes.api
 import pyflakes.messages
 
-GATE_VERSION = "test-probe@1.4.0"
+GATE_VERSION = "test-probe@1.5.0"
 
-_TARGET = "test_probe_target.py"
+_TEST_FILE = "test_probe_target.py"
+_PLUGIN_FILE = "hotdocs_probe_assets.py"
 
 _STUB_SOURCE = '''class HotdocsProbeStubReached(BaseException):
     pass
@@ -41,7 +42,7 @@ def __getattr__(name):
     return _Stub(name)
 '''
 
-_ASSET_PLUGIN_SOURCE = '''import json
+_PLUGIN_SOURCE = '''import json
 import os
 
 import pytest
@@ -76,28 +77,48 @@ def asset_runner():
         return _reached
 
     return runner
+
+
+class _DriverStub:
+    def __init__(self, name):
+        self._name = name
+
+    def __getattr__(self, name):
+        raise HotdocsProbeStubReached(self._name + "." + name)
+
+
+def _driver_fixture(name):
+    @pytest.fixture(name=name)
+    def fixture():
+        return _DriverStub(name)
+
+    return fixture
+
+
+for _name in json.loads(os.environ.get("HOTDOCS_PROBE_DRIVERS", "[]")):
+    globals()["_driver_" + _name] = _driver_fixture(_name)
 '''
 
 _FIND_SPEC_SCRIPT = (
     "import importlib.util, json, sys\n"
-    "print(json.dumps([p for p in sys.argv[1:] "
+    "print(json.dumps([p for p in json.loads(sys.argv[1]) "
     "if importlib.util.find_spec(p) is None]))\n"
 )
 
-_SIG_START = re.compile(r"([A-Za-z_]\w*)\s*\(")
-_ARROW = re.compile(r"\s*->")
-
+_IMPORT_ERRORS = {"ImportError", "ModuleNotFoundError"}
 _BUG_PREFIXES = ("NameError", "UnboundLocalError", "ImportError",
                  "ModuleNotFoundError")
-_SETUP_ASSERTION = 'failed on setup with "AssertionError"'
+_SIG_START = re.compile(r"([A-Za-z_]\w*)\s*\(")
+_OPENERS = "([{"
+_CLOSERS = ")]}"
 
 
-@dataclass
+@dataclasses.dataclass
 class ProbeReport:
     ok: bool
-    findings: list = field(default_factory=list)
-    tests_run: int = 0
-    tests_reached: int = 0
+    findings: list
+    tests_run: int
+    tests_reached: int
 
     def to_dict(self):
         return {
@@ -113,27 +134,27 @@ def _finding(kind, line, message, severity="error"):
             "message": message}
 
 
-def _ordered(findings):
-    unique = {(f["line"], f["message"], f["kind"]): f for f in findings}
-    return sorted(unique.values(),
-                  key=lambda f: (f["line"] is None, f["line"] or 0,
-                                 f["message"]))
+def _sorted(findings):
+    return sorted(findings, key=lambda f: (f["line"] or 0, f["message"]))
 
 
-def _report(findings, tests_run=0, tests_reached=0):
-    return ProbeReport(
-        ok=not any(f["severity"] == "error" for f in findings),
-        findings=findings,
-        tests_run=tests_run,
-        tests_reached=tests_reached,
-    )
+def _get(obj, key, default):
+    if isinstance(obj, Mapping):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-# R-PROBE-002 --------------------------------------------------------------
+# --- R-PROBE-002 -----------------------------------------------------------
 
-class _Collector:
+class _Reporter:
     def __init__(self):
-        self.messages = []
+        self.findings = []
+
+    def flake(self, message):
+        if isinstance(message, pyflakes.messages.UndefinedName):
+            self.findings.append(_finding(
+                "undefined_name", message.lineno,
+                f"undefined name '{message.message_args[0]}'"))
 
     def unexpectedError(self, filename, msg):
         pass
@@ -141,101 +162,105 @@ class _Collector:
     def syntaxError(self, filename, msg, lineno, offset, text):
         pass
 
-    def flake(self, message):
-        self.messages.append(message)
-
 
 def _check_pyflakes(test_source):
-    collector = _Collector()
-    pyflakes.api.check(test_source, _TARGET, collector)
-    return [
-        _finding("undefined_name", m.lineno,
-                 f"undefined name '{m.message_args[0]}'")
-        for m in collector.messages
-        if isinstance(m, pyflakes.messages.UndefinedName)
-    ]
+    reporter = _Reporter()
+    pyflakes.api.check(test_source, _TEST_FILE, reporter)
+    return reporter.findings
 
 
-# R-PROBE-003 --------------------------------------------------------------
+# --- R-PROBE-003 -----------------------------------------------------------
 
-def _guards_import_error(handler):
-    names = handler.type.elts if isinstance(handler.type, ast.Tuple) \
-        else [handler.type]
-    for node in names:
-        name = node.id if isinstance(node, ast.Name) else \
-            getattr(node, "attr", None)
-        if name in ("ImportError", "ModuleNotFoundError"):
+def _catches_import_error(node):
+    for handler in node.handlers:
+        types = handler.type.elts if isinstance(handler.type, ast.Tuple) \
+            else [handler.type]
+        if any(isinstance(t, ast.Name) and t.id in _IMPORT_ERRORS
+               for t in types):
             return True
     return False
 
 
-def _guarded_imports(tree):
-    guarded = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Try) and any(
-                _guards_import_error(h) for h in node.handlers):
-            for stmt in node.body:
-                guarded.update(id(n) for n in ast.walk(stmt))
-    return guarded
+def _collect_imports(tree):
+    found = []
+
+    def visit(node, guarded):
+        if isinstance(node, ast.Import) and not guarded:
+            for alias in node.names:
+                found.append((node.lineno, alias.name.split(".")[0]))
+        elif isinstance(node, ast.ImportFrom) and not guarded \
+                and node.level == 0:
+            found.append((node.lineno, node.module.split(".")[0]))
+        if isinstance(node, ast.Try) and _catches_import_error(node):
+            for child in node.body:
+                visit(child, True)
+            for child in node.handlers + node.orelse + node.finalbody:
+                visit(child, guarded)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, guarded)
+
+    visit(tree, False)
+    return found
 
 
-def _check_imports(tree, names, interpreter):
-    guarded = _guarded_imports(tree)
-    pending = []
-    for node in ast.walk(tree):
-        if id(node) in guarded:
-            continue
-        if isinstance(node, ast.Import):
-            parts = [alias.name.split(".")[0] for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0:
-            parts = [node.module.split(".")[0]]
-        else:
-            continue
-        for part in parts:
-            if part not in names and part not in sys.stdlib_module_names:
-                pending.append((node.lineno, part))
-    if not pending:
-        return []
-    distinct = sorted({part for _, part in pending})
+def _missing_parts(parts, interpreter):
     if interpreter is None:
-        missing = {p for p in distinct
-                   if importlib.util.find_spec(p) is None}
-    else:
-        proc = subprocess.run(
-            [interpreter, "-c", _FIND_SPEC_SCRIPT, *distinct],
-            capture_output=True, text=True, env=dict(os.environ))
-        missing = set(json.loads(proc.stdout))
+        return {p for p in parts if importlib.util.find_spec(p) is None}
+    proc = subprocess.run(
+        [interpreter, "-c", _FIND_SPEC_SCRIPT, json.dumps(parts)],
+        capture_output=True, text=True)
+    return set(json.loads(proc.stdout))
+
+
+def _check_imports(tree, module_names, interpreter):
+    imports = _collect_imports(tree)
+    remaining = sorted({part for _, part in imports
+                        if part not in module_names
+                        and part not in sys.stdlib_module_names})
+    missing = _missing_parts(remaining, interpreter)
     return [_finding("unknown_import", line, f"cannot import '{part}'")
-            for line, part in pending if part in missing]
+            for line, part in imports if part in missing]
 
 
-# R-PROBE-004 --------------------------------------------------------------
+# --- R-PROBE-004 -----------------------------------------------------------
 
-def _param_count(text, start):
+def _balanced(text, start):
+    depth = 1
+    for index in range(start, len(text)):
+        char = text[index]
+        if char in _OPENERS:
+            depth += 1
+        elif char in _CLOSERS:
+            depth -= 1
+            if depth == 0:
+                return text[start:index], index + 1
+    return None, None
+
+
+def _split_params(params_text):
+    parts = []
     depth = 0
-    pieces = []
-    current = []
-    for i in range(start, len(text)):
-        ch = text[i]
-        if depth == 0 and ch == ")":
-            if not _ARROW.match(text, i + 1):
-                return None
-            pieces.append("".join(current))
-            break
-        if depth == 0 and ch == ",":
-            pieces.append("".join(current))
-            current = []
-            continue
-        depth += (ch in "([{") - (ch in ")]}")
-        current.append(ch)
-    else:
-        return None
+    current = ""
+    for char in params_text:
+        if char in _OPENERS:
+            depth += 1
+        elif char in _CLOSERS:
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += char
+    parts.append(current)
     count = 0
-    for piece in pieces:
-        piece = piece.strip()
-        name = piece.split(":")[0].split("=")[0].strip()
-        if name and name not in ("*", "/", "self"):
-            count += 1
+    for part in parts:
+        name = part.split(":")[0].split("=")[0].strip()
+        if name in ("", "*", "/", "self"):
+            continue
+        if not name.lstrip("*").isidentifier():
+            return None
+        count += 1
     return count
 
 
@@ -243,181 +268,204 @@ def _signatures(interfaces):
     sigs = {}
     for component_id, text in interfaces.items():
         for match in _SIG_START.finditer(text):
-            count = _param_count(text, match.end())
-            if count is not None:
-                sigs.setdefault(match.group(1), []).append(
-                    (component_id, count))
+            params_text, end = _balanced(text, match.end())
+            if params_text is None or not re.match(r"\s*->", text[end:]):
+                continue
+            count = _split_params(params_text)
+            if count is None:
+                continue
+            sigs.setdefault(match.group(1), []).append((component_id, count))
     return sigs
 
 
-def _fakes(tree):
+def _is_def(node):
+    return isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+
+
+def _collect_fakes(tree, sigs):
     fakes = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             try:
                 inner = ast.parse(node.value)
-            except SyntaxError:
+            except (SyntaxError, ValueError):
                 continue
-            for d in inner.body:
-                if isinstance(d, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    fakes.append((d.name, d, node.lineno + d.lineno - 1))
+            for item in inner.body:
+                if _is_def(item) and item.name in sigs:
+                    fakes.append((item.name, item,
+                                  node.lineno + item.lineno - 1))
 
-    installable = {n.name: n for n in tree.body
-                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    for n in tree.body:
-        if (isinstance(n, ast.Assign) and len(n.targets) == 1
-                and isinstance(n.targets[0], ast.Name)
-                and isinstance(n.value, ast.Name)
-                and n.value.id in installable):
-            installable[n.targets[0].id] = installable[n.value.id]
+    defs = {item.name: item for item in tree.body if _is_def(item)}
+    resolvable = dict(defs)
+    for item in tree.body:
+        if isinstance(item, ast.Assign) and len(item.targets) == 1 \
+                and isinstance(item.targets[0], ast.Name) \
+                and isinstance(item.value, ast.Name) \
+                and item.value.id in defs:
+            resolvable[item.targets[0].id] = defs[item.value.id]
 
+    installs = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-            is_setattr = (isinstance(func, ast.Attribute)
-                          and func.attr == "setattr") or (
-                isinstance(func, ast.Name) and func.id == "setattr")
-            if (is_setattr and len(node.args) >= 3
-                    and isinstance(node.args[1], ast.Constant)
-                    and isinstance(node.args[1].value, str)
-                    and isinstance(node.args[2], ast.Name)
-                    and node.args[2].id in installable):
-                d = installable[node.args[2].id]
-                fakes.append((node.args[1].value, d, d.lineno))
-        elif isinstance(node, ast.Assign) and isinstance(node.value,
-                                                         ast.Name):
-            if node.value.id in installable:
-                d = installable[node.value.id]
-                for target in node.targets:
-                    if isinstance(target, ast.Attribute):
-                        fakes.append((target.attr, d, d.lineno))
+        if isinstance(node, ast.Call) and len(node.args) == 3 \
+                and ((isinstance(node.func, ast.Name)
+                      and node.func.id == "setattr")
+                     or (isinstance(node.func, ast.Attribute)
+                         and node.func.attr == "setattr")) \
+                and isinstance(node.args[1], ast.Constant) \
+                and isinstance(node.args[1].value, str) \
+                and isinstance(node.args[2], ast.Name) \
+                and node.args[2].id in resolvable:
+            installs.append((node.args[1].value, resolvable[node.args[2].id]))
+        elif isinstance(node, ast.Assign) \
+                and isinstance(node.value, ast.Name) \
+                and node.value.id in resolvable:
+            for target in node.targets:
+                if isinstance(target, ast.Attribute):
+                    installs.append((target.attr, resolvable[node.value.id]))
+
+    seen = set()
+    for name, fn in installs:
+        if name in sigs and (name, id(fn)) not in seen:
+            seen.add((name, id(fn)))
+            fakes.append((name, fn, fn.lineno))
     return fakes
 
 
 def _check_fakes(tree, interfaces):
     sigs = _signatures(interfaces)
     findings = []
-    for name, d, line in _fakes(tree):
-        if name not in sigs or d.args.vararg or d.args.kwarg:
+    for name, fn, line in _collect_fakes(tree, sigs):
+        args = fn.args
+        if args.vararg or args.kwarg:
             continue
-        n = len(d.args.posonlyargs) + len(d.args.args) + len(
-            d.args.kwonlyargs)
-        options = sigs[name]
-        if any(m == n for _, m in options):
-            continue
-        component_id, m = options[0]
-        findings.append(_finding(
-            "fake_signature_mismatch", line,
-            f"{name} takes {n} parameters; the interface of "
-            f"{component_id} gives {m}"))
+        count = len(args.posonlyargs) + len(args.args) + len(args.kwonlyargs)
+        entries = sigs[name]
+        if count not in [m for _, m in entries]:
+            component_id, expected = entries[0]
+            findings.append(_finding(
+                "fake_signature_mismatch", line,
+                f"{name} takes {count} parameters; "
+                f"the interface of {component_id} gives {expected}"))
     return findings
 
 
-# R-PROBE-005 / R-PROBE-007 -----------------------------------------------
+# --- R-PROBE-005 -----------------------------------------------------------
 
-def _stub_run(test_source, names, timeout, interpreter, assets):
+def _classify(testcases):
+    findings = []
+    reached = 0
+    setup_reached = False
+    for case in testcases:
+        name = case.get("name")
+        children = [c for c in case if c.tag in ("failure", "error")]
+        messages = [(c.tag, c.get("message", "")) for c in children]
+        undeclared = [m for _, m in messages
+                      if "HotdocsProbeUndeclaredAsset" in m]
+        if undeclared:
+            findings.append(_finding("test_bug", None,
+                                     f"{name}: {undeclared[0]}"))
+            continue
+        stub = [tag for tag, m in messages if "HotdocsProbeStubReached" in m]
+        if stub:
+            reached += 1
+            if "error" in stub:
+                setup_reached = True
+            continue
+        if setup_reached and ("error",
+                              'failed on setup with "AssertionError"') \
+                in messages:
+            continue
+        bugs = [m for tag, m in messages
+                if tag == "error" or m.startswith(_BUG_PREFIXES)]
+        if bugs:
+            findings.append(_finding("test_bug", None, f"{name}: {bugs[0]}"))
+            continue
+        if not children and case.find("skipped") is None:
+            findings.append(_finding(
+                "vacuous", None,
+                f"{name} passed without reaching the code under test",
+                severity="warn"))
+    return findings, reached
+
+
+def _stub_run(test_source, module_names, timeout, interpreter, assets,
+              drivers):
     tmp = tempfile.mkdtemp()
     try:
-        with open(os.path.join(tmp, _TARGET), "w", encoding="utf-8") as fh:
-            fh.write(test_source)
-        for name in names:
-            with open(os.path.join(tmp, name + ".py"), "w",
-                      encoding="utf-8") as fh:
-                fh.write(_STUB_SOURCE)
-        with open(os.path.join(tmp, "hotdocs_probe_assets.py"), "w",
-                  encoding="utf-8") as fh:
-            fh.write(_ASSET_PLUGIN_SOURCE)
+        files = {_TEST_FILE: test_source, _PLUGIN_FILE: _PLUGIN_SOURCE}
+        for name in module_names:
+            files[name + ".py"] = _STUB_SOURCE
+        for file_name, source in files.items():
+            with open(os.path.join(tmp, file_name), "w",
+                      encoding="utf-8") as handle:
+                handle.write(source)
         env = dict(os.environ)
         env["PYTHONPATH"] = tmp
-        env.pop("HOTDOCS_PROBE_ASSETS", None)
-        if assets is not None:
+        if assets is None:
+            env.pop("HOTDOCS_PROBE_ASSETS", None)
+        else:
             env["HOTDOCS_PROBE_ASSETS"] = json.dumps(assets)
+        env["HOTDOCS_PROBE_DRIVERS"] = json.dumps(drivers or [])
         report_path = os.path.join(tmp, "report.xml")
-        command = [interpreter, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                   "--noconftest", "-p", "hotdocs_probe_assets",
-                   f"--junitxml={report_path}", _TARGET]
+        command = [interpreter or sys.executable, "-m", "pytest", "-q",
+                   "-p", "no:cacheprovider", "--noconftest",
+                   "-p", "hotdocs_probe_assets",
+                   f"--junitxml={report_path}", _TEST_FILE]
         try:
             proc = subprocess.run(command, cwd=tmp, env=env,
                                   capture_output=True, text=True,
                                   timeout=timeout)
         except subprocess.TimeoutExpired:
-            return [_finding(
-                "probe_timeout", None,
-                f"stub run still going after {timeout} seconds")], 0, 0
-        last_line = "".join(
-            (proc.stdout + proc.stderr).strip().splitlines()[-1:])
-        collection = ([_finding("collection_error", None, last_line)], 0, 0)
+            return [_finding("probe_timeout", None,
+                             f"stub run exceeded {timeout} seconds")], 0, 0
+        lines = [line for line in (proc.stdout + proc.stderr).splitlines()
+                 if line.strip()]
+        collection = [_finding("collection_error", None,
+                               lines[-1] if lines else "")]
         if proc.returncode in (2, 3, 4):
-            return collection
-        cases = list(ET.parse(report_path).getroot().iter("testcase"))
-        if not cases or any(
-                e.get("message", "") == "collection failure"
-                for c in cases for e in c.findall("error")):
-            return collection
-        return _classify(cases)
+            return collection, 0, 0
+        testcases = list(ET.parse(report_path).getroot().iter("testcase"))
+        if not testcases or any(
+                c.tag == "error" and c.get("message") == "collection failure"
+                for case in testcases for c in case):
+            return collection, 0, 0
+        findings, reached = _classify(testcases)
+        return findings, len(testcases), reached
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _classify(cases):
-    findings = []
-    reached = 0
-    setup_reached = False
-    for case in cases:
-        name = case.get("name", "")
-        child = next((c for c in case if c.tag in ("failure", "error")),
-                     None)
-        if child is None:
-            if case.find("skipped") is None:
-                findings.append(_finding(
-                    "vacuous", None,
-                    f"{name} passed without reaching the code under test",
-                    severity="warn"))
-            continue
-        message = child.get("message", "")
-        if "HotdocsProbeUndeclaredAsset" in message:
-            findings.append(_finding("test_bug", None, f"{name}: {message}"))
-        elif "HotdocsProbeStubReached" in message:
-            reached += 1
-            setup_reached = setup_reached or child.tag == "error"
-        elif (child.tag == "error" and message == _SETUP_ASSERTION
-              and setup_reached):
-            continue
-        elif child.tag == "error" or message.startswith(_BUG_PREFIXES):
-            findings.append(_finding("test_bug", None, f"{name}: {message}"))
-    return findings, len(cases), reached
-
-
-# probe --------------------------------------------------------------------
-
-def _dependency_interfaces(criterion_bundle):
-    if isinstance(criterion_bundle, Mapping):
-        value = criterion_bundle.get("dependency_interfaces")
-    else:
-        value = getattr(criterion_bundle, "dependency_interfaces", None)
-    return value or {}
-
+# --- probe -----------------------------------------------------------------
 
 def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,
-          interpreter=None, assets=None):
+          interpreter=None, assets=None, drivers=None):
     try:
         tree = ast.parse(test_source)
     except SyntaxError as exc:
-        return _report([_finding("syntax_error", exc.lineno, str(exc.msg))])
+        return ProbeReport(ok=False,
+                           findings=[_finding("syntax_error", exc.lineno,
+                                              exc.msg)],
+                           tests_run=0, tests_reached=0)
 
-    names = [module_name] if isinstance(module_name, str) \
+    module_names = [module_name] if isinstance(module_name, str) \
         else list(module_name)
+    interfaces = _get(criterion_bundle, "dependency_interfaces", {})
 
     findings = []
-    findings += _ordered(_check_pyflakes(test_source))
-    findings += _ordered(_check_imports(tree, names, interpreter))
-    findings += _ordered(_check_fakes(
-        tree, _dependency_interfaces(criterion_bundle)))
+    findings += _sorted(_check_pyflakes(test_source))
+    findings += _sorted(_check_imports(tree, module_names, interpreter))
+    findings += _sorted(_check_fakes(tree, interfaces))
 
-    if any(f["severity"] == "error" for f in findings):
-        return _report(findings)
+    tests_run = 0
+    tests_reached = 0
+    if not any(f["severity"] == "error" for f in findings):
+        stub_findings, tests_run, tests_reached = _stub_run(
+            test_source, module_names, timeout, interpreter, assets, drivers)
+        findings += _sorted(stub_findings)
 
-    run_findings, tests_run, tests_reached = _stub_run(
-        test_source, names, timeout, interpreter or sys.executable, assets)
-    findings += _ordered(run_findings)
-    return _report(findings, tests_run, tests_reached)
+    return ProbeReport(
+        ok=not any(f["severity"] == "error" for f in findings),
+        findings=findings,
+        tests_run=tests_run,
+        tests_reached=tests_reached,
+    )

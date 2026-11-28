@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:e625b86223ebdadd2f70a8ed6374fc55056d124b81a6a0d077fe4c8ad448300b
+# hotdocs-criterion: sha256:e7b4492157e2024ccdef8b5ef53f86c1089c362b032e9581b8004c8bd12526b9
 import importlib.util
 import json
 import sys
@@ -9,153 +9,160 @@ import pytest
 import spec_bundle_assembler
 
 
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+def component_files(slug, depends_on="[]", extra_frontmatter="", purpose="Foo doubles a number."):
+    """The files of one fixture component, keyed by path under repo_root."""
+    upper = slug.upper()
+    base = f"specs/components/{slug}/"
+    return {
+        base + "component.md": (
+            "---\n"
+            f"id: comp-{slug}\n"
+            f"title: {slug.capitalize()}\n"
+            "status: draft\n"
+            "owners: [team-a]\n"
+            "sealed: true\n"
+            f"source_path: legacy/{slug}/\n"
+            f"depends_on: {depends_on}\n"
+            + extra_frontmatter +
+            "---\n"
+            "\n"
+            f"# {slug.capitalize()}\n"
+            "\n"
+            "## Purpose\n"
+            "\n"
+            f"{purpose}\n"
+        ),
+        base + f"requirements/R-{upper}-001.md": (
+            f"# R-{upper}-001\n"
+            "\n"
+            f"**R-{upper}-001** — `foo(x)` MUST return `2 * x`.\n"
+        ),
+        base + f"acceptance/AC-{upper}-001.md": (
+            f"# AC-{upper}-001\n"
+            "\n"
+            f"Covers: R-{upper}-001\n"
+            "Kind: generated-test\n"
+            "\n"
+            "```gherkin\n"
+            "Given x = 2\n"
+            "When foo(x) is called\n"
+            "Then it returns 4\n"
+            "```\n"
+        ),
+        base + "interface/library.md": "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+        base + "constraints.md": "# Constraints\n\nNone.\n",
+    }
+
+
+def write_fixture(repo_root, files):
+    files = {"specs/glossary.md": "# Glossary\n\n- **Foo** — a test term.\n", **files}
+    for rel, text in files.items():
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
 
 
 def load_spec_linter():
     gen = next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
     path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
-    return load_module(path, "spec_linter")
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    return spec_linter
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def build_clean(repo_root):
+    files = {}
+    files.update(component_files("foo"))
+    files.update(component_files("baz", depends_on="[comp-foo]"))
+    write_fixture(repo_root, files)
 
 
-FENCE = "```"
-
-
-def write_component(repo_root, slug, upper, title, purpose, func, depends_on):
-    comp = repo_root / "specs" / "components" / slug
-    write(
-        comp / "component.md",
-        "---\n"
-        + "id: comp-" + slug + "\n"
-        + "title: " + title + "\n"
-        + "status: draft\n"
-        + "owners: [team-a]\n"
-        + "sealed: true\n"
-        + "source_path: legacy/" + slug + "/\n"
-        + "depends_on: " + depends_on + "\n"
-        + "---\n"
-        + "\n"
-        + "# " + title + "\n"
-        + "\n"
-        + "## Purpose\n"
-        + "\n"
-        + purpose + "\n",
+def break_baz(repo_root):
+    """Delete the Kind: line from baz's acceptance file: a hard lint failure."""
+    path = repo_root / "specs/components/baz/acceptance/AC-BAZ-001.md"
+    text = path.read_text(encoding="utf-8")
+    new = "".join(
+        line for line in text.splitlines(keepends=True)
+        if not line.startswith("Kind:")
     )
-    rid = "R-" + upper + "-001"
-    acid = "AC-" + upper + "-001"
-    write(
-        comp / "requirements" / (rid + ".md"),
-        "# " + rid + "\n"
-        + "\n"
-        + "**" + rid + "** — `" + func + "(x)` MUST return `2 * x`.\n",
-    )
-    write(
-        comp / "acceptance" / (acid + ".md"),
-        "# " + acid + "\n"
-        + "\n"
-        + "Covers: " + rid + "\n"
-        + "Kind: generated-test\n"
-        + "\n"
-        + FENCE + "gherkin\n"
-        + "Given x = 2\n"
-        + "When " + func + "(x) is called\n"
-        + "Then it returns 4\n"
-        + FENCE + "\n",
-    )
-    write(
-        comp / "interface" / "library.md",
-        "# Library\n"
-        + "\n"
-        + FENCE + "\n"
-        + func + "(x: int) -> int\n"
-        + FENCE + "\n",
-    )
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    assert new != text
+    path.write_text(new, encoding="utf-8")
 
 
-def build_corpus(repo_root):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
-    )
-    write_component(repo_root, "foo", "FOO", "Foo", "Foo doubles a number.", "foo", "[]")
-    write_component(repo_root, "bar", "BAR", "Bar", "Bar doubles a number.", "bar", "[comp-foo]")
-
-
-def break_lint(repo_root, slug, upper):
-    ac = repo_root / "specs" / "components" / slug / "acceptance" / ("AC-" + upper + "-001.md")
-    lines = ac.read_text(encoding="utf-8").splitlines(keepends=True)
-    kept = [line for line in lines if not line.startswith("Kind:")]
-    assert len(kept) == len(lines) - 1
-    ac.write_text("".join(kept), encoding="utf-8")
-
-
-def is_full_bundle(value):
-    if value is None:
+def looks_like_bundle(stdout):
+    stdout = stdout.strip()
+    if not stdout:
         return False
     try:
-        spec = field(value, "spec")
-    except (KeyError, AttributeError, TypeError):
+        doc = json.loads(stdout)
+    except ValueError:
         return False
-    return isinstance(spec, str) and spec != ""
+    return isinstance(doc, dict) and ("spec" in doc or "spec_bundle_hash" in doc)
 
 
-@pytest.mark.parametrize(
-    "broken_slug,broken_upper,target",
-    [
-        ("bar", "BAR", "comp-foo"),
-        ("bar", "BAR", "comp-bar"),
-        ("foo", "FOO", "comp-foo"),
-        ("foo", "FOO", "comp-bar"),
-    ],
-)
-def test_assemble_refuses_corpus_with_hard_lint_failure(tmp_path, capsys, broken_slug, broken_upper, target):
+@pytest.mark.parametrize("component_id", ["comp-foo", "comp-baz"])
+def test_cli_refuses_with_precondition_failure_when_corpus_not_lint_clean(tmp_path, capsys, component_id):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_corpus(repo_root)
-
+    build_clean(repo_root)
     spec_linter = load_spec_linter()
     assert spec_linter.lint(None, repo_root).hard_failures == 0
 
-    break_lint(repo_root, broken_slug, broken_upper)
+    # Control: the clean corpus assembles.
+    capsys.readouterr()
+    rc_clean = spec_bundle_assembler.main(
+        [component_id, "--repo-root=" + str(repo_root), "--format=json"]
+    )
+    clean_out = capsys.readouterr().out
+    assert rc_clean == 0
+    assert looks_like_bundle(clean_out)
+
+    # Introduce a hard-fail finding in baz (somewhere in the corpus).
+    break_baz(repo_root)
     assert spec_linter.lint(None, repo_root).hard_failures > 0
 
-    # Library: no partial bundle is produced.
-    raised = None
-    result = None
-    try:
-        result = spec_bundle_assembler.assemble(target, repo_root)
-    except Exception as exc:  # precondition failure may be raised
-        raised = exc
-    if raised is None:
-        assert not is_full_bundle(result), "assemble produced a bundle from a corpus that is not lint-clean"
-
-    # CLI: exit code 1 (precondition failure), and no bundle on stdout.
-    capsys.readouterr()
-    code = spec_bundle_assembler.main([target, "--repo-root=" + str(repo_root), "--format=json"])
+    rc = spec_bundle_assembler.main(
+        [component_id, "--repo-root=" + str(repo_root), "--format=json"]
+    )
     out = capsys.readouterr().out
-    assert code == 1
-    stripped = out.strip()
-    if stripped:
-        try:
-            parsed = json.loads(stripped)
-        except ValueError:
-            parsed = None
-        if isinstance(parsed, dict):
-            assert not parsed.get("spec"), "CLI printed a bundle despite precondition failure"
-            assert "spec_bundle_hash" not in parsed
+    assert rc == 1
+    assert not looks_like_bundle(out)
+
+
+@pytest.mark.parametrize("component_id", ["comp-foo", "comp-baz"])
+def test_library_refuses_to_produce_bundle_when_corpus_not_lint_clean(tmp_path, component_id):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_clean(repo_root)
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+    # Control: the clean corpus yields a bundle.
+    clean = spec_bundle_assembler.assemble(component_id, repo_root)
+    assert field(clean, "component_id") == component_id
+    assert field(clean, "spec")
+
+    break_baz(repo_root)
+    assert spec_linter.lint(None, repo_root).hard_failures > 0
+
+    try:
+        result = spec_bundle_assembler.assemble(component_id, repo_root)
+    except Exception:
+        return  # precondition failure raised: no bundle produced
+    # If a result is returned instead, it must not be a (partial) bundle.
+    is_bundle = isinstance(result, spec_bundle_assembler.SpecBundle) if hasattr(
+        spec_bundle_assembler, "SpecBundle") else False
+    assert not is_bundle
+    spec_text = None
+    try:
+        spec_text = field(result, "spec")
+    except (KeyError, AttributeError, TypeError):
+        spec_text = None
+    assert not spec_text

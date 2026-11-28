@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:2378f8e4ca25a03dd0c033e319185799b2211cdf9ee96c1279036f2ae8da1c1a
+# hotdocs-criterion: sha256:d84b1db834a9b061e911223d3813450252863a31dc885e0c020e03765a3703a4
 import json
-import os
 from pathlib import Path
 
 import component_gate_runner
@@ -13,272 +12,286 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMMON_HEADER = (
-    "import json\n"
-    "import os\n"
-    "\n"
-    "def _log(name, **kwargs):\n"
-    "    path = os.environ['GATE_TEST_LOG']\n"
-    "    entry = {'call': name, 'args': kwargs}\n"
-    "    with open(path, 'a', encoding='utf-8') as fh:\n"
-    "        fh.write(json.dumps(entry, default=repr, sort_keys=True) + '\\n')\n"
-    "\n"
-)
-
-
-def _write_fake(repo_root, slug, body):
+def _write(repo_root, slug, source):
     module_name = slug.replace("-", "_")
-    d = Path(repo_root) / "gen" / slug
+    d = repo_root / "gen" / slug
     d.mkdir(parents=True, exist_ok=True)
-    (d / (module_name + ".py")).write_text(COMMON_HEADER + body, encoding="utf-8")
+    (d / (module_name + ".py")).write_text(source)
 
 
-def _verification_report():
+def _header(log_path):
+    return (
+        "import json\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "def _log(entry):\n"
+        "    with open(LOG, 'a') as f:\n"
+        "        f.write(json.dumps(entry) + '\\n')\n"
+        "\n"
+    )
+
+
+VERIFICATION_REPORT = {
+    "component_id": COMPONENT_ID,
+    "criteria": [
+        {
+            "id": "AC-FOO-001",
+            "covers": "R-FOO-001",
+            "kind": "compiled",
+            "result": "fail",
+            "failure_detail": {"message": "x failed", "expected": 1, "actual": 2},
+            "failure_origin": "implementation",
+        }
+    ],
+    "requirement_results": {"R-FOO-001": "fail"},
+    "interface_drift": False,
+    "mutation_score": None,
+    "mutation_error": None,
+    "assets": [],
+    "drivers": [],
+    "overall": "fail",
+}
+
+GENERATION_RESULT = {
+    "component_id": COMPONENT_ID,
+    "spec_bundle_hash": "sha256:abc",
+    "model": "m1",
+    "prompt_version": "v1",
+    "cache_hit": False,
+    "files": {"foo.py": "x = 1\n"},
+    "model_call_error": None,
+    "refused": None,
+    "retry_feedback": ["R-FOO-001"],
+    "mode": "single",
+    "transcript_sha256": None,
+    "turns": 1,
+    "tool_calls": 0,
+    "isolation": None,
+}
+
+SURFACE_REPORT = {"ok": True, "findings": []}
+
+
+def _attempt(number, retry_feedback):
     return {
-        "component_id": COMPONENT_ID,
-        "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled",
-             "result": "fail", "failure_origin": "implementation",
-             "failure_detail": {"message": "m", "expected": 1, "actual": 2}},
-        ],
-        "requirement_results": {"R-FOO-001": "fail"},
-        "interface_drift": False,
-        "mutation_score": 0.5,
-        "mutation_error": None,
-        "assets": [],
+        "number": number,
+        "outcome": "verification_failed",
+        "retry_feedback": retry_feedback,
+        "error_category": None,
+        "surface_ok": True,
         "overall": "fail",
-    }
-
-
-def _generation_result():
-    return {
-        "component_id": COMPONENT_ID,
-        "spec_bundle_hash": "sha256:abc123",
-        "model": "test-model",
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "files": {"foo.py": "x = 1\n"},
-        "model_call_error": None,
-        "refused": None,
-        "retry_feedback": None,
-        "mode": "single",
+        "failed_requirements": ["R-FOO-001"],
         "transcript_sha256": None,
-        "turns": 1,
-        "tool_calls": 0,
-        "isolation": None,
+        "reauthored_tests": [],
     }
 
 
-def _attempts():
-    out = []
-    for n in (1, 2, 3):
-        out.append({
-            "number": n,
-            "outcome": "verification_failed",
-            "retry_feedback": [] if n == 1 else ["R-FOO-001"],
-            "error_category": None,
-            "surface_ok": True,
-            "overall": "fail",
-            "failed_requirements": ["R-FOO-001"],
-            "transcript_sha256": None,
-            "reauthored_tests": [],
-        })
-    return out
+ATTEMPTS = [
+    _attempt(1, []),
+    _attempt(2, ["R-FOO-001"]),
+    _attempt(3, ["R-FOO-001"]),
+]
+
+LOOP_RESULT = {
+    "passed": False,
+    "stop_reason": "max_attempts",
+    "attempts": ATTEMPTS,
+    "generation_result": GENERATION_RESULT,
+    "verification_report": VERIFICATION_REPORT,
+    "surface_report": SURFACE_REPORT,
+}
+
+LICENSE_SCAN = {
+    "component_id": COMPONENT_ID,
+    "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+    "evaluated": False,
+    "reason": "no-reference-corpus",
+    "similarity_score": None,
+    "block_threshold": None,
+    "blocked": False,
+    "matches": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+SECRET_SCAN = {
+    "scope": "full",
+    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "flagged": False,
+    "matches": [],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+GATE_VERSIONS = {
+    "compiler": "criterion-compiler@1.0.0",
+    "generated_test": "generated_test@1.0.0",
+    "verifier": "verifier-orchestrator@2.0.0",
+    "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
+    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "generator": "generator@3.0.0+v11",
+}
+
+SPEC_BUNDLE_PARTS = {"spec": "sha256:aaa", "dependency_code": "sha256:bbb"}
 
 
-def _build_fakes(repo_root):
-    # provenance-checker
-    _write_fake(repo_root, "provenance-checker", (
-        "class _Key:\n"
+def _build_fakes(repo_root, log_path):
+    h = _header(log_path)
+
+    _write(
+        repo_root,
+        "provenance-checker",
+        h
+        + "class _Key:\n"
         "    def __init__(self):\n"
-        "        self.spec_bundle_hash = 'sha256:abc123'\n"
-        "        self.gate_versions = {'compiler': 'c@1', 'generated_test': 'g@1', 'verifier': 'v@1',\n"
-        "                              'license_scanner': 'l@1', 'secret_scanner': 's@1', 'generator': 'gen@1+v1'}\n"
-        "        self.assets = [{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
-        "                        'adapter_sha256': None, 'versions': {}, 'lockfile_sha256': None}]\n"
+        "        self.spec_bundle_hash = 'sha256:abc'\n"
+        "        self.spec_bundle_parts = " + repr(SPEC_BUNDLE_PARTS) + "\n"
+        "        self.gate_versions = " + repr(GATE_VERSIONS) + "\n"
+        "        self.assets = [{'kind': 'python', 'path': '.', 'definition_sha256': None, 'adapter_sha256': 'sha256:00', 'versions': {'python': '3.12.4'}, 'lockfile_sha256': None}]\n"
+        "        self.drivers = []\n"
         "\n"
         "def current_sealed_key(component_id, repo_root):\n"
-        "    _log('current_sealed_key', component_id=component_id)\n"
+        "    _log({'call': 'current_sealed_key'})\n"
         "    return None\n"
         "\n"
         "def current_provenance_key(component_id, repo_root):\n"
-        "    _log('current_provenance_key', component_id=component_id)\n"
+        "    _log({'call': 'current_provenance_key'})\n"
         "    return _Key()\n"
         "\n"
-        "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
-        "    _log('check_provenance', component_id=component_id)\n"
-        "    return {'hit': False, 'reason': 'no manifest', 'verification_report': None,\n"
-        "            'license_scan': None, 'secret_scan': None}\n"
+        "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root, spec_bundle_parts=None):\n"
+        "    _log({'call': 'check_provenance'})\n"
+        "    return {'hit': False, 'reason': 'no manifest', 'verification_report': None, 'license_scan': None, 'secret_scan': None}\n"
         "\n"
         "def check_sealed_provenance(component_id, repo_root):\n"
-        "    _log('check_sealed_provenance', component_id=component_id)\n"
-        "    return {'hit': False, 'sealed': False, 'reason': 'not_sealed', 'verification_report': None,\n"
-        "            'license_scan': None, 'secret_scan': None, 'owners': None,\n"
-        "            'source_hash': None, 'written_at': None}\n"
-    ))
+        "    _log({'call': 'check_sealed_provenance'})\n"
+        "    return {'hit': False, 'sealed': False, 'reason': 'not_sealed', 'verification_report': None, 'license_scan': None, 'secret_scan': None, 'owners': None, 'source_hash': None, 'written_at': None}\n",
+    )
 
-    # spec-bundle-assembler
-    _write_fake(repo_root, "spec-bundle-assembler", (
-        "def assemble(component_id, repo_root, mode='cold'):\n"
-        "    _log('assemble', component_id=component_id, mode=mode)\n"
-        "    return {'component_id': component_id, 'spec_bundle_hash': 'sha256:abc123',\n"
-        "            'spec': 'spec', 'interface': 'iface', 'constraints': '',\n"
-        "            'dependency_interfaces': {}, 'dependency_context': {},\n"
-        "            'dependency_usage': {}, 'vars': {}, 'glossary': '', 'hint_code': None}\n"
+    _write(
+        repo_root,
+        "spec-bundle-assembler",
+        h
+        + "def assemble(component_id, repo_root, mode='cold'):\n"
+        "    _log({'call': 'assemble', 'mode': mode})\n"
+        "    return {'component_id': component_id, 'spec_bundle_hash': 'sha256:abc', 'spec': '', 'interface': '', 'constraints': '', 'dependency_interfaces': {}, 'dependency_context': {}, 'dependency_usage': {}, 'vars': {}, 'glossary': '', 'hint_code': None, 'spec_bundle_parts': "
+        + repr(SPEC_BUNDLE_PARTS)
+        + "}\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    _log('assemble_criterion', component_id=component_id)\n"
-        "    return {'component_id': component_id, 'criterion_id': criterion_id, 'covers': '',\n"
-        "            'criterion_text': '', 'requirement_text': '', 'interface': '', 'glossary': '',\n"
-        "            'dependency_interfaces': {}, 'testing': ''}\n"
-    ))
+        "    _log({'call': 'assemble_criterion'})\n"
+        "    return {'component_id': component_id, 'criterion_id': criterion_id, 'covers': '', 'criterion_text': '', 'requirement_text': '', 'interface': '', 'glossary': '', 'dependency_interfaces': {}, 'testing': ''}\n",
+    )
 
-    # generation-loop
-    _write_fake(repo_root, "generation-loop", (
-        "RETRIED_CATEGORIES = ('truncated_response', 'missing_module', 'empty_response',\n"
-        "                      'agent_budget_exhausted', 'agent_unfinished', 'undecodable_file',\n"
-        "                      'missing_asset', 'malformed_layout')\n"
+    _write(
+        repo_root,
+        "generation-loop",
+        h
+        + "RETRIED_CATEGORIES = ('truncated_response', 'missing_module', 'empty_response', 'agent_budget_exhausted', 'agent_unfinished', 'undecodable_file', 'missing_asset', 'malformed_layout')\n"
         "\n"
-        "GEN = " + repr(_generation_result()) + "\n"
-        "VER = " + repr(_verification_report()) + "\n"
-        "ATTEMPTS = " + repr(_attempts()) + "\n"
-        "\n"
-        "def run_attempts(component_id, bundle, repo_root, model, *, mode='single', max_attempts=3,\n"
-        "                 retry_feedback=None, seed=0, llm_backend=None,\n"
-        "                 allow_unisolated_exec=False, on_attempt=None):\n"
-        "    _log('run_attempts', component_id=component_id, model=model, mode=mode,\n"
-        "         max_attempts=max_attempts, retry_feedback=retry_feedback, seed=seed,\n"
-        "         allow_unisolated_exec=allow_unisolated_exec)\n"
-        "    gen = dict(GEN)\n"
-        "    ver = dict(VER)\n"
-        "    attempts = [dict(a) for a in ATTEMPTS]\n"
-        "    if on_attempt is not None:\n"
-        "        for a in attempts:\n"
-        "            on_attempt(a, gen, ver)\n"
-        "    return {'passed': False, 'stop_reason': 'max_attempts', 'attempts': attempts,\n"
-        "            'generation_result': gen, 'verification_report': ver,\n"
-        "            'surface_report': {'ok': True, 'findings': []}}\n"
+        "def run_attempts(component_id, bundle, repo_root, model, *, mode='single', max_attempts=3, retry_feedback=None, seed=0, llm_backend=None, allow_unisolated_exec=False, on_attempt=None):\n"
+        "    _log({'call': 'run_attempts', 'component_id': component_id, 'model': model, 'mode': mode, 'max_attempts': max_attempts, 'retry_feedback': retry_feedback, 'seed': seed})\n"
+        "    return " + repr(LOOP_RESULT) + "\n"
         "\n"
         "def make_closures(model, seed, repo_root, llm_backend=None):\n"
-        "    _log('make_closures', model=model, seed=seed)\n"
+        "    _log({'call': 'make_closures'})\n"
         "    def test_author(bundle):\n"
         "        return {'model_call_error': None, 'file': None}\n"
         "    def judge(bundle):\n"
         "        return {'result': 'pass', 'rationale': None}\n"
-        "    return (test_author, judge)\n"
-    ))
+        "    return (test_author, judge)\n",
+    )
 
-    # provenance-tracker
-    _write_fake(repo_root, "provenance-tracker", (
-        "import pathlib\n"
-        "_COUNTER = [0]\n"
-        "\n"
-        "def write_attempt_record(component_id, generation_result, verification_report,\n"
-        "                         spec_bundle_hash, repo_root):\n"
-        "    _log('write_attempt_record', component_id=component_id, spec_bundle_hash=spec_bundle_hash)\n"
-        "    _COUNTER[0] += 1\n"
-        "    d = pathlib.Path(repo_root) / '.hotdocs' / 'attempts' / component_id\n"
-        "    d.mkdir(parents=True, exist_ok=True)\n"
-        "    aid = '2026-01-01T00:00:0' + str(_COUNTER[0]) + 'Z-fake'\n"
-        "    record = {'attempt_id': aid, 'component_id': component_id,\n"
-        "              'timestamp': '2026-01-01T00:00:00Z', 'spec_bundle_hash': spec_bundle_hash,\n"
-        "              'generation': {}, 'verification': None}\n"
-        "    (d / (aid + '.json')).write_text(json.dumps(record), encoding='utf-8')\n"
-        "    return record\n"
-        "\n"
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    return {'scope': 'whole-corpus', 'ready': True, 'components': {}, 'capabilities': {},\n"
-        "            'secret_scan': None, 'not_ready_reasons': []}\n"
+    _write(
+        repo_root,
+        "provenance-tracker",
+        h
+        + "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
+        "    _log({'call': 'write_attempt_record'})\n"
+        "    return {'attempt_id': '2026-01-01T00:00:00Z-aaaaaa', 'component_id': component_id, 'timestamp': '2026-01-01T00:00:00Z', 'spec_bundle_hash': spec_bundle_hash, 'generation': {}, 'verification': None}\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
-        "    return []\n"
-    ))
+        "    return []\n",
+    )
 
-    # license-scanner
-    _write_fake(repo_root, "license-scanner", (
-        "def scan(component_id, repo_root):\n"
-        "    _log('license_scan', component_id=component_id)\n"
-        "    return {'component_id': component_id,\n"
-        "            'gate_version': 'license_scanner@4.0.0-no-reference-corpus',\n"
-        "            'evaluated': False, 'reason': 'no-reference-corpus',\n"
-        "            'similarity_score': None, 'block_threshold': None, 'blocked': False,\n"
-        "            'matches': [], 'notified': False, 'notification_delivery_error': None,\n"
-        "            'cache_hit': False}\n"
-        "\n"
-        "def gate_version(repo_root):\n"
-        "    return 'license_scanner@4.0.0-no-reference-corpus'\n"
-    ))
-
-    # secret-scanner
-    _write_fake(repo_root, "secret-scanner", (
-        "def scan(repo_root):\n"
-        "    _log('secret_scan')\n"
-        "    return {'scope': 'full', 'gate_version': 'secret_scanner@3.1.0',\n"
-        "            'flagged': False, 'matches': [], 'allowed': [],\n"
-        "            'unused_allowlist_entries': [], 'notified': False,\n"
-        "            'notification_delivery_error': None, 'cache_hit': False}\n"
-        "\n"
-        "def scan_files(paths, repo_root=None):\n"
-        "    return {'scope': 'precommit', 'flagged': False, 'matches': [], 'allowed': [],\n"
-        "            'unused_allowlist_entries': [], 'notified': False,\n"
-        "            'notification_delivery_error': None, 'cache_hit': False}\n"
-        "\n"
-        "def gate_version(repo_root):\n"
-        "    return 'secret_scanner@3.1.0'\n"
-    ))
-
-    # provenance-writer
-    _write_fake(repo_root, "provenance-writer", (
-        "def write_provenance(component_id, inputs, repo_root):\n"
-        "    _log('write_provenance', component_id=component_id)\n"
-        "    return None\n"
-        "\n"
-        "def write_sealed_provenance(component_id, inputs, repo_root):\n"
-        "    _log('write_sealed_provenance', component_id=component_id)\n"
-        "    return None\n"
-    ))
-
-    # verifier-orchestrator (not expected on this path; present so no real copy is needed)
-    _write_fake(repo_root, "verifier-orchestrator", (
-        "GATE_VERSION = 'verifier-orchestrator@3.5.0'\n"
+    _write(
+        repo_root,
+        "verifier-orchestrator",
+        h
+        + "GATE_VERSION = 'verifier-orchestrator@4.0.0'\n"
         "DEFAULT_TEST_TIMEOUT = 300.0\n"
         "\n"
         "def verify(component_id, repo_root, judge=None, test_author=None):\n"
-        "    _log('verify', component_id=component_id)\n"
-        "    return " + repr(_verification_report()) + "\n"
-    ))
+        "    _log({'call': 'verify'})\n"
+        "    return " + repr(VERIFICATION_REPORT) + "\n",
+    )
+
+    _write(
+        repo_root,
+        "license-scanner",
+        h
+        + "def scan(component_id, repo_root):\n"
+        "    _log({'call': 'license_scan'})\n"
+        "    return " + repr(LICENSE_SCAN) + "\n"
+        "\n"
+        "def gate_version(repo_root):\n"
+        "    return 'license_scanner@4.0.0-no-reference-corpus'\n",
+    )
+
+    _write(
+        repo_root,
+        "secret-scanner",
+        h
+        + "def scan(repo_root):\n"
+        "    _log({'call': 'secret_scan'})\n"
+        "    return " + repr(SECRET_SCAN) + "\n"
+        "\n"
+        "def gate_version(repo_root):\n"
+        "    return 'secret_scanner@3.1.0+detect-secrets.1.5.0'\n",
+    )
+
+    _write(
+        repo_root,
+        "provenance-writer",
+        h
+        + "class InvalidSealedInputError(Exception):\n"
+        "    pass\n"
+        "\n"
+        "class MissingInputError(Exception):\n"
+        "    pass\n"
+        "\n"
+        "def write_provenance(component_id, inputs, repo_root):\n"
+        "    _log({'call': 'write_provenance'})\n"
+        "    return None\n"
+        "\n"
+        "def write_sealed_provenance(component_id, inputs, repo_root):\n"
+        "    _log({'call': 'write_sealed_provenance'})\n"
+        "    return None\n",
+    )
 
 
 def _read_log(log_path):
     if not log_path.exists():
         return []
-    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
 
 
-def test_ac_gate_003b_run_attempts_called_once_without_retry_feedback(tmp_path, monkeypatch):
+def test_ac_gate_003b_run_attempts_called_once_and_blocked(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     log_path = tmp_path / "calls.log"
-    monkeypatch.setenv("GATE_TEST_LOG", str(log_path))
+    _build_fakes(repo_root, log_path)
 
-    _build_fakes(repo_root)
-
-    result = component_gate_runner.run_component_gates(COMPONENT_ID, repo_root, "test-model")
+    result = component_gate_runner.run_component_gates(COMPONENT_ID, repo_root, "m1")
 
     calls = _read_log(log_path)
     run_calls = [c for c in calls if c["call"] == "run_attempts"]
     assert len(run_calls) == 1, calls
-    args = run_calls[0]["args"]
-    assert args["retry_feedback"] is None
-    assert args["max_attempts"] == 3
-
-    # never makes its own generator/closure calls on this path
-    assert not [c for c in calls if c["call"] == "make_closures"]
+    assert run_calls[0]["retry_feedback"] is None
+    assert run_calls[0]["max_attempts"] == 3
 
     assert field(result, "blocked") is True
     assert field(result, "block_reason") == "verification_failed"
-
-    attempts = field(result, "attempts")
-    assert attempts == _attempts()
-    assert len(attempts) == 3
-    assert attempts[-1]["outcome"] == "verification_failed"
+    assert field(result, "attempts") == ATTEMPTS

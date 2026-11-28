@@ -1,10 +1,9 @@
 """Decision Drift Detector.
 
-Flags live spec-file ``D<N>`` citations whose cited decision has since been
-superseded by a decision ratified after the citing file's own last-touching
-commit (``find_decision_drift``), and reports everything that would be
-affected by altering a decision (``find_decision_impact``). Purely
-diagnostic: reads only, never gates anything.
+Flags live spec files whose cited ``D<N>`` decision has since been
+superseded by a decision ratified after the citing file's own last
+commit (``find_decision_drift``), and reports what would be affected by
+altering a decision (``find_decision_impact``). Purely diagnostic.
 """
 
 from __future__ import annotations
@@ -18,221 +17,233 @@ from pathlib import Path
 
 import duckdb
 
-CITATION_RE = re.compile(r"\bD\d+\b")
+__all__ = ["find_decision_drift", "find_decision_impact", "main", "UsageError"]
 
-_DEPENDENCY_SLUG = "graph-query-engine"
-_DEPENDENCY_MODULE = "graph_query_engine"
-
-_MODULE_CACHE: dict = {}
+_CITATION_RE = re.compile(r"\bD\d+\b")
 
 _USAGE_DRIFT = "usage: hotdocs decision-drift [--format=json|text] [--repo-root=<dir>]"
 _USAGE_IMPACT = (
     "usage: hotdocs decision-impact <decision-id> [--format=json|text] [--repo-root=<dir>]"
 )
+_USAGES = {"decision-drift": _USAGE_DRIFT, "decision-impact": _USAGE_IMPACT}
+_USAGE_ALL = _USAGE_DRIFT + "\n" + _USAGE_IMPACT
+
+_MODULE_CACHE: dict = {}
 
 
 class UsageError(Exception):
-    """A usage error: reported as exit code 2 by ``main``."""
+    """A usage error: bad arguments, not a git repository, or missing history."""
 
 
-# ---------------------------------------------------------------------------
-# Dependency resolution (R-DRIFT-004)
-# ---------------------------------------------------------------------------
+class _Report(dict):
+    """A dict whose keys are also readable as attributes."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
+# --------------------------------------------------------------------------
+# Dependency loading (R-DRIFT-004)
+# --------------------------------------------------------------------------
 
 
 def _tool_root() -> Path:
-    for parent in Path(__file__).resolve().parents:
-        if parent.name == "gen":
-            return parent.parent
-    return Path(__file__).resolve().parent
+    here = Path(__file__).resolve()
+    return next(p.parent for p in here.parents if p.name == "gen")
 
 
-def _load_dependency(repo_root, slug: str, module_name: str):
+def _load_dependency(repo_root: Path, slug: str, module_name: str):
     key = (str(repo_root), module_name)
     if key in _MODULE_CACHE:
         return _MODULE_CACHE[key]
-    dep_dir = Path(repo_root) / "gen" / slug
-    if not dep_dir.is_dir():
-        dep_dir = _tool_root() / "gen" / slug
-    flat = dep_dir / f"{module_name}.py"
-    if flat.is_file():
-        spec = importlib.util.spec_from_file_location(module_name, flat)
-    else:
-        pkg_dir = dep_dir / module_name
+    base = Path(repo_root) / "gen" / slug
+    if not base.is_dir():
+        base = _tool_root() / "gen" / slug
+    load_name = f"_decision_drift_detector_dep_{module_name}_{len(_MODULE_CACHE)}"
+    package_init = base / module_name / "__init__.py"
+    if package_init.is_file():
         spec = importlib.util.spec_from_file_location(
-            module_name,
-            pkg_dir / "__init__.py",
-            submodule_search_locations=[str(pkg_dir)],
+            load_name, package_init, submodule_search_locations=[str(package_init.parent)]
         )
+    else:
+        spec = importlib.util.spec_from_file_location(load_name, base / f"{module_name}.py")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
+    sys.modules[load_name] = module
     spec.loader.exec_module(module)
     _MODULE_CACHE[key] = module
     return module
 
 
-def _open_graph(repo_root):
-    gqe = _load_dependency(repo_root, _DEPENDENCY_SLUG, _DEPENDENCY_MODULE)
+def _dep_get(obj, name):
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name)
+
+
+def _open_views(repo_root: Path):
+    gqe = _load_dependency(repo_root, "graph-query-engine", "graph_query_engine")
     con = duckdb.connect()
     con.execute("INSTALL yaml FROM community")
     con.execute("LOAD yaml")
-    gqe.load_views(con, Path(repo_root))
+    _dep_get(gqe, "load_views")(con, Path(repo_root))
     return con
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Git helpers
+# --------------------------------------------------------------------------
 
 
-def _decision_key(decision_id: str):
-    return (int(decision_id[1:]), decision_id)
-
-
-def _git(repo_root, *args):
+def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", *args],
-        cwd=str(repo_root),
-        capture_output=True,
-        text=True,
+        ["git", *args], cwd=str(repo_root), capture_output=True, text=True
     )
 
 
-def _require_git_repo(repo_root) -> None:
-    result = _git(repo_root, "rev-parse", "--git-dir")
-    if result.returncode != 0:
+def _require_git(repo_root: Path) -> None:
+    if _git(repo_root, "rev-parse", "--git-dir").returncode != 0:
         raise UsageError(f"not a git repository: {repo_root}")
 
 
-def _is_ancestor(repo_root, older: str, newer: str) -> bool:
+def _file_commit(repo_root: Path, rel_path: str) -> str:
+    commit = _git(repo_root, "log", "-1", "--format=%H", "--", rel_path).stdout.strip()
+    if not commit:
+        raise UsageError(f"no commit history for cited file: {rel_path}")
+    return commit
+
+
+def _is_ancestor(repo_root: Path, older: str, newer: str) -> bool:
     return _git(repo_root, "merge-base", "--is-ancestor", older, newer).returncode == 0
 
 
-def _live_files(repo_root):
-    """Yield (relative posix path, citations set) for every live spec file."""
-    root = Path(repo_root)
-    specs = root / "specs"
-    for path in sorted(specs.rglob("*.md")):
-        rel = path.relative_to(root).as_posix()
+# --------------------------------------------------------------------------
+# Corpus helpers
+# --------------------------------------------------------------------------
+
+
+def _decision_key(decision_id: str):
+    return (len(decision_id), decision_id)
+
+
+def _live_citations(repo_root: Path):
+    """Yield (relative_path, sorted citations) for every live spec file."""
+    result = []
+    for path in sorted((Path(repo_root) / "specs").rglob("*.md")):
+        rel = path.relative_to(repo_root).as_posix()
         if rel.startswith("specs/decisions/"):
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        yield rel, set(CITATION_RE.findall(text))
+        cited = set(_CITATION_RE.findall(path.read_text(encoding="utf-8")))
+        result.append((rel, sorted(cited, key=_decision_key)))
+    return result
 
 
-def _edges(con, edge_types):
-    placeholders = ", ".join("?" for _ in edge_types)
-    rows = con.execute(
-        f"SELECT source_id, target_id FROM edges WHERE edge_type IN ({placeholders})",
-        list(edge_types),
-    ).fetchall()
-    by_target: dict = {}
-    for source_id, target_id in rows:
-        by_target.setdefault(target_id, set()).add(source_id)
-    return by_target
-
-
-def _closure(by_target: dict, start: str) -> set:
-    seen: set = set()
-    stack = [start]
-    while stack:
-        current = stack.pop()
-        for source in by_target.get(current, ()):
-            if source not in seen and source != start:
-                seen.add(source)
-                stack.append(source)
-    return seen
-
-
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Library
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 
-def find_decision_drift(repo_root: Path) -> dict:
-    _require_git_repo(repo_root)
-    con = _open_graph(repo_root)
-    try:
-        superseded_by = _edges(con, ["supersedes"])
-        lineage = {
-            row[0]: row[1]
-            for row in con.execute(
-                "SELECT id, last_ratified_commit FROM decision_lineage"
-            ).fetchall()
-        }
-    finally:
-        con.close()
+def find_decision_drift(repo_root: Path) -> _Report:
+    repo_root = Path(repo_root)
+    _require_git(repo_root)
+    con = _open_views(repo_root)
+    superseders: dict = {}
+    for source_id, target_id in con.execute(
+        "SELECT source_id, target_id FROM edges WHERE edge_type = 'supersedes'"
+    ).fetchall():
+        superseders.setdefault(target_id, set()).add(source_id)
+    ratified = dict(
+        con.execute("SELECT id, last_ratified_commit FROM decision_lineage").fetchall()
+    )
+    con.close()
 
     latest_cache: dict = {}
 
     def latest_superseder(decision_id: str):
         if decision_id in latest_cache:
             return latest_cache[decision_id]
-        best = None
-        for cand in sorted(_closure(superseded_by, decision_id), key=_decision_key):
-            commit = lineage.get(cand)
-            if not commit:
+        seen: set = set()
+        frontier = [decision_id]
+        while frontier:
+            current = frontier.pop()
+            for newer in superseders.get(current, ()):
+                if newer not in seen:
+                    seen.add(newer)
+                    frontier.append(newer)
+        seen.discard(decision_id)
+        latest = None
+        for candidate in sorted(seen, key=_decision_key):
+            commit = ratified.get(candidate)
+            if commit is None:
                 continue
-            if best is None or (
-                best[1] != commit and _is_ancestor(repo_root, best[1], commit)
-            ):
-                best = (cand, commit)
-        latest_cache[decision_id] = best
-        return best
+            if latest is None or _is_ancestor(repo_root, latest[1], commit):
+                latest = (candidate, commit)
+        latest_cache[decision_id] = latest
+        return latest
 
     entries = []
-    for rel, citations in _live_files(repo_root):
+    for rel, cited in _live_citations(repo_root):
         file_commit = None
-        for cited in sorted(citations, key=_decision_key):
-            found = latest_superseder(cited)
-            if found is None:
+        for decision_id in cited:
+            latest = latest_superseder(decision_id)
+            if latest is None:
                 continue
             if file_commit is None:
-                file_commit = _git(
-                    repo_root, "log", "-1", "--format=%H", "--", rel
-                ).stdout.strip()
-                if not file_commit:
-                    raise UsageError(f"no commit history for {rel}")
-            superseder, superseder_commit = found
+                file_commit = _file_commit(repo_root, rel)
+            superseder_id, superseder_commit = latest
             if _is_ancestor(repo_root, file_commit, superseder_commit):
                 entries.append(
-                    {
-                        "file": rel,
-                        "cited_decision": cited,
-                        "superseded_by": superseder,
-                        "file_commit": file_commit,
-                        "superseder_ratified_commit": superseder_commit,
-                    }
+                    _Report(
+                        file=rel,
+                        cited_decision=decision_id,
+                        superseded_by=superseder_id,
+                        file_commit=file_commit,
+                        superseder_ratified_commit=superseder_commit,
+                    )
                 )
-    return {"entries": entries}
+    return _Report(entries=entries)
 
 
-def find_decision_impact(repo_root: Path, decision_id: str) -> dict:
-    con = _open_graph(repo_root)
-    try:
-        dependents = _edges(con, ["supersedes", "builds_on"])
-    finally:
-        con.close()
-    dependent_decisions = sorted(_closure(dependents, decision_id), key=_decision_key)
-    citing_files = [
-        rel for rel, citations in _live_files(repo_root) if decision_id in citations
-    ]
-    return {
-        "decision_id": decision_id,
-        "dependent_decisions": dependent_decisions,
-        "citing_files": citing_files,
-    }
+def find_decision_impact(repo_root: Path, decision_id: str) -> _Report:
+    repo_root = Path(repo_root)
+    con = _open_views(repo_root)
+    dependents_of: dict = {}
+    for source_id, target_id in con.execute(
+        "SELECT source_id, target_id FROM edges "
+        "WHERE edge_type IN ('supersedes', 'builds_on')"
+    ).fetchall():
+        dependents_of.setdefault(target_id, set()).add(source_id)
+    con.close()
+
+    seen: set = set()
+    frontier = [decision_id]
+    while frontier:
+        current = frontier.pop()
+        for dependent in dependents_of.get(current, ()):
+            if dependent not in seen:
+                seen.add(dependent)
+                frontier.append(dependent)
+    seen.discard(decision_id)
+
+    citing_files = [rel for rel, cited in _live_citations(repo_root) if decision_id in cited]
+    return _Report(
+        decision_id=decision_id,
+        dependent_decisions=sorted(seen, key=_decision_key),
+        citing_files=citing_files,
+    )
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # CLI (R-DRIFT-005)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 
-def _render_drift(report: dict) -> str:
+def _render_drift_text(report) -> str:
     entries = report["entries"]
     if not entries:
-        return "No decision drift found."
+        return "No decision drift candidates."
     lines = [f"{len(entries)} decision drift candidate(s):"]
     for e in entries:
         lines.append(
@@ -243,96 +254,80 @@ def _render_drift(report: dict) -> str:
     return "\n".join(lines)
 
 
-def _render_impact(report: dict) -> str:
-    lines = [f"Impact of altering {report['decision_id']}:"]
-    deps = report["dependent_decisions"]
-    lines.append("Dependent decisions: " + (", ".join(deps) if deps else "(none)"))
-    files = report["citing_files"]
-    lines.append("Citing files:" + ("" if files else " (none)"))
-    for f in files:
-        lines.append(f"  {f}")
+def _render_impact_text(report) -> str:
+    lines = [f"Decision {report['decision_id']}"]
+    lines.append(
+        "Dependent decisions: " + (", ".join(report["dependent_decisions"]) or "(none)")
+    )
+    lines.append("Citing files:" + ("" if report["citing_files"] else " (none)"))
+    lines.extend(f"  {path}" for path in report["citing_files"])
     return "\n".join(lines)
 
 
-def _usage_error(cause: str, usage: str) -> int:
-    print(f"usage error: {cause}", file=sys.stderr)
-    print(usage, file=sys.stderr)
-    return 2
-
-
-def main(argv: list[str] | None = None) -> int:
-    if argv is None:
-        argv = sys.argv[1:]
-    args = list(argv)
-    both_usage = _USAGE_DRIFT + "\n" + _USAGE_IMPACT
-
-    if not args or args[0] not in ("decision-drift", "decision-impact"):
-        return _usage_error("missing or unknown subcommand", both_usage)
-    command = args.pop(0)
-    usage = _USAGE_DRIFT if command == "decision-drift" else _USAGE_IMPACT
-
+def _run(command, tokens) -> int:
+    if command not in _USAGES:
+        raise UsageError(f"unknown or missing subcommand: {command!r}")
     fmt = "text"
-    repo_root_arg = None
-    positionals = []
+    root_arg = None
+    positional = []
     i = 0
-    while i < len(args):
-        token = args[i]
-        name, eq, value = token.partition("=")
+    while i < len(tokens):
+        tok = tokens[i]
+        name, eq, value = tok.partition("=")
         if name in ("--format", "--repo-root"):
             if not eq:
-                if i + 1 >= len(args):
-                    return _usage_error(f"{name} requires a value", usage)
                 i += 1
-                value = args[i]
+                if i >= len(tokens):
+                    raise UsageError(f"{name} requires a value")
+                value = tokens[i]
             if name == "--format":
-                if value not in ("json", "text"):
-                    return _usage_error(f"invalid --format value: {value}", usage)
                 fmt = value
             else:
-                repo_root_arg = value
-        elif token.startswith("-"):
-            return _usage_error(f"unknown argument: {token}", usage)
+                root_arg = value
+        elif tok.startswith("-"):
+            raise UsageError(f"unknown argument: {tok}")
         else:
-            positionals.append(token)
+            positional.append(tok)
         i += 1
 
-    if command == "decision-impact":
-        if not positionals:
-            return _usage_error("missing <decision-id>", usage)
-        if len(positionals) > 1:
-            return _usage_error(f"unknown argument: {positionals[1]}", usage)
-    elif positionals:
-        return _usage_error(f"unknown argument: {positionals[0]}", usage)
+    if fmt not in ("json", "text"):
+        raise UsageError(f"invalid --format value: {fmt}")
+    expected = 1 if command == "decision-impact" else 0
+    if len(positional) < expected:
+        raise UsageError("missing <decision-id>")
+    if len(positional) > expected:
+        raise UsageError(f"unexpected argument: {positional[expected]}")
 
-    if repo_root_arg is None:
+    if root_arg is None:
         top = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
         )
         if top.returncode != 0:
-            return _usage_error("not a git repository", usage)
+            raise UsageError("not a git repository")
         repo_root = Path(top.stdout.strip())
     else:
-        repo_root = Path(repo_root_arg)
+        repo_root = Path(root_arg)
         if not repo_root.is_dir():
-            return _usage_error(f"unreadable --repo-root: {repo_root_arg}", usage)
+            raise UsageError(f"unreadable --repo-root: {root_arg}")
+    _require_git(repo_root)
 
-    try:
-        _require_git_repo(repo_root)
-        if command == "decision-drift":
-            report = find_decision_drift(repo_root)
-            text = _render_drift(report)
-        else:
-            report = find_decision_impact(repo_root, positionals[0])
-            text = _render_impact(report)
-    except UsageError as exc:
-        return _usage_error(str(exc), usage)
-
-    if fmt == "json":
-        print(json.dumps(report, indent=2))
+    if command == "decision-drift":
+        report = find_decision_drift(repo_root)
+        text = _render_drift_text(report)
     else:
-        print(text)
+        report = find_decision_impact(repo_root, positional[0])
+        text = _render_impact_text(report)
+    print(json.dumps(report, indent=2) if fmt == "json" else text)
     return 0
 
 
-if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    command = args[0] if args else None
+    usage = _USAGES.get(command, _USAGE_ALL)
+    try:
+        return _run(command, args[1:])
+    except UsageError as exc:
+        print(f"usage error: {exc}", file=sys.stderr)
+        print(usage, file=sys.stderr)
+        return 2

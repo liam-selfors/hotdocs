@@ -92,9 +92,9 @@ split.
   (e.g. `AC-FOO-003` → `test_ac_foo_003.py`), directly under
   `verification/<component>/<compiled|generated-test>/` — no further
   nesting, no content hash or other suffix. Both producers already used
-  this exact formula independently; `verifier-orchestrator`, the
+  this exact formula independently; `test-supply`, the
   dependent that must *check for* a `generated-test` file before
-  deciding whether to dispatch to `test_author` (`R-VERIFY-002`), is
+  deciding whether to dispatch to `test_author` (`R-SUPPLY-001`), is
   the first consumer, and this was never written down anywhere as a
   shared contract before `D63` — two independent real candidates each
   invented a different, incompatible filename/location scheme for the
@@ -117,7 +117,7 @@ split.
   `bundle` itself is **not** one universal shape — each dependent
   passes the richest shape it actually has: `verifier-orchestrator`
   passes the exact same `CriterionBundle` to both `judge` and
-  `test_author` (`R-VERIFY-003`/`009`) — the well-specified,
+  `test_author` (`R-VERIFY-003`, `R-SUPPLY-002`) — the well-specified,
   component-scoped shape `spec-bundle-assembler` already produces,
   reused rather than duplicated. `capability-scenario-verifier`, which
   operates cross-component (no single component's `CriterionBundle`

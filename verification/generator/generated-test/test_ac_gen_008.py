@@ -1,7 +1,7 @@
-# hotdocs-criterion: sha256:c9a9662b8d65b15ac55f91d3eeb9cc03e41ef0ef1b99c769d8baae5463abb2fb
+# hotdocs-criterion: sha256:e0e9eef398cbcc5122a9f6e5a0cca41463ce7f3e6fb3f30c8862a343349979d7
 import importlib.util
+import re
 import sys
-import uuid
 from pathlib import Path
 
 import pytest
@@ -20,9 +20,23 @@ PYTHON_ADAPTER = (
     "\n"
     "\n"
     "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
-    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
 )
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-widget-maker\n"
+    "title: Widget Maker\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Widget Maker\n"
+)
+
+PREFIX = "the model reply contained no files; it began:\n"
 
 
 def field(value, name):
@@ -44,162 +58,101 @@ def load_cache_manager():
     return load_module(path, "cache_manager")
 
 
-class Bundle:
-    """A SpecBundle-shaped object readable by attribute and as a mapping."""
-
-    _FIELDS = (
-        "component_id",
-        "spec_bundle_hash",
-        "spec",
-        "interface",
-        "constraints",
-        "dependency_interfaces",
-        "dependency_context",
-        "dependency_usage",
-        "vars",
-        "glossary",
-        "hint_code",
-    )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs[name])
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        return getattr(self, key) if key in self._FIELDS else default
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-    def __contains__(self, key):
-        return key in self._FIELDS
-
-
-def make_bundle():
-    return Bundle(
-        component_id="comp-widget-maker",
-        spec_bundle_hash="sha256:" + uuid.uuid4().hex + uuid.uuid4().hex,
-        spec="# Widget Maker\n\nMakes widgets.",
-        interface="# Library\n\nmake() -> str",
-        constraints="None.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="",
-        hint_code=None,
-    )
-
-
-MODEL = "anthropic:claude-sonnet-5"
-
-
 @pytest.fixture
 def repo_root(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     root = tmp_path / "repo"
-    root.mkdir()
     adapter = root / "gen" / "kind-python" / "kind_python.py"
     adapter.parent.mkdir(parents=True)
     adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
-    monkeypatch.chdir(root)
+    comp = root / "specs" / "components" / "widget-maker" / "component.md"
+    comp.parent.mkdir(parents=True)
+    comp.write_text(COMPONENT_MD, encoding="utf-8")
     return root
 
 
-def text_backend(text, calls):
+def make_bundle(tag):
+    return {
+        "component_id": "comp-widget-maker",
+        "spec_bundle_hash": "sha256:" + (tag * 64)[:64],
+        "spec": "# Widget Maker\n\nMakes widgets.",
+        "interface": "make() -> str",
+        "constraints": "",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+        "spec_bundle_parts": {},
+    }
+
+
+def text_backend(text, log_path):
     def backend(prompt, model, **params):
-        calls.append(prompt)
+        assert re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("called\n")
         return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
     return backend
 
 
-def nothing_written_or_cached(repo_root):
-    out_dir = repo_root / "gen" / "widget-maker"
-    if out_dir.exists():
-        assert [p for p in out_dir.rglob("*") if p.is_file()] == []
+def assert_nothing_written_or_cached(repo_root):
+    gen_dir = repo_root / "gen" / "widget-maker"
+    assert not gen_dir.exists() or not any(gen_dir.iterdir())
     cache_manager = load_cache_manager()
-    stats = cache_manager.stats(repo_root=repo_root)
-    assert field(stats, "entry_count") == 0
+    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 0
 
 
-def test_network_error_is_model_call_error(repo_root):
-    calls = []
-
+def test_network_error(repo_root):
     def backend(prompt, model, **params):
-        calls.append(prompt)
-        return {
-            "text": None,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": {"category": "network", "message": "connection refused"},
-        }
+        raise ConnectionError("network unreachable")
 
-    result = generator.generate(make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend)
-
-    assert len(calls) == 1
+    result = generator.generate(make_bundle("a"), "mock-model", repo_root=repo_root, llm_backend=backend)
     assert field(result, "model_call_error") is not None
     assert field(result, "files") == {}
     assert field(result, "cache_hit") is False
 
 
-def test_reply_with_no_file_blocks_is_empty_response(repo_root):
-    calls = []
-    backend = text_backend("I cannot: the bundle omits X.", calls)
-
-    result = generator.generate(make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend)
-
-    assert len(calls) == 1
-    error = field(result, "model_call_error")
-    assert error is not None
-    assert field(error, "category") == "empty_response"
-    assert field(error, "message") == (
-        "the model reply contained no files; it began:\nI cannot: the bundle omits X."
+def test_reply_without_files(repo_root, tmp_path):
+    log = tmp_path / "calls.log"
+    text = "I cannot: the bundle omits X."
+    result = generator.generate(
+        make_bundle("b"), "mock-model", repo_root=repo_root, llm_backend=text_backend(text, log)
     )
+    assert log.read_text(encoding="utf-8").count("called") == 1
+    err = field(result, "model_call_error")
+    assert err is not None
+    assert field(err, "category") == "empty_response"
+    assert field(err, "message") == PREFIX + "I cannot: the bundle omits X."
     assert field(result, "files") == {}
     assert field(result, "cache_hit") is False
-    nothing_written_or_cached(repo_root)
+    assert_nothing_written_or_cached(repo_root)
 
 
-def test_long_reply_with_no_file_blocks_is_truncated(repo_root):
-    calls = []
-    backend = text_backend("a" * 4010, calls)
-
-    result = generator.generate(make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend)
-
-    assert len(calls) == 1
-    error = field(result, "model_call_error")
-    assert error is not None
-    assert field(error, "category") == "empty_response"
-    message = field(error, "message")
+def test_long_reply_truncated(repo_root, tmp_path):
+    log = tmp_path / "calls.log"
+    text = "a" * 4010
+    result = generator.generate(
+        make_bundle("c"), "mock-model", repo_root=repo_root, llm_backend=text_backend(text, log)
+    )
+    err = field(result, "model_call_error")
+    assert err is not None
+    assert field(err, "category") == "empty_response"
+    message = field(err, "message")
     assert message.endswith("\n[10 more characters]")
-    assert message == (
-        "the model reply contained no files; it began:\n" + "a" * 4000 + "\n[10 more characters]"
+    assert message == PREFIX + "a" * 4000 + "\n[10 more characters]"
+    assert field(result, "files") == {}
+    assert field(result, "cache_hit") is False
+
+
+def test_whitespace_reply(repo_root, tmp_path):
+    log = tmp_path / "calls.log"
+    result = generator.generate(
+        make_bundle("d"), "mock-model", repo_root=repo_root, llm_backend=text_backend("  \n", log)
     )
+    err = field(result, "model_call_error")
+    assert dict(err) == {"category": "empty_response", "message": "the model reply was empty"}
     assert field(result, "files") == {}
     assert field(result, "cache_hit") is False
-
-
-def test_whitespace_only_reply_is_empty(repo_root):
-    calls = []
-    backend = text_backend("  \n", calls)
-
-    result = generator.generate(make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend)
-
-    assert len(calls) == 1
-    error = field(result, "model_call_error")
-    assert dict(error) == {"category": "empty_response", "message": "the model reply was empty"}
-    assert field(result, "files") == {}
-    assert field(result, "cache_hit") is False
-    nothing_written_or_cached(repo_root)

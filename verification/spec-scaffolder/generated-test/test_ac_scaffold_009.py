@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:f5a22124cc094c160305717232a43de8e5d70ae27fd1191e858a71807e736e8f
+# hotdocs-criterion: sha256:cc45e95bbb02a837e2a1d69fbde2ae18b928c116d73b96a0a7e858e041d99ea3
 from pathlib import Path
 
 import pytest
@@ -28,39 +28,43 @@ def _make_repo(tmp_path):
     return repo_root
 
 
-def test_new_capability_writes_exact_layout_and_refuses_duplicates_and_bad_names(tmp_path):
+def test_new_capability_library(tmp_path):
     repo_root = _make_repo(tmp_path)
-    expected_path = repo_root / "specs" / "product" / "order-book.md"
+    target = repo_root / "specs" / "product" / "order-book.md"
 
     result = spec_scaffolder.new_capability(
         repo_root, "order-book", owners=["team-a", "team-b"]
     )
+    assert Path(result).resolve() == target.resolve()
+    assert target.is_file()
 
-    assert Path(result).resolve() == expected_path.resolve()
-    assert expected_path.is_file()
-    content = expected_path.read_text()
+    content = target.read_text(encoding="utf-8")
     assert content == EXPECTED_ORDER_BOOK
     lines = content.split("\n")
     assert lines[0] == "---"
     assert lines[2] == "title: Order Book"
     assert content.endswith("## Purpose\n\nTODO.\n")
 
+    original_bytes = target.read_bytes()
+
     with pytest.raises(FileExistsError):
         spec_scaffolder.new_capability(repo_root, "order-book")
+    assert target.read_bytes() == original_bytes
 
     with pytest.raises(ValueError):
         spec_scaffolder.new_capability(repo_root, "Order_Book")
+    assert target.read_bytes() == original_bytes
 
-    assert expected_path.read_text() == EXPECTED_ORDER_BOOK
-    product_dir = repo_root / "specs" / "product"
-    assert sorted(p.name for p in product_dir.iterdir()) == ["order-book.md"]
+    product = repo_root / "specs" / "product"
+    entries = sorted(p.name for p in product.iterdir())
+    assert entries == ["order-book.md"]
 
 
-def test_main_capability_new_success_and_errors(tmp_path, capsys):
+def test_new_capability_cli(tmp_path, capsys, monkeypatch):
     repo_root = _make_repo(tmp_path)
-    capsys.readouterr()
+    monkeypatch.chdir(tmp_path)
 
-    code = spec_scaffolder.main(
+    rc = spec_scaffolder.main(
         [
             "capability",
             "new",
@@ -71,38 +75,37 @@ def test_main_capability_new_success_and_errors(tmp_path, capsys):
         ]
     )
     captured = capsys.readouterr()
-    assert code == 0
+    assert rc == 0
     assert captured.out.splitlines() == ["specs/product/ledger.md", "id: P-LEDGER"]
+    assert captured.out.replace("\r\n", "\n") == "specs/product/ledger.md\nid: P-LEDGER\n"
 
-    ledger = repo_root / "specs" / "product" / "ledger.md"
-    assert ledger.is_file()
-    ledger_lines = ledger.read_text().splitlines()
-    assert "title: The Ledger" in ledger_lines
-    assert ledger_lines[2] == "title: The Ledger"
-    owners_lines = [line for line in ledger_lines if line.startswith("owners:")]
-    assert owners_lines == ["owners: [unassigned]"]
-    original = ledger.read_text()
+    target = repo_root / "specs" / "product" / "ledger.md"
+    assert target.is_file()
+    file_lines = target.read_text(encoding="utf-8").splitlines()
+    assert file_lines[2] == "title: The Ledger"
+    assert file_lines[4] == "owners: [unassigned]"
+    original_bytes = target.read_bytes()
 
-    code = spec_scaffolder.main(
+    rc = spec_scaffolder.main(
         ["capability", "new", "ledger", "--repo-root=" + str(repo_root)]
     )
     captured = capsys.readouterr()
-    assert code == 1
-    err_lines = [line for line in captured.err.splitlines() if line.strip()]
+    assert rc == 1
+    err_lines = captured.err.splitlines()
     assert len(err_lines) == 1
     assert err_lines[0].startswith("error: ")
-    assert ledger.read_text() == original
+    assert target.read_bytes() == original_bytes
 
-    code = spec_scaffolder.main(["capability", "new"])
+    rc = spec_scaffolder.main(["capability", "new"])
     captured = capsys.readouterr()
-    assert code == 2
+    assert rc == 2
     err_lines = captured.err.splitlines()
     assert err_lines
     assert err_lines[0].startswith("usage error: ")
 
-    code = spec_scaffolder.main(["capability"])
+    rc = spec_scaffolder.main(["capability"])
     captured = capsys.readouterr()
-    assert code == 2
+    assert rc == 2
     err_lines = captured.err.splitlines()
     assert err_lines
     assert err_lines[0].startswith("usage error: ")

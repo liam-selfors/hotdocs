@@ -1,11 +1,18 @@
-# hotdocs-criterion: sha256:a1e4f7c9ee4f9544f3c44dbd720e07bc51728be3d8ec74c7a927f70c6b29eea9
+# hotdocs-criterion: sha256:cc89e7ad36d7586b0ace560de7abc07fa71fe977e04c0432987253c4d5fc5f44
 import os
 import sys
 
 import test_probe
 
 
-SOURCE = "import wraponly_pkg\nimport slugify\n\n\ndef test_w():\n    assert slugify.slugify('x') == 'x'\n"
+SOURCE = (
+    "import wraponly_pkg\n"
+    "import slugify\n"
+    "\n"
+    "\n"
+    "def test_w():\n"
+    "    assert slugify.slugify('x') == 'x'\n"
+)
 
 
 def field(value, name):
@@ -21,8 +28,8 @@ def make_wrapper(tmp_path):
     content = (
         "#!/bin/sh\n"
         + 'PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}'
-        + str(w / "site")
-        + "\" exec '"
+        + str(w)
+        + '/site" exec \''
         + sys.executable
         + "' \"$@\"\n"
     )
@@ -31,7 +38,7 @@ def make_wrapper(tmp_path):
     return str(wrapper)
 
 
-def test_wrapper_interpreter_resolves_import_and_runs_under_it(tmp_path):
+def test_ac_probe_009_wrapper_interpreter_resolves_import(tmp_path):
     interpreter = make_wrapper(tmp_path)
     report = test_probe.probe(SOURCE, {}, "slugify", interpreter=interpreter)
     findings = field(report, "findings")
@@ -41,14 +48,14 @@ def test_wrapper_interpreter_resolves_import_and_runs_under_it(tmp_path):
     assert field(report, "tests_reached") == 1
 
 
-def test_default_interpreter_cannot_import_wraponly_pkg(tmp_path):
+def test_ac_probe_009_default_interpreter_cannot_import(tmp_path):
     make_wrapper(tmp_path)
     report = test_probe.probe(SOURCE, {}, "slugify")
     assert field(report, "ok") is False
     findings = field(report, "findings")
     assert len(findings) == 1, findings
     finding = findings[0]
-    assert finding["kind"] == "unknown_import"
-    assert finding["severity"] == "error"
-    assert finding["line"] == 1
-    assert finding["message"] == "cannot import 'wraponly_pkg'"
+    assert field(finding, "kind") == "unknown_import"
+    assert field(finding, "severity") == "error"
+    assert field(finding, "line") == 1
+    assert field(finding, "message") == "cannot import 'wraponly_pkg'"

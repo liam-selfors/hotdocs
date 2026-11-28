@@ -1,7 +1,11 @@
-# hotdocs-criterion: sha256:805cb3edc8c209e7393e1b32e9a48df1342b624c6544f003f1944b08108be913
+# hotdocs-criterion: sha256:0cc70ca549bc9029cacc8b73899c4a0ff8d3f91e1d8a63392f91845254b4b87a
 import re
 
 import test_author
+
+
+DUAL_ACCESS_LINE = "        return value[name] if isinstance(value, dict) else getattr(value, name)"
+DUAL_ACCESS_RULE = "MUST use dual dict-or-attribute access, never one assumed shape:"
 
 
 def field(value, name):
@@ -28,7 +32,7 @@ def _write_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, **kwargs):\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
         "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
         "        fh.write('probe\\n')\n"
         "    return _Report()\n"
@@ -36,7 +40,20 @@ def _write_probe_stand_in(repo_root, log_path):
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def test_prompt_holds_dual_access_block(tmp_path, monkeypatch):
+def _bundle():
+    return {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - widgets MUST be made.",
+        "interface": "make_widget() -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
+
+def test_first_prompt_holds_dual_access_block(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
@@ -45,14 +62,14 @@ def test_prompt_holds_dual_access_block(tmp_path, monkeypatch):
     _write_probe_stand_in(repo_root, probe_log)
 
     prompts = []
-    valid_test = "def test_ok():\n    assert True\n"
+    reply_body = "def test_widget():\n    assert True\n"
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
         nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + valid_test
+            + reply_body
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -62,27 +79,13 @@ def test_prompt_holds_dual_access_block(tmp_path, monkeypatch):
             "model_call_error": None,
         }
 
-    bundle = {
-        "component_id": "comp-widget-maker",
-        "criterion_id": "AC-WIDGET-MAKER-001",
-        "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget When made Then it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 The maker MUST make widgets.",
-        "interface": "make_widget(name: str) -> dict",
-        "glossary": "",
-        "dependency_interfaces": {},
-    }
-
     result = test_author.author_test(
-        bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
+        _bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
     assert field(result, "model_call_error") is None
     assert len(prompts) >= 1
 
     first = prompts[0]
-    expected_line = (
-        "        return value[name] if isinstance(value, dict) else getattr(value, name)"
-    )
-    assert expected_line in first.splitlines()
-    assert "MUST use dual dict-or-attribute access, never one assumed shape:" in first
+    assert DUAL_ACCESS_LINE in first.splitlines()
+    assert DUAL_ACCESS_RULE in first

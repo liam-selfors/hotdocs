@@ -1,4 +1,7 @@
-# hotdocs-criterion: sha256:a0048dbb0ff9da9eb1ebc54d510c45b9e9ab8bc6fa306d7387c757c81f1a3ecd
+# hotdocs-criterion: sha256:f08ea0246bd3d03f2a98e3ab20415a1d36bfb1da68c998e8adfd642535493291
+"""AC-SECRET-009: a flagged result stays cached under its own key after a clean rescan."""
+
+import importlib.util
 import json
 import sys
 import urllib.request
@@ -7,52 +10,42 @@ from pathlib import Path
 import secret_scanner
 
 
-STORE_ENV = "FAKE_CACHE_MANAGER_STORE"
-LOG_ENV = "FAKE_CACHE_MANAGER_LOG"
+STORE_ENV = "AC009_CACHE_STORE_PATH"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _fake_cache_manager_source():
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def fake_cache_manager_source():
     lines = [
         "import dataclasses",
-        "import datetime",
         "import json",
         "import os",
-        "from pathlib import Path",
-        "",
-        "STORE_ENV = " + repr(STORE_ENV),
-        "LOG_ENV = " + repr(LOG_ENV),
-        "",
-        "REQUIRED = " + repr({
-            "generator": ["component_id", "model", "prompt_version", "files"],
-            "compiler": ["outputs", "gate_version", "summary"],
-            "generated_test": ["component_id", "criterion_id", "model", "file"],
-            "llm_judge": ["result", "rationale"],
-            "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-            "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
-        }),
-        "",
-        "",
-        "class SchemaValidationError(ValueError):",
-        "    pass",
+        "from datetime import datetime, timezone",
         "",
         "",
         "@dataclasses.dataclass",
         "class CacheKey:",
-        "    spec_bundle_hash: object = None",
-        "    gate_inputs_hash: object = None",
-        "    gate_version: object = None",
-        "    model_pin: object = None",
+        "    spec_bundle_hash: str",
+        "    gate_inputs_hash: str",
+        "    gate_version: str",
+        "    model_pin: str",
         "",
         "",
         "@dataclasses.dataclass",
         "class CachedResult:",
-        "    gate_type: object = None",
-        "    payload: object = None",
-        "    stored_at: object = None",
+        "    gate_type: str",
+        "    payload: dict",
+        "    stored_at: str",
         "",
         "",
         "class Miss:",
@@ -63,132 +56,127 @@ def _fake_cache_manager_source():
         "        return 0",
         "",
         "",
-        "def _attr(value, name):",
-        "    return value[name] if isinstance(value, dict) else getattr(value, name)",
+        "class SchemaValidationError(ValueError):",
+        "    pass",
         "",
         "",
-        "def _key_text(cache_key):",
-        "    data = dict()",
-        "    for name in ('spec_bundle_hash', 'gate_inputs_hash', 'gate_version', 'model_pin'):",
-        "        data[name] = _attr(cache_key, name)",
-        "    return json.dumps(data, sort_keys=True, default=str)",
+        "def _store_path():",
+        "    return os.environ[" + repr(STORE_ENV) + "]",
         "",
         "",
-        "def _load():",
-        "    path = Path(os.environ[STORE_ENV])",
-        "    if not path.is_file():",
-        "        return dict()",
-        "    return json.loads(path.read_text())",
+        "def _as_dict(value):",
+        "    if dataclasses.is_dataclass(value):",
+        "        return dataclasses.asdict(value)",
+        "    if isinstance(value, dict):",
+        "        return dict(value)",
+        "    return dict(vars(value))",
         "",
         "",
-        "def _save(store):",
-        "    Path(os.environ[STORE_ENV]).write_text(json.dumps(store, sort_keys=True))",
+        "def _append(record):",
+        "    with open(_store_path(), 'a', encoding='utf-8') as fh:",
+        "        fh.write(json.dumps(record, sort_keys=True, default=str) + chr(10))",
         "",
         "",
-        "def _log(entry):",
-        "    with open(os.environ[LOG_ENV], 'a') as handle:",
-        "        handle.write(json.dumps(entry, sort_keys=True, default=str) + chr(10))",
-        "",
-        "",
-        "def now_iso():",
-        "    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')",
+        "def _records():",
+        "    path = _store_path()",
+        "    if not os.path.exists(path):",
+        "        return []",
+        "    with open(path, encoding='utf-8') as fh:",
+        "        return [json.loads(line) for line in fh if line.strip()]",
         "",
         "",
         "def get(cache_key, *, repo_root=None):",
-        "    text = _key_text(cache_key)",
-        "    _log({'op': 'get', 'key': text})",
-        "    store = _load()",
-        "    if text not in store:",
+        "    wanted = json.dumps(_as_dict(cache_key), sort_keys=True, default=str)",
+        "    found = None",
+        "    for rec in _records():",
+        "        if rec.get('op') != 'put':",
+        "            continue",
+        "        if json.dumps(rec['key'], sort_keys=True, default=str) == wanted:",
+        "            found = rec",
+        "    _append({'op': 'get', 'key': _as_dict(cache_key)})",
+        "    if found is None:",
         "        return Miss()",
-        "    entry = store[text]",
-        "    return CachedResult(gate_type=entry['gate_type'], payload=entry['payload'], stored_at=entry['stored_at'])",
+        "    return CachedResult(**found['result'])",
         "",
         "",
         "def put(cache_key, result, *, repo_root=None):",
-        "    gate_version = str(_attr(cache_key, 'gate_version'))",
-        "    gate_type = _attr(result, 'gate_type')",
-        "    if gate_version.split('@')[0] != gate_type or gate_type not in REQUIRED:",
-        "        raise SchemaValidationError('gate type mismatch')",
-        "    payload = _attr(result, 'payload')",
-        "    if hasattr(payload, 'to_dict'):",
-        "        payload = payload.to_dict()",
-        "    payload = json.loads(json.dumps(payload, default=str))",
-        "    if not isinstance(payload, dict):",
-        "        raise SchemaValidationError('payload is not a mapping')",
-        "    for name in REQUIRED[gate_type]:",
-        "        if name not in payload:",
-        "            raise SchemaValidationError('missing key ' + name)",
-        "    text = _key_text(cache_key)",
-        "    store = _load()",
-        "    store[text] = {'gate_type': gate_type, 'payload': payload, 'stored_at': _attr(result, 'stored_at')}",
-        "    _save(store)",
-        "    _log({'op': 'put', 'key': text, 'flagged': payload.get('flagged')})",
+        "    _append({'op': 'put', 'key': _as_dict(cache_key), 'result': _as_dict(result)})",
+        "    return None",
+        "",
+        "",
+        "def now_iso():",
+        "    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')",
         "",
         "",
         "def stats(*, repo_root=None):",
-        "    return {'entry_count': len(_load())}",
+        "    return {'entry_count': len([r for r in _records() if r.get('op') == 'put'])}",
         "",
     ]
     return "\n".join(lines)
 
 
-def _read_log(path):
-    if not path.is_file():
+def read_records(store_path):
+    if not store_path.exists():
         return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in store_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def key_text(key):
+    return json.dumps(key, sort_keys=True, default=str)
 
 
 def test_ac_secret_009_flagged_result_survives_clean_rescan(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    # Store lives outside repo_root so the scan never sees it.
+    store_path = tmp_path / "cache_store.jsonl"
+
+    monkeypatch.setenv(STORE_ENV, str(store_path))
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
     monkeypatch.setattr(sys, "dont_write_bytecode", True)
 
-    repo_root = tmp_path / "repo"
-    state = tmp_path / "state"
-    repo_root.mkdir()
-    state.mkdir()
-
-    store_path = state / "store.json"
-    log_path = state / "calls.log"
-    monkeypatch.setenv(STORE_ENV, str(store_path))
-    monkeypatch.setenv(LOG_ENV, str(log_path))
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-
-    def fake_urlopen(*args, **kwargs):
+    def no_network(*args, **kwargs):
         raise AssertionError("webhook must not be called without a configured URL")
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(urllib.request, "urlopen", no_network)
 
     cm_dir = repo_root / "gen" / "cache-manager"
     cm_dir.mkdir(parents=True)
-    (cm_dir / "cache_manager.py").write_text(_fake_cache_manager_source())
+    fake_path = cm_dir / "cache_manager.py"
+    fake_path.write_text(fake_cache_manager_source(), encoding="utf-8")
 
     target = repo_root / "gen" / "foo" / "c.py"
     target.parent.mkdir(parents=True)
-    target.write_text("K = " + repr("AKIAABCDEFGHIJKLMNOP") + "\n")
+    target.write_text("K = " + repr("AKIAABCDEFGHIJKLMNOP") + "\n", encoding="utf-8")
 
     first = secret_scanner.scan(repo_root)
+    assert field(first, "flagged") is True
 
-    target.write_text("K = " + repr("") + "\n")
+    target.write_text("K = " + repr("") + "\n", encoding="utf-8")
 
     second = secret_scanner.scan(repo_root)
-
-    assert field(first, "flagged") is True
     assert field(second, "flagged") is False
-    assert field(first, "cache_hit") is False
-    assert field(second, "cache_hit") is False
 
-    puts = [entry for entry in _read_log(log_path) if entry["op"] == "put"]
+    puts = [r for r in read_records(store_path) if r.get("op") == "put"]
     assert len(puts) == 2, puts
-    first_key = puts[0]["key"]
-    second_key = puts[1]["key"]
-    assert first_key != second_key
-    assert puts[0]["flagged"] is True
-    assert puts[1]["flagged"] is False
+    first_key, second_key = puts[0]["key"], puts[1]["key"]
+    assert key_text(first_key) != key_text(second_key)
 
-    store = json.loads(store_path.read_text())
-    assert first_key in store
-    assert second_key in store
-    flagged_entry = store[first_key]
-    assert flagged_entry["gate_type"] == "secret_scanner"
-    assert field(flagged_entry["payload"], "flagged") is True
-    assert len(field(flagged_entry["payload"], "matches")) >= 1
-    assert field(store[second_key]["payload"], "flagged") is False
+    assert field(puts[0]["result"]["payload"], "flagged") is True
+    assert field(puts[1]["result"]["payload"], "flagged") is False
+
+    # The flagged result is still retrievable under its own key after the second scan.
+    cm = load_module(fake_path, "cache_manager")
+    stored = cm.get(cm.CacheKey(**first_key), repo_root=repo_root)
+    assert not isinstance(stored, cm.Miss)
+    assert field(stored, "gate_type") == "secret_scanner"
+    assert field(field(stored, "payload"), "flagged") is True
+    assert len(field(field(stored, "payload"), "matches")) >= 1
+
+    clean = cm.get(cm.CacheKey(**second_key), repo_root=repo_root)
+    assert not isinstance(clean, cm.Miss)
+    assert field(field(clean, "payload"), "flagged") is False

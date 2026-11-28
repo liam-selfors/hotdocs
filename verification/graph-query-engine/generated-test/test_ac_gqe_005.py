@@ -1,64 +1,69 @@
-# hotdocs-criterion: sha256:492a45cc57147e2e55921eaaa00f96bf06f0183408c9805a6fe18bf402c0c9c2
+# hotdocs-criterion: sha256:b8adea489fa2e0507ac4bebc62e197f8e4c210860da2b5ac64f0fbfe20fcef0e
+"""AC-GQE-005: component_provenance rows match each committed .provenance.json exactly."""
+
+import datetime
+import importlib.util
 import json
 from pathlib import Path
 
 import duckdb
+import pytest
 
 import graph_query_engine
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def write(path, text):
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    path.write_bytes(text.encode("utf-8"))
 
 
-def build_fixture(repo_root):
-    write(
+def _frontmatter(lines):
+    return "---\n" + "".join(line + "\n" for line in lines) + "---\n"
+
+
+def _build_fixture(repo_root: Path) -> None:
+    _write(
         repo_root / "specs" / "components" / "foo" / "component.md",
-        "---\n"
-        + "id: comp-foo\n"
-        + "title: Foo\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "depends_on: [comp-bar]\n"
-        + "realizes: [P-X]\n"
-        + "uses_var: [VAR-X]\n"
-        + "depends_on_guarantees: [G-BAR-001]\n"
-        + "---\n"
-        + "\n"
-        + "# Foo\n"
-        + "\n"
-        + "one two three\n",
+        _frontmatter(
+            [
+                "id: comp-foo",
+                "title: Foo",
+                "status: draft",
+                "owners: [team]",
+                "depends_on: [comp-bar]",
+                "realizes: [P-X]",
+                "uses_var: [VAR-X]",
+                "depends_on_guarantees: [G-BAR-001]",
+            ]
+        )
+        + "\n# Foo\n\none two three\n",
     )
-    write(
+    _write(
         repo_root / "specs" / "components" / "bar" / "component.md",
-        "---\n"
-        + "id: comp-bar\n"
-        + "title: Bar\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "realizes: [P-X]\n"
-        + "---\n"
-        + "\n"
-        + "# Bar\n",
+        _frontmatter(
+            [
+                "id: comp-bar",
+                "title: Bar",
+                "status: draft",
+                "owners: [team]",
+                "realizes: [P-X]",
+            ]
+        )
+        + "\n# Bar\n",
     )
-    write(
+    _write(
         repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n" + "\n" + "foo MUST work.\n",
+        "# R-FOO-001\n\nfoo MUST work.\n",
     )
-    write(
+    _write(
         repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002\n" + "\n" + "foo MUST stop.\n",
+        "# R-FOO-002\n\nfoo MUST stop.\n",
     )
-    write(
+    _write(
         repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n" + "\n" + "Covers: R-FOO-001\n" + "Kind: generated-test\n",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
     )
-    write(
+    _write(
         repo_root
         / "specs"
         / "components"
@@ -66,94 +71,115 @@ def build_fixture(repo_root):
         / "interface"
         / "guarantees"
         / "G-FOO-001.md",
-        "# G-FOO-001\n" + "\n" + "foo never fails.\n",
+        "# G-FOO-001\n\nfoo never fails.\n",
     )
-    write(
+    _write(
         repo_root / "specs" / "product" / "x.md",
-        "---\n"
-        + "id: P-X\n"
-        + "title: X\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
-        + "# X\n"
-        + "### CS-X-001\n"
-        + "Covers: P-X\n"
-        + "### CS-X-002\n"
-        + "Covers: P-X\n",
+        _frontmatter(["id: P-X", "title: X", "status: draft", "owners: [team]"])
+        + "# X\n\n### CS-X-001\nCovers: P-X\n\n### CS-X-002\nCovers: P-X\n",
     )
-    write(
+    _write(
         repo_root / "specs" / "vars" / "x.md",
-        "---\n"
-        + "id: VAR-X\n"
-        + "title: V\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
+        _frontmatter(["id: VAR-X", "title: V", "status: draft", "owners: [team]"])
         + "# V\n",
     )
-    write(
+    _write(
         repo_root / "specs" / "decisions" / "D1.md",
-        "---\n"
-        + "id: D1\n"
-        + "title: One\n"
-        + "status: ratified\n"
-        + "owners: [team]\n"
-        + "last_ratified_commit: 0000000\n"
-        + "---\n"
+        _frontmatter(
+            [
+                "id: D1",
+                "title: One",
+                "status: ratified",
+                "owners: [team]",
+                "last_ratified_commit: 0000000",
+            ]
+        )
         + "# D1\n",
     )
-    write(
+    _write(
         repo_root / "specs" / "decisions" / "D2.md",
-        "---\n"
-        + "id: D2\n"
-        + "title: Two\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "supersedes: D1\n"
-        + "builds_on: [D1]\n"
-        + "---\n"
+        _frontmatter(
+            [
+                "id: D2",
+                "title: Two",
+                "status: draft",
+                "owners: [team]",
+                "supersedes: D1",
+                "builds_on: [D1]",
+            ]
+        )
         + "# D2\n",
     )
     for sub in ("product", "vars", "decisions"):
-        write(repo_root / "specs" / sub / "README.md", "# Readme\n" + "\n" + "Notes.\n")
+        _write(repo_root / "specs" / sub / "README.md", "# Readme\n\nNotes.\n")
 
 
-# Deliberately avoids an ISO-8601 `generated_at` value so that read_json's
-# auto-detection never infers TIMESTAMP WITH TIME ZONE (which would require
-# pytz to materialize); every value here round-trips through DuckDB to the
-# identical Python value.
-PROVENANCE = {
-    "component_id": "comp-foo",
-    "spec_bundle_hash": "sha256-abcdef0123456789",
-    "model": "anthropic:claude-sonnet-5",
-    "generator_version": "gen-v-one",
-    "verification_report": {
-        "passed": True,
-        "criteria_total": 3,
-        "criteria_passed": 3,
-        "summary": "all good",
-    },
-    "license_scan": {
-        "passed": True,
-        "findings_count": 0,
-    },
-    "secret_scan": {
-        "passed": False,
-        "findings_count": 2,
-    },
-    "provenance_hit": True,
-}
+def _have_pytz() -> bool:
+    return importlib.util.find_spec("pytz") is not None
 
 
-def test_component_provenance_row_matches_provenance_json_exactly(tmp_path):
+def _manifest(slug: str, hit: bool, hash_suffix: str, include_generated_at: bool):
+    manifest = {
+        "spec_bundle_hash": "sha256-" + hash_suffix * 16,
+        "generator_model": "anthropic:claude-sonnet-5",
+        "generator_tool_version": "tool-v" + slug,
+        "attempt_count": 2 if hit else 1,
+        "verification_report": {
+            "passed": True,
+            "summary": "all gates passed for " + slug,
+            "criteria": [
+                {"criterion_id": "AC-" + slug.upper() + "-001", "result": "pass"},
+            ],
+        },
+        "license_scan": {"passed": True, "findings_count": 0},
+        "secret_scan": {"passed": hit, "findings_count": 0 if hit else 1},
+        "provenance_hit": hit,
+    }
+    if include_generated_at:
+        manifest["generated_at"] = "2026-01-02T03:04:05Z"
+    return manifest
+
+
+def _normalize(value):
+    if isinstance(value, datetime.datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=datetime.timezone.utc)
+        return value.astimezone(datetime.timezone.utc)
+    if isinstance(value, dict):
+        return {k: _normalize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize(v) for v in value]
+    return value
+
+
+def _expected(key, value):
+    if key == "generated_at" and isinstance(value, str):
+        return datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.timezone.utc)
+    return value
+
+
+def _equal(key, actual, expected):
+    actual = _normalize(actual)
+    if key == "generated_at" and isinstance(actual, str):
+        return actual == expected
+    return actual == _normalize(_expected(key, expected))
+
+
+def test_component_provenance_rows_match_their_own_json_files(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root)
+    _build_fixture(repo_root)
 
-    prov_path = repo_root / "verification" / "foo" / ".provenance.json"
-    write(prov_path, json.dumps(PROVENANCE, indent=2) + "\n")
-    expected = json.loads(prov_path.read_text(encoding="utf-8"))
+    include_generated_at = _have_pytz()
+    manifests = {
+        "foo": _manifest("foo", True, "a1", include_generated_at),
+        "bar": _manifest("bar", False, "b2", include_generated_at),
+    }
+    for slug, manifest in manifests.items():
+        _write(
+            repo_root / "verification" / slug / ".provenance.json",
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        )
 
     con = duckdb.connect()
     try:
@@ -161,30 +187,40 @@ def test_component_provenance_row_matches_provenance_json_exactly(tmp_path):
         con.execute("LOAD yaml")
         graph_query_engine.load_views(con, repo_root)
 
-        cur = con.execute(
-            "SELECT * FROM component_provenance WHERE component_id = ?",
-            ["comp-foo"],
-        )
-        columns = [d[0] for d in cur.description]
-        rows = cur.fetchall()
+        for slug, manifest in manifests.items():
+            # Re-read the file's own JSON content as the source of truth.
+            on_disk = json.loads(
+                (repo_root / "verification" / slug / ".provenance.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            assert on_disk == manifest
+
+            cur = con.execute(
+                "SELECT * FROM component_provenance WHERE component_id = ?",
+                ["comp-" + slug],
+            )
+            columns = [d[0] for d in cur.description]
+            rows = cur.fetchall()
+            assert len(rows) == 1, (slug, rows)
+            row = dict(zip(columns, rows[0]))
+
+            assert row["component_id"] == "comp-" + slug
+
+            missing = set(on_disk) - set(columns)
+            assert not missing, ("columns missing from view", slug, missing)
+            extra = set(columns) - set(on_disk) - {"component_id", "filename"}
+            assert not extra, ("unexpected columns in view", slug, extra)
+
+            for key, expected in on_disk.items():
+                assert _equal(key, row[key], expected), (
+                    slug,
+                    key,
+                    row[key],
+                    expected,
+                )
+
+        total = con.execute("SELECT count(*) FROM component_provenance").fetchone()[0]
+        assert total == len(manifests)
     finally:
         con.close()
-
-    assert len(rows) == 1, "expected exactly one component_provenance row for comp-foo, got " + repr(rows)
-    row = dict(zip(columns, rows[0]))
-
-    assert field(row, "component_id") == "comp-foo"
-
-    for key, value in expected.items():
-        assert key in row, "column " + repr(key) + " missing from component_provenance; columns: " + repr(columns)
-        assert field(row, key) == value, (
-            "field " + repr(key) + " mismatch: view=" + repr(field(row, key)) + " file=" + repr(value)
-        )
-
-    # Struct-valued fields come back with exactly the file's own keys, no more, no fewer.
-    for key in ("verification_report", "license_scan", "secret_scan"):
-        got = field(row, key)
-        assert isinstance(got, dict), "expected STRUCT for " + repr(key) + ", got " + repr(got)
-        assert set(got.keys()) == set(expected[key].keys())
-
-    assert field(row, "provenance_hit") is True

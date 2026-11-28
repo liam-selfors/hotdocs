@@ -6,6 +6,6 @@
 
   Every test run's `PYTHONPATH` MUST be exactly the directory of the
   code being verified (`gen/<component>/`, or the mutation copy) then
-  the `asset_runner` plugin's directory, never a broader ancestor such as `gen/`, where
+  the run environment's `plugin_dir` (`R-VERIFY-020`), never a broader ancestor such as `gen/`, where
   `import <module_name>` (`R-COMPILE-013`) resolves to an empty
   namespace package.

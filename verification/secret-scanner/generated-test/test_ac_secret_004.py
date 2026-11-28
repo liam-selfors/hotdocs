@@ -1,19 +1,75 @@
-# hotdocs-criterion: sha256:40bc64e7a6511dc58e56b070adc14ca1eb45fa376a5d65018aa3bc678ac8cc19
+# hotdocs-criterion: sha256:9efdfb8090058d7526b2a274c24d6f0ea50be7dbc0dc2a479e6d733e6c2e596b
+"""AC-SECRET-004 / R-SECRET-004: compliance webhook notification for high-risk matches."""
+
 import urllib.request
+from pathlib import Path
 
 import pytest
 
 import secret_scanner
 
 
-WEBHOOK_URL = "http://127.0.0.1:9/compliance-hook"
-
-# Built by concatenation so this test file itself holds no detectable key shape.
-AWS_KEY_SHAPE = "AKIA" + "IOSFODNN" + "7EXAMPLE"
+WEBHOOK_URL = "https://compliance.example.invalid/hook"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _aws_key():
+    # Built from fragments so this test file itself never holds the full shape.
+    return "AK" + "IA" + "IOSFODNN7" + "EXAMPLE"
+
+
+FAKE_CACHE_MANAGER_SOURCE = (
+    "import dataclasses\n"
+    "import datetime\n"
+    "\n"
+    "\n"
+    "class SchemaValidationError(ValueError):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "@dataclasses.dataclass\n"
+    "class CacheKey:\n"
+    "    spec_bundle_hash: str\n"
+    "    gate_inputs_hash: str\n"
+    "    gate_version: str\n"
+    "    model_pin: str\n"
+    "\n"
+    "\n"
+    "@dataclasses.dataclass\n"
+    "class CachedResult:\n"
+    "    gate_type: str\n"
+    "    payload: dict\n"
+    "    stored_at: str\n"
+    "\n"
+    "\n"
+    "class Miss:\n"
+    "    def __eq__(self, other):\n"
+    "        return isinstance(other, Miss)\n"
+    "\n"
+    "    def __hash__(self):\n"
+    "        return 0\n"
+    "\n"
+    "\n"
+    "def get(cache_key, *, repo_root=None):\n"
+    "    return Miss()\n"
+    "\n"
+    "\n"
+    "def put(cache_key, result, *, repo_root=None):\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    "def now_iso():\n"
+    "    return datetime.datetime.now(datetime.timezone.utc).strftime("
+    + repr("%Y-%m-%dT%H:%M:%SZ")
+    + ")\n"
+    "\n"
+    "\n"
+    "def stats(*, repo_root=None):\n"
+    "    return " + repr({"entry_count": 0}) + "\n"
+)
 
 
 class _FakeResponse:
@@ -23,7 +79,7 @@ class _FakeResponse:
         return 200
 
     def read(self, *args, **kwargs):
-        return b""
+        return b"ok"
 
     def close(self):
         pass
@@ -35,22 +91,12 @@ class _FakeResponse:
         return False
 
 
-def _request_url(req):
-    if isinstance(req, str):
-        return req
-    full = getattr(req, "full_url", None)
-    if full is not None:
-        return full
-    get = getattr(req, "get_full_url", None)
-    return get() if get is not None else req
-
-
 @pytest.fixture
 def recorder(monkeypatch):
     calls = []
 
-    def fake_urlopen(req, *args, **kwargs):
-        calls.append(_request_url(req))
+    def fake_urlopen(*args, **kwargs):
+        calls.append((args, kwargs))
         return _FakeResponse()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
@@ -59,57 +105,67 @@ def recorder(monkeypatch):
     return calls
 
 
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
+def _make_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    cm_dir = repo_root / "gen" / "cache-manager"
+    cm_dir.mkdir(parents=True)
+    (cm_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE)
+    (repo_root / "gen" / "foo").mkdir(parents=True)
+    return repo_root
+
+
+def _plant_secret(repo_root):
+    target = repo_root / "gen" / "foo" / "config.py"
+    target.write_text("aws_access_key_id = " + repr(_aws_key()) + "\n")
+    return target
+
+
+def _url_of(call):
+    args, kwargs = call
+    target = args[0] if args else kwargs.get("url")
+    if isinstance(target, str):
+        return target
+    return getattr(target, "full_url", None)
+
+
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(tmp_path)
-    return tmp_path
 
 
-def _write_secret_file(repo_root):
-    target = repo_root / "config.py"
-    target.write_text("AWS_ACCESS_KEY_ID = " + repr(AWS_KEY_SHAPE) + "\n")
-    return target
-
-
-def _write_clean_file(repo_root):
-    target = repo_root / "config.py"
-    target.write_text("GREETING = " + repr("hello") + "\n")
-    return target
-
-
-def test_high_risk_match_sends_notification_even_if_later_scan_clean(
-    repo_root, recorder, monkeypatch
+def test_high_risk_match_sends_notification_independent_of_later_clean_scan(
+    tmp_path, monkeypatch, recorder
 ):
     monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", WEBHOOK_URL)
-    target = _write_secret_file(repo_root)
+    repo_root = _make_repo(tmp_path)
+    secret_file = _plant_secret(repo_root)
 
-    first = secret_scanner.scan(repo_root)
+    result = secret_scanner.scan(repo_root)
 
-    matches = field(first, "matches")
-    assert any(field(m, "risk_tier") == "high" for m in matches), matches
-    assert field(first, "flagged") is True
-    assert field(first, "notified") is True
+    matches = field(result, "matches")
+    assert any(m["risk_tier"] == "high" for m in matches), matches
+    assert field(result, "flagged") is True
+    assert field(result, "notified") is True
     assert len(recorder) == 1, recorder
-    assert recorder[0] == WEBHOOK_URL
+    assert _url_of(recorder[0]) == WEBHOOK_URL
+    assert field(result, "notification_delivery_error") is None
 
-    # A later retry that scans clean never un-notifies the earlier one.
-    _write_clean_file(repo_root)
-    assert target.read_text().find("AKIA") == -1
+    # A later retry that scans clean never un-notifies the earlier notification.
+    secret_file.write_text("value = 1\n")
+    retry = secret_scanner.scan(repo_root)
 
-    second = secret_scanner.scan(repo_root)
-    assert field(second, "flagged") is False
-    assert field(second, "notified") is False
+    assert field(retry, "flagged") is False
+    assert field(retry, "notified") is False
     assert len(recorder) == 1, recorder
-    assert recorder[0] == WEBHOOK_URL
-    assert field(first, "notified") is True
+    assert field(result, "notified") is True
 
 
-def test_no_match_with_webhook_configured_does_not_notify(
-    repo_root, recorder, monkeypatch
-):
+def test_no_match_never_notifies(tmp_path, monkeypatch, recorder):
     monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", WEBHOOK_URL)
-    _write_clean_file(repo_root)
+    repo_root = _make_repo(tmp_path)
+    (repo_root / "gen" / "foo" / "plain.py").write_text("greeting = 'hello world'\n")
+    (repo_root / "README.md").write_text("Nothing to see here.\n")
 
     result = secret_scanner.scan(repo_root)
 
@@ -119,16 +175,15 @@ def test_no_match_with_webhook_configured_does_not_notify(
     assert recorder == []
 
 
-def test_high_risk_match_with_webhook_unset_flags_without_notifying(
-    repo_root, recorder, monkeypatch
-):
+def test_unset_webhook_flags_but_never_notifies(tmp_path, monkeypatch, recorder):
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    _write_secret_file(repo_root)
+    repo_root = _make_repo(tmp_path)
+    _plant_secret(repo_root)
 
     result = secret_scanner.scan(repo_root)
 
     matches = field(result, "matches")
-    assert any(field(m, "risk_tier") == "high" for m in matches), matches
+    assert any(m["risk_tier"] == "high" for m in matches), matches
     assert field(result, "flagged") is True
     assert field(result, "notified") is False
     assert recorder == []

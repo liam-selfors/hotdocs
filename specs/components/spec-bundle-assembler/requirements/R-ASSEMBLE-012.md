@@ -9,12 +9,7 @@
   any spec file's YAML frontmatter, and MUST NOT
   introduce a new third-party dependency (a standalone YAML library,
   a Markdown parser, or similar) for anything a declared dependency
-  — `spec-linter`, reached via DuckDB's own `yaml` community extension
-  through its own dependency on `graph-query-engine` — already
-  provides. Files `load_corpus` does not parse — `Implements:` and
+  already provides. Files `load_corpus` does not parse — `Implements:` and
   `Uses:` documents and `interface/assets/` files — are content, read
   from disk as text, and asset-kind adapters are loaded by path
-  (`R-ASSEMBLE-016`).
-
-  Found once a candidate re-parsed frontmatter with `PyYAML`, a package
-  this corpus never installs (`D101`).
+  (`R-ASSEMBLE-016`). (`D101`)

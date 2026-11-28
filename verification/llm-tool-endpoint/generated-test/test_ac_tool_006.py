@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:7b463f1b198ea0064f9e58d64f0fc80650104541ed42f9d14c6ffed7e98004d2
+# hotdocs-criterion: sha256:9f75d0e86bb7b6cc26b3687037b64af41d80aea14e48684354dfd17c190e7314
 import email.message
 import io
 import json
@@ -34,10 +34,10 @@ TOOL = {
         (500, "network"),
     ],
 )
-def test_http_error_ends_loop_with_categorized_error(
+def test_ac_tool_006_http_error_categorized_without_leaking(
     status, category, tmp_path, monkeypatch
 ):
-    workdir = tmp_path / "work"
+    workdir = tmp_path / "empty"
     workdir.mkdir()
     monkeypatch.chdir(workdir)
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
@@ -55,11 +55,10 @@ def test_http_error_ends_loop_with_categorized_error(
                 body = json.loads(data.decode("utf-8"))
             except Exception:
                 body = data
-        recorded.append({"url": url, "headers": headers, "body": body})
+        recorded.append({"url": url, "headers": headers, "body": body, "timeout": timeout})
         hdrs = email.message.Message()
-        hdrs["Content-Type"] = "text/plain"
         raise urllib.error.HTTPError(
-            url, status, "vendor says no", hdrs, io.BytesIO(b"vendor says no")
+            url, status, "Error", hdrs, io.BytesIO(b"vendor says no")
         )
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
@@ -74,13 +73,12 @@ def test_http_error_ends_loop_with_categorized_error(
         "sys", "go", "anthropic:claude-opus-5-5", [TOOL], execute
     )
 
-    assert len(recorded) == 1
-    assert executed == []
+    assert len(recorded) == 1, "expected exactly one request, got " + repr(len(recorded))
     assert field(result, "stop") == "error"
 
-    err = field(result, "model_call_error")
-    assert err is not None
-    assert field(err, "category") == category
+    error = field(result, "model_call_error")
+    assert error is not None
+    assert field(error, "category") == category
 
     rendered = json.dumps(result.to_dict())
     assert "vendor says no" not in rendered

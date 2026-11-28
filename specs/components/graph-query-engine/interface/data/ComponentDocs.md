@@ -8,6 +8,4 @@ status      TEXT
 body        TEXT  -- component.md's full raw text, frontmatter included
 ```
 
-One row per component (`R-GQE-003`). The data layer, not a rendered
-view — answers "what does this component's frontmatter and prose say,"
-not "what should a human see" (`docs-site-renderer`'s job).
+One row per component (`R-GQE-003`).

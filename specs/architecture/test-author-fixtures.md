@@ -59,7 +59,7 @@ header line; `author_test` applies no other check to it before `probe`.
 
 A test replaces `test-probe` with a stand-in at
 `<repo_root>/gen/test-probe/test_probe.py` defining
-`probe(test_source, criterion_bundle, module_name, *, timeout=60.0)`
+`probe(test_source, criterion_bundle, module_name, **kwargs)`
 that returns an object with `ok` (bool), `findings` (a list of dicts
 with `kind`, `severity`, `line`, `message`) and `to_dict()`. A stand-in
 records its calls by appending to a file the test controls.

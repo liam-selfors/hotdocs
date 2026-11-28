@@ -1,22 +1,18 @@
-"""Graph Query Engine: the seven shared DuckDB views over a spec corpus.
+"""Graph Query Engine: the eight shared DuckDB views over the spec corpus."""
 
-`load_views(con, repo_root)` creates `nodes`, `edges`, `component_docs`,
-`component_context`, `component_provenance`, `component_size` and
-`decision_lineage` on `con`. The SQL below keeps a `{repo_root}`
-placeholder that is substituted only at call time.
-
-The `yaml` community extension must already be installed and loaded on
-`con` (`INSTALL yaml FROM community` then `LOAD yaml`).
-"""
-
-import glob
-import os
 import re
 from pathlib import Path
 
-PLACEHOLDER = "{repo_root}"
+import duckdb
 
-NODES_SQL = r"""
+_EMPTY_FRONTMATTER = (
+    "(SELECT NULL::VARCHAR AS id, NULL::VARCHAR AS title, "
+    "NULL::VARCHAR AS status, NULL::VARCHAR AS filename WHERE false)"
+)
+
+_YAML_CALL = re.compile(r"read_yaml_frontmatter\('([^']*)', filename:=true\)")
+
+_NODES = r"""
 CREATE OR REPLACE VIEW nodes AS
 SELECT id, title, status, 'component' AS kind, NULL AS owner_component_id
 FROM read_yaml_frontmatter('{repo_root}/specs/components/*/component.md', filename:=true)
@@ -49,7 +45,7 @@ SELECT UNNEST(regexp_extract_all(content, '### (CS-[A-Za-z0-9-]+)', 1)), NULL, N
 FROM read_text('{repo_root}/specs/product/*.md');
 """
 
-EDGES_SQL = r"""
+_EDGES = r"""
 CREATE OR REPLACE VIEW edges AS
 SELECT
   regexp_extract(content, 'id:\s*(\S+)', 1) AS source_id,
@@ -119,14 +115,14 @@ FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
   FROM read_text('{repo_root}/specs/decisions/*.md')) AS d;
 """
 
-COMPONENT_DOCS_SQL = r"""
+_COMPONENT_DOCS = r"""
 CREATE OR REPLACE VIEW component_docs AS
 SELECT fm.*, t.content AS body
 FROM read_yaml_frontmatter('{repo_root}/specs/components/*/component.md', filename:=true) fm
 JOIN read_text('{repo_root}/specs/components/*/component.md') t USING (filename);
 """
 
-COMPONENT_CONTEXT_SQL = r"""
+_COMPONENT_CONTEXT = r"""
 CREATE OR REPLACE VIEW component_context AS
 SELECT
   id AS component_id,
@@ -134,7 +130,9 @@ SELECT
 FROM component_docs;
 """
 
-COMPONENT_PROVENANCE_SQL = r"""
+_PROVENANCE_GLOB = "{repo_root}/verification/*/.provenance.json"
+
+_COMPONENT_PROVENANCE = r"""
 CREATE OR REPLACE VIEW component_provenance AS
 SELECT
   'comp-' || regexp_extract(filename, 'verification/([^/]+)/\.provenance\.json$', 1)
@@ -143,21 +141,21 @@ SELECT
 FROM read_json('{repo_root}/verification/*/.provenance.json', filename:=true);
 """
 
-COMPONENT_PROVENANCE_EMPTY_SQL = r"""
+_COMPONENT_PROVENANCE_EMPTY = r"""
 CREATE OR REPLACE VIEW component_provenance AS
 SELECT
   NULL::VARCHAR AS component_id,
   NULL::VARCHAR AS spec_bundle_hash,
-  NULL::TIMESTAMP WITH TIME ZONE AS generated_at,
-  NULL::STRUCT(status VARCHAR) AS verification_report,
-  NULL::STRUCT(status VARCHAR) AS license_scan,
-  NULL::STRUCT(status VARCHAR) AS secret_scan,
+  NULL::TIMESTAMPTZ AS generated_at,
+  NULL::STRUCT(result VARCHAR) AS verification_report,
+  NULL::STRUCT(result VARCHAR) AS license_scan,
+  NULL::STRUCT(result VARCHAR) AS secret_scan,
   NULL::BOOLEAN AS provenance_hit,
   NULL::VARCHAR AS filename
 WHERE false;
 """
 
-COMPONENT_SIZE_SQL = r"""
+_COMPONENT_SIZE = r"""
 CREATE OR REPLACE VIEW component_size AS
 SELECT
   regexp_extract(filename, 'specs/components/([^/]+)/', 1) AS component_id,
@@ -173,7 +171,7 @@ WHERE NOT ends_with(filename, '/testing.md')
 GROUP BY 1;
 """
 
-DECISION_LINEAGE_SQL = r"""
+_DECISION_LINEAGE = r"""
 CREATE OR REPLACE VIEW decision_lineage AS
 SELECT
   regexp_extract(fm, '(?m)^id:\s*(\S+)', 1) AS id,
@@ -183,48 +181,122 @@ FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
 WHERE fm != '';
 """
 
-PROVENANCE_GLOB = "verification/*/.provenance.json"
-
-_YAML_CALL = re.compile(
-    r"read_yaml_frontmatter\('\{repo_root\}/([^']*)', filename:=true\)"
+_BUNDLE_SIZE = r"""
+CREATE OR REPLACE VIEW bundle_size AS
+WITH docs AS (
+  SELECT
+    regexp_extract(filename, 'specs/components/([^/]+)/', 1) AS c,
+    regexp_extract(filename, 'specs/components/[^/]+/(.*)$', 1) AS rel,
+    content,
+    regexp_replace(content, '^---\n.*?\n---\n', '', 's') AS body
+  FROM read_text('{repo_root}/specs/components/*/**/*.md')
+),
+counted AS (
+  SELECT c, rel, content,
+    CASE WHEN rel = 'component.md'
+      THEN array_to_string(list_filter(regexp_split_to_array(body, '\n## '),
+             lambda s: NOT regexp_matches(s, '^(Rationale|Open questions|Change log)\s*\n')), ' ')
+      ELSE body END AS text,
+    CASE WHEN rel = 'component.md'
+      THEN coalesce(list_filter(regexp_split_to_array(body, '\n## '),
+             lambda s: regexp_matches(s, '^Purpose\n'))[1], '')
+      ELSE '' END AS purpose
+  FROM docs
+),
+w AS (
+  SELECT c, rel, content,
+    len(list_filter(regexp_split_to_array(trim(text), '\s+'), lambda x: x != '')) AS words,
+    len(list_filter(regexp_split_to_array(trim(purpose), '\s+'), lambda x: x != '')) AS purpose_words
+  FROM counted
+),
+own AS (
+  SELECT c,
+    sum(words) FILTER (WHERE rel = 'component.md' OR rel = 'constraints.md'
+      OR starts_with(rel, 'requirements/') OR starts_with(rel, 'interface/')) AS spec_words,
+    sum(words) FILTER (WHERE starts_with(rel, 'interface/')) AS interface_words,
+    coalesce(sum(words) FILTER (WHERE rel = 'testing.md'), 0) AS testing_words,
+    sum(purpose_words) AS purpose_words
+  FROM w GROUP BY c
+),
+arch AS (
+  SELECT
+    CASE WHEN ends_with(filename, '/SPEC_GUIDELINES.md') THEN 'SPEC_GUIDELINES.md'
+      ELSE regexp_extract(filename, '(specs/architecture/[^/]+\.md)$', 1) END AS path,
+    len(list_filter(regexp_split_to_array(trim(regexp_replace(content, '^---\n.*?\n---\n', '', 's')), '\s+'),
+      lambda x: x != '')) AS words
+  FROM read_text(['{repo_root}/specs/architecture/*.md', '{repo_root}/SPEC_GUIDELINES.md'])
+),
+impl AS (
+  SELECT d.c, coalesce(sum(a.words), 0) AS words
+  FROM (SELECT c, unnest(regexp_extract_all(
+          regexp_extract(content, '(?m)^Implements:(.*)$', 1), '`([^`]+)`', 1)) AS path
+        FROM w WHERE rel = 'interface/library.md') d
+  JOIN arch a ON a.path = d.path
+  GROUP BY d.c
+),
+deps AS (
+  SELECT c, regexp_replace(trim(dep), '^comp-', '') AS dep
+  FROM (SELECT c, unnest(string_split(
+          regexp_extract(content, '(?m)^depends_on:\s*\[(.*?)\]', 1), ',')) AS dep
+        FROM w WHERE rel = 'component.md')
+  WHERE trim(dep) != ''
+),
+dep_words AS (
+  SELECT deps.c, sum(o.interface_words) AS interface_words, sum(o.purpose_words) AS purpose_words
+  FROM deps JOIN own o ON o.c = deps.dep
+  GROUP BY deps.c
+),
+criteria AS (
+  SELECT a.c, a.words + coalesce(r.words, 0) AS words
+  FROM (SELECT c, words, regexp_extract(content, '(?m)^Covers:\s*(\S+)', 1) AS covers
+        FROM w WHERE starts_with(rel, 'acceptance/')) a
+  LEFT JOIN w r ON r.c = a.c AND r.rel = 'requirements/' || a.covers || '.md'
 )
+SELECT
+  o.c AS component_id,
+  o.spec_words + coalesce(i.words, 0) + coalesce(dw.interface_words, 0)
+    + coalesce(dw.purpose_words, 0) AS generator_words,
+  CASE WHEN max(cr.words) IS NULL THEN 0
+    ELSE max(cr.words) + coalesce(o.interface_words, 0) + coalesce(i.words, 0)
+      + coalesce(dw.interface_words, 0) + o.testing_words END AS criterion_words_max
+FROM own o
+LEFT JOIN impl i ON i.c = o.c
+LEFT JOIN dep_words dw ON dw.c = o.c
+LEFT JOIN criteria cr ON cr.c = o.c
+WHERE o.spec_words IS NOT NULL
+GROUP BY o.c, o.spec_words, o.interface_words, o.testing_words, i.words, dw.interface_words, dw.purpose_words;
+"""
 
-_EMPTY_FRONTMATTER = (
-    "(SELECT NULL::VARCHAR AS id, NULL::VARCHAR AS title, "
-    "NULL::VARCHAR AS status, NULL::VARCHAR AS filename WHERE false)"
-)
+
+def _has_match(con, pattern):
+    return con.execute("SELECT count(*) FROM glob(?)", [pattern]).fetchone()[0] > 0
 
 
-def _has_match(root, pattern):
-    return len(glob.glob(os.path.join(root, pattern))) > 0
+def _prepare(con, sql, root):
+    sql = sql.replace("{repo_root}", root)
 
-
-def _guard_yaml(sql, root):
-    def repl(match):
-        if _has_match(root, match.group(1)):
-            return match.group(0)
+    def _sub(m):
+        if _has_match(con, m.group(1)):
+            return m.group(0)
         return _EMPTY_FRONTMATTER
 
-    return _YAML_CALL.sub(repl, sql)
+    return _YAML_CALL.sub(_sub, sql)
 
 
-def _render(sql, root):
-    return _guard_yaml(sql, root).replace(PLACEHOLDER, root)
-
-
-def load_views(con, repo_root):
-    root = str(Path(repo_root))
-    if _has_match(root, PROVENANCE_GLOB):
-        provenance_sql = COMPONENT_PROVENANCE_SQL
+def load_views(con: duckdb.DuckDBPyConnection, repo_root: Path) -> None:
+    root = str(repo_root)
+    if _has_match(con, _PROVENANCE_GLOB.replace("{repo_root}", root)):
+        provenance = _COMPONENT_PROVENANCE
     else:
-        provenance_sql = COMPONENT_PROVENANCE_EMPTY_SQL
+        provenance = _COMPONENT_PROVENANCE_EMPTY
     for sql in (
-        NODES_SQL,
-        EDGES_SQL,
-        COMPONENT_DOCS_SQL,
-        COMPONENT_CONTEXT_SQL,
-        provenance_sql,
-        COMPONENT_SIZE_SQL,
-        DECISION_LINEAGE_SQL,
+        _NODES,
+        _EDGES,
+        _COMPONENT_DOCS,
+        _COMPONENT_CONTEXT,
+        provenance,
+        _COMPONENT_SIZE,
+        _DECISION_LINEAGE,
+        _BUNDLE_SIZE,
     ):
-        con.execute(_render(sql, root))
+        con.execute(_prepare(con, sql, root))

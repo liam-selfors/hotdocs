@@ -37,8 +37,7 @@ the package `<module>/` inside it.
 The Python that `surface` and `asset_runner` start is
 `os.environ["HOTDOCS_PYTHON"]` when that is set and non-empty, else
 `sys.executable`, read at each call; the module keeps no state between
-calls. `verifier-orchestrator` sets it to `provision`'s `interpreter`
-when a run uses them; nothing in the pipeline calls them today. Each
+calls. Each
 such subprocess gets a copy of
 `os.environ` with `PYTHONPATH` set to `str(asset_file)` alone, runs with
 the code directory as its working directory, captures stdout and stderr

@@ -1,37 +1,26 @@
-# hotdocs-criterion: sha256:6e9162afd94ee40faa6f31c50d567f5f482d7f2dab350cf1ee0096a2d405020b
-import importlib.util
-import sys
-from dataclasses import dataclass, field as dc_field
+# hotdocs-criterion: sha256:87aeb15e62726e914e0ee6171e2485e51d1feef4b038b742566c42d0d26796bd
+"""AC-DOCS-008: document text is HTML-escaped in a detail view, and a
+component node with null verification/provenance and empty owners renders
+without error."""
+
+import dataclasses
+import json
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-import json
-
 import docs_site_renderer
 
 
-RAW = "<script>alert(1)</script>"
-DOC_TEXT = RAW + " & more"
+XSS_TEXT = "<script>alert(1)</script> & more"
+RAW_SCRIPT = "<script>alert(1)</script>"
 
 
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-@dataclass
-class _StandInCorpusGraph:
-    nodes: dict = dc_field(default_factory=dict)
-    edges: list = dc_field(default_factory=list)
-    aggregates: dict = dc_field(default_factory=dict)
+@dataclasses.dataclass
+class FakeCorpusGraph:
+    nodes: dict
+    edges: list
+    aggregates: dict
 
     def to_dict(self):
         return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
@@ -42,83 +31,66 @@ class _StandInCorpusGraph:
         ).encode("utf-8")
 
 
-def _make_graph(nodes, edges, aggregates):
-    try:
-        gen = next(
-            p for p in Path(docs_site_renderer.__file__).resolve().parents if p.name == "gen"
-        )
-        base = gen / "corpus-graph-builder"
-        flat = base / "corpus_graph_builder.py"
-        path = flat if flat.is_file() else base / "corpus_graph_builder" / "__init__.py"
-        module = load_module(path, "corpus_graph_builder")
-        return module.CorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
-    except Exception:
-        return _StandInCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
-
-
 class _NodeLinkParser(HTMLParser):
+    """Collects, for each `#nodes .node` list item, its data-id and the
+    href of the first `a` inside it."""
+
     def __init__(self):
         super().__init__()
-        self.stack = []
         self.links = {}
+        self._stack = []  # list of (tag, node_id or None)
+        self._current = None
 
     def handle_starttag(self, tag, attrs):
-        a = dict(attrs)
-        if tag == "li":
-            classes = (a.get("class") or "").split()
-            if "node" in classes and a.get("data-id") is not None:
-                self.stack.append(a.get("data-id"))
-            else:
-                self.stack.append(None)
-        elif tag == "a" and a.get("href"):
-            current = next((s for s in reversed(self.stack) if s is not None), None)
-            if current is not None and current not in self.links:
-                self.links[current] = a.get("href")
+        attrs = dict(attrs)
+        classes = (attrs.get("class") or "").split()
+        if tag == "li" and "node" in classes and attrs.get("data-id") is not None:
+            self._current = attrs.get("data-id")
+            self._stack.append((tag, self._current))
+            return
+        if tag == "a" and self._current is not None and self._current not in self.links:
+            href = attrs.get("href")
+            if href is not None:
+                self.links[self._current] = href
 
     def handle_endtag(self, tag):
-        if tag == "li" and self.stack:
-            self.stack.pop()
+        if tag == "li" and self._stack:
+            self._stack.pop()
+            self._current = self._stack[-1][1] if self._stack else None
 
 
-def _detail_page_text(out_dir, node_id):
+def _detail_page(out_dir, node_id):
     index = out_dir / "index.html"
-    candidates = []
-    if index.is_file():
-        parser = _NodeLinkParser()
-        parser.feed(index.read_text(encoding="utf-8"))
-        href = parser.links.get(node_id)
-        if href:
-            parts = urlsplit(href)
-            rel = unquote(parts.path)
-            if rel:
-                target = (out_dir / rel.lstrip("/")) if not rel.startswith("/") else (out_dir / rel.lstrip("/"))
-                if rel.endswith("/") or target.is_dir():
-                    target = target / "index.html"
-                candidates.append(target)
-    for p in sorted(out_dir.rglob("*.html")):
-        if p.name == "index.html" and p.parent == out_dir:
-            continue
-        if node_id in str(p.relative_to(out_dir)):
-            candidates.append(p)
-    for c in candidates:
-        if c.is_file():
-            return c.read_text(encoding="utf-8")
-    raise AssertionError("no detail page found for " + node_id)
+    assert index.is_file(), "index.html was not written"
+    parser = _NodeLinkParser()
+    parser.feed(index.read_text(encoding="utf-8"))
+    assert node_id in parser.links, "no detail link found for " + repr(node_id)
+    href = parser.links[node_id]
+    path_part = unquote(urlsplit(href).path)
+    if path_part == "":
+        target = index
+    else:
+        target = (index.parent / path_part).resolve()
+    assert target.is_file(), "detail page " + repr(str(target)) + " does not exist"
+    return target.read_text(encoding="utf-8")
 
 
-def test_ac_docs_008_escapes_content_and_tolerates_null_fields(tmp_path):
+def _graph():
     nodes = {
-        "comp-alpha": {
+        "comp-xss": {
             "type": "component",
             "verification": None,
             "provenance": None,
             "size_status": "ok",
-            "sealed": True,
+            "sealed": False,
             "pinned_overrides": [],
             "owners": ["pipeline-team"],
-            "documents": {"component.md": DOC_TEXT},
+            "documents": {
+                "component.md": XSS_TEXT,
+                "requirements/R-XSS-001.md": "# R-XSS-001\n\n" + XSS_TEXT + "\n",
+            },
         },
-        "comp-beta": {
+        "comp-bare": {
             "type": "component",
             "verification": None,
             "provenance": None,
@@ -126,31 +98,27 @@ def test_ac_docs_008_escapes_content_and_tolerates_null_fields(tmp_path):
             "sealed": False,
             "pinned_overrides": [],
             "owners": [],
-            "documents": {"component.md": "Beta component text."},
+            "documents": {"component.md": "# Bare\n\nNothing else.\n"},
         },
     }
     edges = []
     aggregates = {
         "orphan_capability_rate": 0.0,
-        "orphan_component_rate": 0.0,
+        "orphan_component_rate": 1.0,
         "orphan_var_rate": 0.0,
     }
-    graph = _make_graph(nodes, edges, aggregates)
+    return FakeCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
+
+
+def test_ac_docs_008_escapes_document_text_and_renders_null_fields(tmp_path):
     out_dir = tmp_path / "site"
+    docs_site_renderer.render_docs_site(_graph(), out_dir)
 
-    result = docs_site_renderer.render_docs_site(graph, out_dir)
-    assert result is None
+    first = _detail_page(out_dir, "comp-xss")
+    assert "&lt;script&gt;" in first
+    assert "&amp; more" in first
+    assert RAW_SCRIPT not in first
 
-    alpha = _detail_page_text(out_dir, "comp-alpha")
-    assert "&lt;script&gt;" in alpha
-    assert "&amp; more" in alpha
-    assert RAW not in alpha
-
-    for p in out_dir.rglob("*"):
-        if p.is_file():
-            text = p.read_bytes().decode("utf-8", errors="replace")
-            assert RAW not in text, str(p)
-
-    beta = _detail_page_text(out_dir, "comp-beta")
-    assert isinstance(beta, str)
-    assert len(beta) > 0
+    second = _detail_page(out_dir, "comp-bare")
+    assert second.strip() != ""
+    assert RAW_SCRIPT not in second

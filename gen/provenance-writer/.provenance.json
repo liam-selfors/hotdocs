@@ -1,5 +1,9 @@
 {
-  "spec_bundle_hash": "sha256:ef59b2072e15fd891af6e9c6e2ebb04ff71cd4f033e384c644ce46e8d20117fc",
+  "spec_bundle_hash": "sha256:b2ae444922efbd64860a7b8bf9fe58ea74505fcb9c0e89052ef2db82188a19c1",
+  "spec_bundle_parts": {
+    "spec": "sha256:6cfd2ba0fc19e172ba1aae3c3fa6fa462b49dbc11137ff6496d58ab27e32f942",
+    "dependency_code": "sha256:2f11d6d49b3269043658d261588d090ab8a06ce150aed807d588e03aa856e408"
+  },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -7,8 +11,8 @@
     "mode": "single",
     "generator_version": "generator@3.2.0+v12",
     "transcript_sha256": null,
-    "turns": 1,
-    "tool_calls": 0,
+    "turns": null,
+    "tool_calls": null,
     "isolation": null
   },
   "attempts": 1,
@@ -17,13 +21,13 @@
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
-    "verifier": "verifier-orchestrator@3.5.0",
+    "verifier": "verifier-orchestrator@4.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-25T07:43:05Z",
+  "generated_at": "2026-11-27T23:06:30Z",
   "verification_run_id": "provenance-writer-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-writer",
@@ -32,139 +36,289 @@
         "id": "AC-PROV-001",
         "covers": "R-PROV-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-002",
         "covers": "R-PROV-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-003",
         "covers": "R-PROV-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-004",
         "covers": "R-PROV-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-005",
         "covers": "R-PROV-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-007",
         "covers": "R-PROV-007",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-008",
         "covers": "R-PROV-008",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-009",
         "covers": "R-PROV-009",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-010",
         "covers": "R-PROV-010",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-011",
         "covers": "R-PROV-011",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-012",
         "covers": "R-PROV-012",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-013",
         "covers": "R-PROV-013",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-014",
         "covers": "R-PROV-014",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-015",
         "covers": "R-PROV-015",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-016",
         "covers": "R-PROV-016",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-017",
         "covers": "R-PROV-017",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-018",
         "covers": "R-PROV-018",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-019",
         "covers": "R-PROV-019",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-020",
         "covers": "R-PROV-019",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-021",
         "covers": "R-PROV-010",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-022",
         "covers": "R-PROV-020",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-023",
         "covers": "R-PROV-021",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROV-024",
         "covers": "R-PROV-022",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-PROV-025",
+        "covers": "R-PROV-023",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -188,17 +342,18 @@
       "R-PROV-019": "pass",
       "R-PROV-020": "pass",
       "R-PROV-021": "pass",
-      "R-PROV-022": "pass"
+      "R-PROV-022": "pass",
+      "R-PROV-023": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9795918367346939,
+    "mutation_score": 0.9772727272727273,
     "mutation_error": null,
     "assets": [
       {
         "kind": "python",
         "path": ".",
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-        "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
+        "adapter_sha256": "sha256:8362b78ab748ac18bc698e12021205d61ddea2a28505ad934a6ba26d8c3a3b73",
         "versions": {
           "python": "3.14.10",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
@@ -206,6 +361,7 @@
         "lockfile_sha256": null
       }
     ],
+    "drivers": [],
     "overall": "pass"
   },
   "license_scan": {
@@ -219,14 +375,62 @@
     "matches": [],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": false
+    "cache_hit": true
   },
   "secret_scan": {
     "scope": "full",
     "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": false,
-    "matches": [],
+    "flagged": true,
+    "matches": [
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "line": 7
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_005.py",
+        "line": 14
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "line": 13
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "line": 14
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_008.py",
+        "line": 14
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "line": 14
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "line": 16
+      }
+    ],
     "allowed": [
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "gen/review-packet-builder/review_packet_builder.py",
+        "line": 14
+      },
       {
         "rule_id": "AWS Access Key",
         "file": "specs/components/secret-scanner/acceptance/AC-SECRET-001.md",
@@ -313,9 +517,29 @@
         "line": 7
       },
       {
+        "rule_id": "AWS Access Key",
+        "file": "verification/corpus-graph.json",
+        "line": 10359
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/corpus-graph.json",
+        "line": 10368
+      },
+      {
+        "rule_id": "Base64 High Entropy String",
+        "file": "verification/corpus-graph.json",
+        "line": 10370
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "line": 14
+      },
+      {
         "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-writer/generated-test/test_ac_prov_018.py",
-        "line": 22
+        "line": 27
       },
       {
         "rule_id": "Hex High Entropy String",
@@ -325,37 +549,42 @@
       {
         "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
-        "line": 98
+        "line": 11
       },
       {
         "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
-        "line": 116
+        "line": 132
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_004b.py",
+        "line": 96
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_009.py",
+        "line": 154
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_014.py",
+        "line": 16
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_014.py",
+        "line": 17
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "line": 15
       }
     ],
     "unused_allowlist_entries": [
       {
-        "file": "gen/review-packet-builder/review_packet_builder.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/corpus-graph.json",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/corpus-graph.json",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/corpus-graph.json",
-        "type": "Base64 High Entropy String"
-      },
-      {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
         "type": "Hex High Entropy String"
       },
       {
@@ -371,19 +600,11 @@
         "type": "AWS Access Key"
       },
       {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_004b.py",
-        "type": "Hex High Entropy String"
-      },
-      {
         "file": "verification/secret-scanner/generated-test/test_ac_secret_008.py",
         "type": "AWS Access Key"
       },
       {
         "file": "verification/secret-scanner/generated-test/test_ac_secret_008.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_009.py",
         "type": "AWS Access Key"
       },
       {
@@ -395,14 +616,6 @@
         "type": "Hex High Entropy String"
       },
       {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_014.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_014.py",
-        "type": "Hex High Entropy String"
-      },
-      {
         "file": "verification/secret-scanner/generated-test/test_ac_secret_015.py",
         "type": "AWS Access Key"
       },
@@ -417,10 +630,6 @@
       {
         "file": "verification/secret-scanner/generated-test/test_ac_secret_016.py",
         "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
-        "type": "Hex High Entropy String"
       }
     ],
     "notified": false,
@@ -432,12 +641,13 @@
       "kind": "python",
       "path": ".",
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-      "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
+      "adapter_sha256": "sha256:8362b78ab748ac18bc698e12021205d61ddea2a28505ad934a6ba26d8c3a3b73",
       "versions": {
         "python": "3.14.10",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
       },
       "lockfile_sha256": null
     }
-  ]
+  ],
+  "drivers": []
 }

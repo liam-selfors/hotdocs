@@ -8,9 +8,5 @@
   walk toward the latest superseder, this walks *backward*, toward
   everything that depends on the one being altered); (2) every live
   spec file citing `decision_id` — unlike `R-DRIFT-001`/`002`, every
-  citation, not only ones whose commit predates something, since the
-  question here is "what would need review," not "what is already
-  stale." `decision_id` need not resolve to a real file yet — the
-  query is defined over whatever `edges`/citations already point at
-  it today, which is well-defined even for an id that does not exist
-  as a ratified record.
+  citation, not only ones whose commit predates something.
+  `decision_id` need not resolve to a real file yet.

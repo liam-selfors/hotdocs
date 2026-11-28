@@ -21,4 +21,4 @@ dataclasses, and read-only `hard_failures`, `warnings` and `skipped`
 counts. Their `to_json()` gives the JSON above, with `rationale` only
 when set. `severity` is `fail`, `warn` or `skipped` (R-LINT-015 with no
 model). `rationale` is set only when an `llm-judge` evaluation ran
-(`SPEC_GUIDELINES.md` §5).
+(`specs/architecture/acceptance-criteria.md`).

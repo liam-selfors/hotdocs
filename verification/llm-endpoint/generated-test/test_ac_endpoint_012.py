@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:8aae07b0e59757f3401b07913118bbbb40cda719e74c359b146a05d105302854
+# hotdocs-criterion: sha256:bb1a420e232a6035670b31ac9cc2d6fbb496049e3e258d0f247d287c8b0f6787
 import json
 import os
 import stat
@@ -13,70 +13,63 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-STREAM_LINES = [
-    {"type": "system"},
-    {"type": "assistant", "message": {"content": [{"type": "text", "text": "ab"}]}},
-    {
-        "type": "assistant",
-        "message": {"content": [{"type": "thinking"}, {"type": "text", "text": "cd"}]},
-    },
+STREAM_LINES_OK = [
+    '{"type": "system"}',
+    '{"type": "assistant", "message": {"content": [{"type": "text", "text": "ab"}]}}',
+    '{"type": "assistant", "message": {"content": [{"type": "thinking"}, {"type": "text", "text": "cd"}]}}',
+    '{"type": "result", "is_error": false}',
 ]
 
-
-def _stream_output(is_error):
-    lines = list(STREAM_LINES) + [{"type": "result", "is_error": is_error}]
-    return "".join(json.dumps(line) + "\n" for line in lines)
+STREAM_LINES_ERR = STREAM_LINES_OK[:-1] + ['{"type": "result", "is_error": true}']
 
 
 def _install_recorder(tmp_path, monkeypatch, stdout_text, exit_code=0):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
     log_path = tmp_path / "claude_calls.log"
     script = (
         "#!" + sys.executable + "\n"
-        "import json\n"
-        "import os\n"
-        "import sys\n"
-        "with open(" + repr(str(log_path)) + ", 'a') as f:\n"
-        "    f.write(json.dumps({'argv': sys.argv[1:], "
-        "'key': os.environ.get('ANTHROPIC_API_KEY')}) + '\\n')\n"
-        "try:\n"
-        "    sys.stdin.read()\n"
-        "except Exception:\n"
-        "    pass\n"
-        "sys.stdout.write(" + repr(stdout_text) + ")\n"
-        "sys.stdout.flush()\n"
-        "sys.exit(" + repr(exit_code) + ")\n"
+        + "import json\n"
+        + "import os\n"
+        + "import sys\n"
+        + "try:\n"
+        + "    sys.stdin.read()\n"
+        + "except Exception:\n"
+        + "    pass\n"
+        + "with open(" + repr(str(log_path)) + ", 'a') as f:\n"
+        + "    f.write(json.dumps({'args': sys.argv[1:], 'key': os.environ.get('ANTHROPIC_API_KEY')}) + '\\n')\n"
+        + "sys.stdout.write(" + repr(stdout_text) + ")\n"
+        + "sys.stdout.flush()\n"
+        + "sys.exit(" + repr(exit_code) + ")\n"
     )
-    claude_path = bin_dir / "claude"
-    claude_path.write_text(script)
-    claude_path.chmod(
-        claude_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-    )
-    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    claude = bindir / "claude"
+    claude.write_text(script)
+    claude.chmod(claude.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
     return log_path
 
 
 def _read_calls(log_path):
     assert log_path.is_file(), "the claude recorder was never run"
-    return [
-        json.loads(line)
-        for line in log_path.read_text().splitlines()
-        if line.strip()
-    ]
+    return [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
 
 
-@pytest.fixture
-def workdir(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
-    return tmp_path
+def _holds_stream_json_verbose(args):
+    for i in range(len(args) - 1):
+        if args[i] == "--output-format" and args[i + 1] == "stream-json":
+            return "--verbose" in args
+    return False
 
 
-def test_stream_text_blocks_are_joined_and_flags_recorded(workdir, monkeypatch):
-    log_path = _install_recorder(workdir, monkeypatch, _stream_output(False))
+def test_stream_reply_joins_text_blocks(tmp_path, monkeypatch):
+    log_path = _install_recorder(tmp_path, monkeypatch, "\n".join(STREAM_LINES_OK) + "\n", 0)
 
     response = llm_endpoint.complete("hi", "claude-sonnet-5")
 
@@ -85,16 +78,12 @@ def test_stream_text_blocks_are_joined_and_flags_recorded(workdir, monkeypatch):
 
     calls = _read_calls(log_path)
     assert len(calls) == 1
-    argv = calls[0]["argv"]
-    assert "--output-format" in argv
-    idx = argv.index("--output-format")
-    assert idx + 1 < len(argv)
-    assert argv[idx + 1] == "stream-json"
-    assert "--verbose" in argv
+    args = calls[0]["args"]
+    assert _holds_stream_json_verbose(args), args
 
 
-def test_result_is_error_true_is_a_failure(workdir, monkeypatch):
-    log_path = _install_recorder(workdir, monkeypatch, _stream_output(True))
+def test_stream_result_is_error_is_failure(tmp_path, monkeypatch):
+    log_path = _install_recorder(tmp_path, monkeypatch, "\n".join(STREAM_LINES_ERR) + "\n", 0)
 
     response = llm_endpoint.complete("hi", "claude-sonnet-5")
 
@@ -102,14 +91,18 @@ def test_result_is_error_true_is_a_failure(workdir, monkeypatch):
     error = field(response, "model_call_error")
     assert error is not None
     assert field(error, "category") in ("network", "auth", "rate_limit", "timeout")
-    assert len(_read_calls(log_path)) == 1
+
+    calls = _read_calls(log_path)
+    assert len(calls) == 1
 
 
-def test_non_stream_stdout_with_zero_exit_is_whole_reply(workdir, monkeypatch):
-    log_path = _install_recorder(workdir, monkeypatch, "hello\n")
+def test_non_stream_stdout_is_whole_reply(tmp_path, monkeypatch):
+    log_path = _install_recorder(tmp_path, monkeypatch, "hello\n", 0)
 
     response = llm_endpoint.complete("hi", "claude-sonnet-5")
 
     assert field(response, "text") == "hello\n"
     assert field(response, "model_call_error") is None
-    assert len(_read_calls(log_path)) == 1
+
+    calls = _read_calls(log_path)
+    assert len(calls) == 1

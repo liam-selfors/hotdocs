@@ -55,8 +55,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All are `kind: generated-test`, with an injected mock model.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -67,5 +65,4 @@ None.
 
 ## Change log
 
-- `D300`: initial spec.
-- `D361`: the asset interface check; the prompt's test-mechanics sentence.
+`D300`, `D361`.

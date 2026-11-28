@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:9e452edebeef6bcd451115315f190f82f7d47a5dfd46f1e7e675f47dd09f4195
+# hotdocs-criterion: sha256:23e9d95853e0cd249f6da46a37c92b578d98e5984ad3dfb82a27abf992898d82
 import re
 
 import test_author
@@ -8,7 +8,15 @@ DEP_ID = "comp-zebra-quux"
 DEP_INTERFACE = "zq_lookup(x: int, y: str) -> ZqResult"
 RULE_LINE = "a fake MUST return every field, never a bare list, string or number in its place"
 
-TEST_BODY = "def test_placeholder():\n    assert True\n"
+NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
+
+REPLY_FILE = (
+    "import test_author\n"
+    "\n"
+    "\n"
+    "def test_placeholder():\n"
+    "    assert test_author is not None\n"
+)
 
 
 def field(value, name):
@@ -21,14 +29,14 @@ def make_bundle(dependency_interfaces):
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
         "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make widgets.",
+        "requirement_text": "R-WIDGET-MAKER-001 - A widget MUST be made.",
         "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": dependency_interfaces,
     }
 
 
-def write_probe_stand_in(repo_root, log_path):
+def plant_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
@@ -48,11 +56,7 @@ def write_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "GATE_VERSION = 'test-probe@1.4.0'\n"
-        "\n"
-        "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None):\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
         "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
         "        fh.write('probe\\n')\n"
         "    return _Report()\n"
@@ -63,10 +67,10 @@ def write_probe_stand_in(repo_root, log_path):
 def make_mock_backend(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        nonce = re.findall(NONCE_RE, prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + TEST_BODY
+            + REPLY_FILE
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -79,12 +83,11 @@ def make_mock_backend(prompts):
     return backend
 
 
-def run(tmp_path, monkeypatch, name, dependency_interfaces):
-    repo_root = tmp_path / name
-    repo_root.mkdir()
-    log_path = tmp_path / (name + "-probe.log")
-    write_probe_stand_in(repo_root, log_path)
+def run_scenario(repo_root, monkeypatch, dependency_interfaces):
+    repo_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.chdir(repo_root)
+    log_path = repo_root / "probe_calls.log"
+    plant_probe_stand_in(repo_root, log_path)
     prompts = []
     backend = make_mock_backend(prompts)
     result = test_author.author_test(
@@ -96,8 +99,12 @@ def run(tmp_path, monkeypatch, name, dependency_interfaces):
     return result, prompts
 
 
-def test_dependency_interfaces_and_fake_rule_in_prompt(tmp_path, monkeypatch):
-    result, prompts = run(tmp_path, monkeypatch, "with-deps", {DEP_ID: DEP_INTERFACE})
+def test_dependency_interfaces_appear_in_prompt_with_fake_rule(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo_with_dep"
+    result, prompts = run_scenario(
+        repo_root, monkeypatch, {DEP_ID: DEP_INTERFACE}
+    )
+
     assert prompts, "the mock model was never called"
     first = prompts[0]
     assert DEP_ID in first
@@ -106,7 +113,9 @@ def test_dependency_interfaces_and_fake_rule_in_prompt(tmp_path, monkeypatch):
 
 
 def test_empty_dependency_interfaces_adds_no_entry(tmp_path, monkeypatch):
-    result, prompts = run(tmp_path, monkeypatch, "no-deps", {})
+    repo_root = tmp_path / "repo_without_dep"
+    result, prompts = run_scenario(repo_root, monkeypatch, {})
+
     assert field(result, "model_call_error") is None
     assert prompts, "the mock model was never called"
     assert DEP_ID not in prompts[0]

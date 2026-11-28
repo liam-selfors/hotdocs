@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:2585d1ae85ce41d9d144e2b491f4a3cb783edf8d29ca8fe6092d8d88492aa3b8
+# hotdocs-criterion: sha256:f803a149e28dc3a27bf5796a83f1c4dd4d0853a7f189475c709485a547d5c0b7
 import importlib.util
 import sys
 from pathlib import Path
@@ -54,8 +54,8 @@ def _build_corpus(repo_root):
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`, so 4 for an x of 2, "
-        "and MUST honor `--opt=`.\n",
+        "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`, so it returns `4`"
+        " for an input of two, and it accepts `--opt=<v>`.\n",
     )
     _write(
         comp / "acceptance" / "AC-FOO-001.md",
@@ -87,20 +87,22 @@ def _build_corpus(repo_root):
     )
 
 
-def _load_spec_linter():
+def _assert_lint_clean(repo_root):
     gen = next(p for p in Path(spec_reviewer.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
     path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
-    return load_module(path, "spec_linter")
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
 
 
 def test_ac_review_003_invisible_reference_only_for_when_then_tokens(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
-
-    spec_linter = _load_spec_linter()
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+    _assert_lint_clean(repo_root)
 
     report = spec_reviewer.check(["AC-FOO-001"], repo_root)
 

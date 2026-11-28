@@ -50,8 +50,7 @@ None.
 
 ## Acceptance criteria
 
-See `acceptance/`. All `generated-test`, over small corpora written to a
-temporary `repo_root`.
+See `acceptance/`.
 
 ## Non-functional constraints
 
@@ -63,5 +62,4 @@ None.
 
 ## Change log
 
-- `D242`: split out of `spec-linter`, with `R-LINT-026`–`030` renumbered
-  `R-CITE-001`–`005`.
+`D242`.

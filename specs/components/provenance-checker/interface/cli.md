@@ -4,8 +4,7 @@
 hotdocs provenance check <component-id> --spec-bundle-hash=<h> --gate-versions=<json> [--repo-root=<dir>] [--format=json|text]
 ```
 
-Reports hit/miss for the given component and hash, for a developer
-debugging why a component did or didn't skip regeneration.
+Reports hit/miss for the given component and hash.
 
 `main(argv)` receives `argv` beginning `["check", ...]` (the
 `provenance` verb is already consumed). Every flag takes its value

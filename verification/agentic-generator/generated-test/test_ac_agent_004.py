@@ -1,7 +1,8 @@
-# hotdocs-criterion: sha256:584222b98870802da0afde1c96191428bbe047366276156f48c0443511eccfac
+# hotdocs-criterion: sha256:b560d3e2a367a1127c8f66207448839b585d7f785b240cba13e138ce7583b7b5
 import json
 import os
 import shlex
+import stat
 import sys
 from pathlib import Path
 
@@ -10,7 +11,121 @@ import pytest
 import agentic_generator
 
 
-MODEL = "anthropic:claude-sonnet-5"
+GENERATOR_STANDIN = '''
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def _log(name, payload):
+    with open(HERE / (name + ".jsonl"), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload, default=str) + "\\n")
+
+
+@dataclass
+class GenerationResult:
+    component_id: str = ""
+    spec_bundle_hash: str = ""
+    model: str = ""
+    prompt_version: str = ""
+    cache_hit: bool = False
+    files: dict = field(default_factory=dict)
+    model_call_error: object = None
+    refused: object = None
+    retry_feedback: object = None
+    mode: str = "single"
+    transcript_sha256: object = None
+    turns: int = 1
+    tool_calls: int = 0
+    isolation: object = None
+
+
+def check_write_allowed(bundle, repo_root=None):
+    return None
+
+
+def render_prompt_sections(bundle, retry_feedback=None):
+    return [("Spec", "SPEC TEXT"), ("Component interface", "IFACE TEXT")]
+
+
+def write_files(component_id, files, repo_root=None):
+    _log("write_files", {"component_id": component_id, "files": files, "repo_root": str(repo_root)})
+
+
+def check_assets(component_id, files, repo_root=None):
+    _log("check_assets", {"component_id": component_id, "files": files, "repo_root": str(repo_root)})
+    for content in files.values():
+        if "bad" in content:
+            return ("malformed_layout", ["static/app.txt: bad"])
+    return (None, [])
+
+
+def check_asset_environment(component_id, repo_root=None):
+    if repo_root is not None and (Path(repo_root) / "NO_ENV").exists():
+        return ("environment", ["fake needs fakeprog >= 2"])
+    return (None, [])
+'''
+
+
+LOOP_STANDIN = '''
+import json
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+class ToolLoopResult:
+    def __init__(self, text, transcript, turns, tool_calls, stop, model_call_error):
+        self.text = text
+        self.transcript = transcript
+        self.turns = turns
+        self.tool_calls = tool_calls
+        self.stop = stop
+        self.model_call_error = model_call_error
+
+    def to_dict(self):
+        return {
+            "text": self.text,
+            "transcript": self.transcript,
+            "turns": self.turns,
+            "tool_calls": self.tool_calls,
+            "stop": self.stop,
+            "model_call_error": self.model_call_error,
+        }
+
+
+def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,
+                  max_tool_calls=120, wall_seconds=1800.0, repo_root=None,
+                  claude_command="claude"):
+    with open(HERE / "loop_args.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "system": system, "prompt": prompt, "model": model, "tools": tools,
+            "max_turns": max_turns, "max_tool_calls": max_tool_calls,
+            "wall_seconds": wall_seconds, "repo_root": str(repo_root),
+            "claude_command": claude_command,
+        }, default=str) + "\\n")
+    script = json.loads((HERE / "script.json").read_text(encoding="utf-8"))
+    calls = 0
+    for step in script:
+        text, is_error = execute(step["name"], step["arguments"])
+        calls += 1
+        with open(HERE / "calls.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "name": step["name"], "arguments": step["arguments"],
+                "text": text, "is_error": bool(is_error),
+            }) + "\\n")
+    return ToolLoopResult(
+        text="done",
+        transcript=[{"role": "user", "content": prompt}],
+        turns=1,
+        tool_calls=calls,
+        stop="end_turn",
+        model_call_error=None,
+    )
+'''
+
 
 WIDGET_SRC = "import os\nKEY = os.environ.get('ANTHROPIC_API_KEY')\n"
 
@@ -23,146 +138,130 @@ SCRATCH_TEST_SRC = (
     "def test_w():\n"
     "    assert widget.KEY is None\n"
     "    with pytest.raises(OSError):\n"
-    "        socket.create_connection(('1.1.1.1', 80), timeout=3)\n"
+    "        socket.create_connection((\"1.1.1.1\", 80), timeout=3)\n"
 )
 
 FULL_SCRIPT = [
-    ["write_file", {"path": "work/widget.py", "content": WIDGET_SRC}],
-    ["write_file", {"path": "scratch/test_w.py", "content": SCRATCH_TEST_SRC}],
-    ["check_import", {}],
-    ["run_scratch_tests", {}],
-    ["finish", {"summary": "done"}],
+    {"name": "write_file", "arguments": {"path": "work/widget.py", "content": WIDGET_SRC}},
+    {"name": "write_file", "arguments": {"path": "scratch/test_w.py", "content": SCRATCH_TEST_SRC}},
+    {"name": "check_import", "arguments": {}},
+    {"name": "run_scratch_tests", "arguments": {}},
+    {"name": "finish", "arguments": {"summary": "done"}},
 ]
 
 FINISH_ONLY_SCRIPT = [
-    ["finish", {"summary": "done"}],
+    {"name": "finish", "arguments": {"summary": "done"}},
 ]
+
+HAS_SANDBOX_EXEC = sys.platform == "darwin" and os.path.exists("/usr/bin/sandbox-exec")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def has_sandbox_exec():
-    return sys.platform == "darwin" and os.path.exists("/usr/bin/sandbox-exec")
+def make_repo(root, script):
+    root.mkdir(parents=True, exist_ok=True)
+    gdir = root / "gen" / "generator"
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "generator.py").write_text(GENERATOR_STANDIN, encoding="utf-8")
+    ldir = root / "gen" / "llm-tool-endpoint"
+    ldir.mkdir(parents=True, exist_ok=True)
+    (ldir / "llm_tool_endpoint.py").write_text(LOOP_STANDIN, encoding="utf-8")
+    (ldir / "script.json").write_text(json.dumps(script), encoding="utf-8")
+    return root
 
 
-GENERATOR_SRC_HEAD = (
-    "import dataclasses\n"
-    "import json\n"
-    "from dataclasses import dataclass, field\n"
-    "from pathlib import Path\n"
-    "\n"
-    "\n"
-    "@dataclass\n"
-    "class GenerationResult:\n"
-    "    component_id: str = ''\n"
-    "    spec_bundle_hash: str = ''\n"
-    "    model: str = ''\n"
-    "    prompt_version: str = ''\n"
-    "    cache_hit: bool = False\n"
-    "    files: dict = field(default_factory=dict)\n"
-    "    model_call_error: object = None\n"
-    "    refused: object = None\n"
-    "    retry_feedback: object = None\n"
-    "    mode: str = 'single'\n"
-    "    transcript_sha256: object = None\n"
-    "    turns: int = 1\n"
-    "    tool_calls: int = 0\n"
-    "    isolation: object = None\n"
-    "\n"
-)
+def read_calls(root):
+    path = root / "gen" / "llm-tool-endpoint" / "calls.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def generator_src(log_dir):
-    return (
-        GENERATOR_SRC_HEAD
-        + "LOG_DIR = " + repr(str(log_dir)) + "\n"
-        + "\n"
-        + "def _record(name, payload):\n"
-        + "    with open(Path(LOG_DIR) / name, 'a', encoding='utf-8') as fh:\n"
-        + "        fh.write(json.dumps(payload, default=str) + '\\n')\n"
-        + "\n"
-        + "def check_write_allowed(bundle, repo_root=None):\n"
-        + "    return None\n"
-        + "\n"
-        + "def render_prompt_sections(bundle, retry_feedback=None):\n"
-        + "    return [('Spec', 'SPEC TEXT'), ('Component interface', 'IFACE TEXT')]\n"
-        + "\n"
-        + "def write_files(component_id, files, repo_root=None):\n"
-        + "    _record('write_files.log', [component_id, files, str(repo_root)])\n"
-        + "\n"
-        + "def check_assets(component_id, files, repo_root=None):\n"
-        + "    _record('check_assets.log', [component_id, files, str(repo_root)])\n"
-        + "    for content in files.values():\n"
-        + "        if 'bad' in content:\n"
-        + "            return ('malformed_layout', ['static/app.txt: bad'])\n"
-        + "    return (None, [])\n"
-        + "\n"
-        + "def check_asset_environment(component_id, repo_root=None):\n"
-        + "    if repo_root is not None and (Path(repo_root) / 'NO_ENV').exists():\n"
-        + "        return ('environment', ['fake needs fakeprog >= 2'])\n"
-        + "    return (None, [])\n"
+def call_for(calls, name):
+    found = [c for c in calls if c["name"] == name]
+    assert found, "no recorded call for " + name + ": " + repr(calls)
+    return found[0]
+
+
+def bundle():
+    return {
+        "component_id": "comp-widget",
+        "spec_bundle_hash": "sha256:" + "0" * 64,
+        "hint_code": None,
+    }
+
+
+def run(root, **kwargs):
+    return agentic_generator.generate_agentic(bundle(), "claude-sonnet-5-5", None, repo_root=root, **kwargs)
+
+
+@pytest.fixture
+def api_key(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+
+
+@pytest.mark.skipif(not HAS_SANDBOX_EXEC, reason="needs macOS with /usr/bin/sandbox-exec")
+def test_sandbox_exec_runs_code_isolated(tmp_path, api_key):
+    root = make_repo(tmp_path / "repo", FULL_SCRIPT)
+    result = run(root)
+    calls = read_calls(root)
+    ci = call_for(calls, "check_import")
+    rs = call_for(calls, "run_scratch_tests")
+    assert ci["text"].startswith("0\n"), ci
+    assert rs["text"].startswith("0\n"), rs
+    assert field(result, "isolation") == "sandbox-exec"
+
+
+@pytest.mark.skipif(not HAS_SANDBOX_EXEC, reason="needs macOS with /usr/bin/sandbox-exec")
+def test_isolation_reported_when_nothing_ran(tmp_path, api_key):
+    root = make_repo(tmp_path / "repo", FINISH_ONLY_SCRIPT)
+    result = run(root)
+    assert field(result, "isolation") == "sandbox-exec"
+
+
+def test_no_sandbox_refuses_unless_allowed(tmp_path, monkeypatch, api_key):
+    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", "/nonexistent/sandbox")
+    monkeypatch.setattr(agentic_generator, "BWRAP", "/nonexistent/sandbox")
+
+    root = make_repo(tmp_path / "repo1", FULL_SCRIPT)
+    result = run(root)
+    ci = call_for(read_calls(root), "check_import")
+    assert ci["text"] == "no OS sandbox available: code is not run"
+    assert ci["is_error"] is True
+    assert field(result, "isolation") == "none"
+
+    root2 = make_repo(tmp_path / "repo2", FULL_SCRIPT)
+    result2 = run(root2, allow_unisolated_exec=True)
+    ci2 = call_for(read_calls(root2), "check_import")
+    assert ci2["text"].startswith("0\n"), ci2
+    assert field(result2, "isolation") == "unisolated"
+
+
+def test_provisioned_interpreter_is_used(tmp_path, monkeypatch, api_key):
+    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", "/nonexistent/sandbox")
+    monkeypatch.setattr(agentic_generator, "BWRAP", "/nonexistent/sandbox")
+
+    interp_dir = tmp_path / "interp"
+    interp_dir.mkdir()
+    log = interp_dir / "interp.log"
+    script_path = interp_dir / "python.sh"
+    script_path.write_text(
+        "#!/bin/sh\n"
+        + "echo run >> " + shlex.quote(str(log)) + "\n"
+        + "exec " + shlex.quote(sys.executable) + ' "$@"\n',
+        encoding="utf-8",
     )
+    script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-
-def loop_src(script_path, results_path, args_path):
-    return (
-        "import json\n"
-        "\n"
-        "SCRIPT = " + repr(str(script_path)) + "\n"
-        "RESULTS = " + repr(str(results_path)) + "\n"
-        "ARGS = " + repr(str(args_path)) + "\n"
-        "\n"
-        "\n"
-        "class _ToolLoopResult:\n"
-        "    def __init__(self, text, transcript, turns, tool_calls, stop, model_call_error):\n"
-        "        self.text = text\n"
-        "        self.transcript = transcript\n"
-        "        self.turns = turns\n"
-        "        self.tool_calls = tool_calls\n"
-        "        self.stop = stop\n"
-        "        self.model_call_error = model_call_error\n"
-        "\n"
-        "    def to_dict(self):\n"
-        "        return {'text': self.text, 'transcript': self.transcript, 'turns': self.turns,\n"
-        "                'tool_calls': self.tool_calls, 'stop': self.stop,\n"
-        "                'model_call_error': self.model_call_error}\n"
-        "\n"
-        "\n"
-        "def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,\n"
-        "                  max_tool_calls=120, wall_seconds=1800.0, repo_root=None,\n"
-        "                  claude_command='claude'):\n"
-        "    with open(ARGS, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'system': system, 'prompt': prompt, 'model': model,\n"
-        "                             'tools': tools, 'max_turns': max_turns,\n"
-        "                             'max_tool_calls': max_tool_calls,\n"
-        "                             'wall_seconds': wall_seconds,\n"
-        "                             'repo_root': str(repo_root),\n"
-        "                             'claude_command': claude_command}, default=str) + '\\n')\n"
-        "    with open(SCRIPT, encoding='utf-8') as fh:\n"
-        "        steps = json.load(fh)\n"
-        "    calls = 0\n"
-        "    for name, arguments in steps:\n"
-        "        text, is_error = execute(name, arguments)\n"
-        "        calls += 1\n"
-        "        with open(RESULTS, 'a', encoding='utf-8') as fh:\n"
-        "            fh.write(json.dumps([name, arguments, text, is_error]) + '\\n')\n"
-        "    return _ToolLoopResult('done', [{'role': 'user', 'content': prompt}], 1, calls,\n"
-        "                           'end_turn', None)\n"
-    )
-
-
-def kind_python_src(interpreter):
-    return (
+    root = make_repo(tmp_path / "repo", FULL_SCRIPT)
+    kdir = root / "gen" / "kind-python"
+    kdir.mkdir(parents=True)
+    adapter_src = (
         "from pathlib import Path\n"
         "\n"
         "KIND = 'python'\n"
-        "INTERPRETER = " + repr(str(interpreter)) + "\n"
-        "\n"
-        "\n"
-        "class AssetError(Exception):\n"
-        "    pass\n"
         "\n"
         "\n"
         "def layout_errors(asset_file):\n"
@@ -175,17 +274,17 @@ def kind_python_src(interpreter):
         "\n"
         "def provision(repo_root):\n"
         "    return {'ok': True, 'reason': None, 'versions': {}, 'lockfile_sha256': None,\n"
-        "            'interpreter': INTERPRETER}\n"
+        "            'interpreter': " + repr(str(script_path)) + "}\n"
         "\n"
         "\n"
         "def guidance():\n"
-        "    return {'generator': 'GEN GUIDANCE', 'test_author': 'TEST GUIDANCE'}\n"
+        "    return {'generator': '', 'test_author': ''}\n"
         "\n"
         "\n"
         "def asset_runner(asset_file):\n"
-        "    def run(entry, args):\n"
-        "        raise AssetError('not supported')\n"
-        "    return run\n"
+        "    def _run(entry, args):\n"
+        "        return None\n"
+        "    return _run\n"
         "\n"
         "\n"
         "def strength_sites(asset_file):\n"
@@ -195,135 +294,11 @@ def kind_python_src(interpreter):
         "def apply_site(asset_file, site):\n"
         "    return None\n"
     )
+    (kdir / "kind_python.py").write_text(adapter_src, encoding="utf-8")
 
-
-class Harness:
-    def __init__(self, base, script):
-        self.base = Path(base)
-        self.repo_root = self.base / "repo"
-        self.logs = self.base / "logs"
-        self.logs.mkdir(parents=True, exist_ok=True)
-        self.script_path = self.logs / "script.json"
-        self.results_path = self.logs / "results.jsonl"
-        self.args_path = self.logs / "loop_args.jsonl"
-        self.script_path.write_text(json.dumps(script), encoding="utf-8")
-
-        gen_dir = self.repo_root / "gen" / "generator"
-        gen_dir.mkdir(parents=True)
-        (gen_dir / "generator.py").write_text(generator_src(self.logs), encoding="utf-8")
-
-        loop_dir = self.repo_root / "gen" / "llm-tool-endpoint"
-        loop_dir.mkdir(parents=True)
-        (loop_dir / "llm_tool_endpoint.py").write_text(
-            loop_src(self.script_path, self.results_path, self.args_path), encoding="utf-8"
-        )
-
-    def reset(self):
-        if self.results_path.exists():
-            self.results_path.unlink()
-
-    def results(self):
-        if not self.results_path.exists():
-            return []
-        out = []
-        for line in self.results_path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                out.append(json.loads(line))
-        return out
-
-    def result_for(self, name):
-        matches = [r for r in self.results() if r[0] == name]
-        assert matches, "no recorded result for " + name + ": " + repr(self.results())
-        return matches[0]
-
-    def run(self, **kwargs):
-        self.reset()
-        bundle = {
-            "component_id": "comp-widget",
-            "spec_bundle_hash": "sha256:" + "0" * 64,
-            "hint_code": None,
-        }
-        return agentic_generator.generate_agentic(
-            bundle, MODEL, repo_root=self.repo_root, **kwargs
-        )
-
-
-@pytest.fixture
-def api_key(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-
-
-@pytest.fixture
-def no_sandbox(monkeypatch):
-    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", "/nonexistent/sandbox")
-    monkeypatch.setattr(agentic_generator, "BWRAP", "/nonexistent/sandbox")
-
-
-def test_sandbox_exec_runs_both_tools(tmp_path, api_key):
-    if not has_sandbox_exec():
-        pytest.skip("platform without /usr/bin/sandbox-exec")
-    h = Harness(tmp_path, FULL_SCRIPT)
-    result = h.run()
-
-    check = h.result_for("check_import")
-    assert check[2].startswith("0\n"), repr(check)
-    tests = h.result_for("run_scratch_tests")
-    assert tests[2].startswith("0\n"), repr(tests)
-    assert field(result, "isolation") == "sandbox-exec"
-
-
-def test_sandbox_exec_isolation_when_nothing_ran(tmp_path, api_key):
-    if not has_sandbox_exec():
-        pytest.skip("platform without /usr/bin/sandbox-exec")
-    h = Harness(tmp_path, FINISH_ONLY_SCRIPT)
-    result = h.run()
-
-    names = [r[0] for r in h.results()]
-    assert "check_import" not in names
-    assert "run_scratch_tests" not in names
-    assert field(result, "isolation") == "sandbox-exec"
-
-
-def test_no_sandbox_refuses_then_unisolated_runs(tmp_path, api_key, no_sandbox):
-    h = Harness(tmp_path, FULL_SCRIPT)
-
-    result = h.run()
-    check = h.result_for("check_import")
-    assert check[2] == "no OS sandbox available: code is not run", repr(check)
-    assert check[3] is True
-    assert field(result, "isolation") == "none"
-
-    result = h.run(allow_unisolated_exec=True)
-    check = h.result_for("check_import")
-    assert check[2].startswith("0\n"), repr(check)
-    assert field(result, "isolation") == "unisolated"
-
-
-def test_provisioned_interpreter_used_once_per_run(tmp_path, api_key, no_sandbox):
-    h = Harness(tmp_path, FULL_SCRIPT)
-
-    interp_dir = tmp_path / "interp"
-    interp_dir.mkdir()
-    interp_log = interp_dir / "interp.log"
-    interpreter = interp_dir / "python.sh"
-    interpreter.write_text(
-        "#!/bin/sh\n"
-        + "echo call >> " + shlex.quote(str(interp_log)) + "\n"
-        + "exec " + shlex.quote(sys.executable) + " \"$@\"\n",
-        encoding="utf-8",
-    )
-    os.chmod(interpreter, 0o755)
-    assert h.repo_root.resolve() not in interpreter.resolve().parents
-
-    kind_dir = h.repo_root / "gen" / "kind-python"
-    kind_dir.mkdir(parents=True)
-    (kind_dir / "kind_python.py").write_text(kind_python_src(interpreter), encoding="utf-8")
-
-    h.run(allow_unisolated_exec=True)
-
-    check = h.result_for("check_import")
-    assert check[2].startswith("0\n"), repr(check)
-
-    assert interp_log.exists(), "interpreter script was never run"
-    lines = [l for l in interp_log.read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert len(lines) == 2, repr(lines)
+    run(root, allow_unisolated_exec=True)
+    ci = call_for(read_calls(root), "check_import")
+    assert ci["text"].startswith("0\n"), ci
+    assert log.exists()
+    lines = [l for l in log.read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert len(lines) == 2, lines

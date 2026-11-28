@@ -464,6 +464,7 @@ def _write_provenance(component_id: str, bundle, result, report, license_result,
         "provenance_hit": False,
         "attempts": 1,
         "gate_versions": gate_versions,
+        **({"spec_bundle_parts": _get(key, "spec_bundle_parts")} if _get(key, "spec_bundle_parts") else {}),
     }, REAL_REPO)
     hit = _get(pc.check_provenance(component_id, current_hash, gate_versions, REAL_REPO), "hit")
     print(f"provenance: written, check hit={hit}")

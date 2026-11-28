@@ -20,59 +20,68 @@ sys.modules["spec_linter"] = spec_linter
 spec.loader.exec_module(spec_linter)
 assert spec_linter.lint(None, repo_root).hard_failures == 0
 ```
-Each file is written exactly as shown, `---` in column 0 of line 1,
-never through `textwrap.dedent` over interpolated text.
+A test writes the fixture with these two functions, copied into its own
+file exactly: `write_fixture(repo_root, component_files("foo"))`. A
+dependent is `component_files("baz", depends_on="[comp-foo]")`, its id
+`comp-baz` and its requirement `R-BAZ-001`, merged into the same dict.
+Never retype the files: each requirement and acceptance file starts
+with its `# <id>` heading, which lint checks (`R-LINT-007`), and every
+file has `---` in column 0 of its first line, so never build one through
+`textwrap.dedent` over interpolated text.
 
-`specs/glossary.md`:
+```python
+def component_files(slug, depends_on="[]", extra_frontmatter="", purpose="Foo doubles a number."):
+    """The files of one fixture component, keyed by path under repo_root."""
+    upper = slug.upper()
+    base = f"specs/components/{slug}/"
+    return {
+        base + "component.md": (
+            "---\n"
+            f"id: comp-{slug}\n"
+            f"title: {slug.capitalize()}\n"
+            "status: draft\n"
+            "owners: [team-a]\n"
+            "sealed: true\n"
+            f"source_path: legacy/{slug}/\n"
+            f"depends_on: {depends_on}\n"
+            + extra_frontmatter +
+            "---\n"
+            "\n"
+            f"# {slug.capitalize()}\n"
+            "\n"
+            "## Purpose\n"
+            "\n"
+            f"{purpose}\n"
+        ),
+        base + f"requirements/R-{upper}-001.md": (
+            f"# R-{upper}-001\n"
+            "\n"
+            f"**R-{upper}-001** — `foo(x)` MUST return `2 * x`.\n"
+        ),
+        base + f"acceptance/AC-{upper}-001.md": (
+            f"# AC-{upper}-001\n"
+            "\n"
+            f"Covers: R-{upper}-001\n"
+            "Kind: generated-test\n"
+            "\n"
+            "```gherkin\n"
+            "Given x = 2\n"
+            "When foo(x) is called\n"
+            "Then it returns 4\n"
+            "```\n"
+        ),
+        base + "interface/library.md": "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+        base + "constraints.md": "# Constraints\n\nNone.\n",
+    }
 
+
+def write_fixture(repo_root, files):
+    files = {"specs/glossary.md": "# Glossary\n\n- **Foo** — a test term.\n", **files}
+    for rel, text in files.items():
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
 ```
-# Glossary
-
-- **Foo** — a test term.
-```
-
-`specs/components/foo/component.md` (a dependent adds
-`depends_on: [comp-foo]` in place of `[]`, with its own id and
-`source_path`):
-
-```
----
-id: comp-foo
-title: Foo
-status: draft
-owners: [team-a]
-sealed: true
-source_path: legacy/foo/
-depends_on: []
----
-
-# Foo
-
-## Purpose
-
-Foo doubles a number.
-```
-
-`requirements/R-FOO-001.md`: `# R-FOO-001`, a blank line, then
-`**R-FOO-001** — \`foo(x)\` MUST return \`2 * x\`.`
-
-`acceptance/AC-FOO-001.md`:
-
-````
-# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: generated-test
-
-```gherkin
-Given x = 2
-When foo(x) is called
-Then it returns 4
-```
-````
-
-`interface/library.md`: `# Library` and a fenced `foo(x: int) -> int`.
-`constraints.md`: `# Constraints` and `None.`
 
 Deleting the `Kind:` line from an acceptance file is a hard lint
 failure, the way to build a corpus `assemble` refuses. A sealed
@@ -80,7 +89,8 @@ component's real code goes under its `source_path`
 (`legacy/foo/foo.py`), never `gen/`.
 
 **The asset fixture** adds to the above: in foo's frontmatter, the line
-`assets: [javascript:static/app.js]` after `depends_on`, and
+`assets: [javascript:static/app.js]` after `depends_on`
+(`component_files("foo", extra_frontmatter="assets: [javascript:static/app.js]\n")`), and
 `interface/assets/app.js.md`:
 
 ````

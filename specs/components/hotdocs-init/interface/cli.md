@@ -9,8 +9,7 @@ hotdocs init [<dir>] [--example] [--reconfigure] [--provider <name>]
 `main(argv)` and `run(argv, ...)` receive everything after the `init` word. Every flag takes its
 value as `--flag=value` or as the next argument; `--example`,
 `--reconfigure`, `--no-test`, and `--yes` take none. `<dir>` defaults to the
-current directory. Behavior is in `R-INIT-001`–`006`; usage errors in
-`R-INIT-007`.
+current directory.
 
 **Exit codes:**
 

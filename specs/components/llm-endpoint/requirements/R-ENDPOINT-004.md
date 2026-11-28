@@ -1,14 +1,13 @@
 # R-ENDPOINT-004
 
 **R-ENDPOINT-004** — MUST NOT retry a provider call, and MUST NOT leave
-  one with an unbounded wait (`D7`/`R-GEN-011`, owned here at the layer
-  that touches the network). A call either succeeds, or fails within
+  one with an unbounded wait (`D7`). A call either succeeds, or fails within
   its provider's bounded timeout as a `model_call_error` with a
   `category` of exactly one of `network`/`auth`/`rate_limit`/`timeout`
   (`D20`; see `ModelResponse`), exactly once.
 
-  **The bound MUST be at least 300 seconds** (`D34`) for a completion:
-  a 120-second bound timed out `generator`'s larger bundle. Default 600;
+  **The bound MUST be at least 300 seconds** (`D34`) for a completion.
+  Default 600;
   `timeout_seconds` in `hotdocs.toml` MAY raise it, never lower it below
   300. `check_connection` (`R-ENDPOINT-009`) is a probe, not a
   completion, and takes its own short bound.

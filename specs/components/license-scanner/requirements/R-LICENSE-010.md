@@ -9,6 +9,4 @@
   `reason` is exactly one of `"no-reference-corpus"` (the variable is
   unset or empty),
   `"corpus-unreadable"`, or `"corpus-invalid"` (`R-LICENSE-011`).
-  `no-reference-corpus` MUST NOT block: a project with no corpus is
-  not stopped, but its result says plainly that nothing was checked
-  (`D193`). The webhook payload carries `evaluated` and `reason` too.
+  `no-reference-corpus` MUST NOT block (`D193`). The webhook payload carries `evaluated` and `reason` too.

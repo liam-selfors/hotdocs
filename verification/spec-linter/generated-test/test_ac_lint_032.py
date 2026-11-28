@@ -1,5 +1,6 @@
-# hotdocs-criterion: sha256:11bfab248ed1f7ca446c9f70b44bfd1a104f75666cd7f8a78d529ac8e456ea5f
+# hotdocs-criterion: sha256:3399afc699241ddf371c5ed4b90bc762e522d8c3b98bf5e4e9f2d9fae9195c05
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -7,194 +8,308 @@ import pytest
 import spec_linter
 
 
+CLEAN_CORPUS = {
+    'specs/product/foo.md': (
+        '---\n'
+        'id: P-FOO\n'
+        'title: Foo works\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        '---\n'
+        '\n'
+        '# Foo works\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'A foo can be made.\n'
+        '\n'
+        '### CS-FOO-001\n'
+        'Covers: P-FOO\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When a foo is made\n'
+        'Then it exists\n'
+        '```\n'
+    ),
+    'specs/components/foo/component.md': (
+        '---\n'
+        'id: comp-foo\n'
+        'title: Foo\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Foo\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Makes a foo.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** making a foo. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/foo/requirements/R-FOO-001.md': (
+        '# R-FOO-001\n'
+        '\n'
+        '**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.\n'
+    ),
+    'specs/components/foo/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `foo.py`.\n'
+        '\n'
+        '```\n'
+        'make_foo() -> str\n'
+        '```\n'
+    ),
+    'specs/components/foo/acceptance/AC-FOO-001.md': (
+        '# AC-FOO-001\n'
+        '\n'
+        'Covers: R-FOO-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When make_foo() is called\n'
+        'Then the result is "foo"\n'
+        '```\n'
+    ),
+    'specs/components/foo/constraints.md': (
+        '# Foo — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
+
+
+def write_corpus(repo_root, changes=None):
+    files = {**CLEAN_CORPUS, **(changes or {})}
+    for rel, text in files.items():
+        if text is not None:
+            path = repo_root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+
+
+CACHE_MANAGER_FILES = {
+    'specs/components/cache-manager/component.md': (
+        '---\n'
+        'id: comp-cache-manager\n'
+        'title: Cache Manager\n'
+        'status: draft\n'
+        'owners: [team-a]\n'
+        'depends_on: []\n'
+        'realizes: [P-FOO]\n'
+        'sealed: false\n'
+        '---\n'
+        '\n'
+        '# Cache Manager\n'
+        '\n'
+        '## Purpose\n'
+        '\n'
+        'Manages a cache.\n'
+        '\n'
+        '## Scope\n'
+        '\n'
+        '**In scope:** caching. **Out of scope:** everything else.\n'
+        '\n'
+        '## Definitions\n'
+        '\n'
+        'No deltas from `specs/glossary.md`.\n'
+        '\n'
+        '## Behavior\n'
+        '\n'
+        'See `requirements/`.\n'
+        '\n'
+        '## Interfaces\n'
+        '\n'
+        'See `interface/`.\n'
+        '\n'
+        '## Data\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Acceptance criteria\n'
+        '\n'
+        'See `acceptance/`.\n'
+        '\n'
+        '## Non-functional constraints\n'
+        '\n'
+        'See `constraints.md`.\n'
+        '\n'
+        '## Open questions\n'
+        '\n'
+        'None.\n'
+        '\n'
+        '## Change log\n'
+        '\n'
+        '- Initial draft.\n'
+    ),
+    'specs/components/cache-manager/requirements/R-CM-001.md': (
+        '# R-CM-001\n'
+        '\n'
+        '**R-CM-001** — `get_cache()` MUST return the string `"cache"`.\n'
+    ),
+    'specs/components/cache-manager/interface/library.md': (
+        '# Library\n'
+        '\n'
+        'One module file, `cache_manager.py`.\n'
+        '\n'
+        '```\n'
+        'get_cache() -> str\n'
+        '```\n'
+    ),
+    'specs/components/cache-manager/acceptance/AC-CM-001.md': (
+        '# AC-CM-001\n'
+        '\n'
+        'Covers: R-CM-001\n'
+        'Kind: generated-test\n'
+        '\n'
+        '```gherkin\n'
+        'Given nothing\n'
+        'When get_cache() is called\n'
+        'Then the result is "cache"\n'
+        '```\n'
+    ),
+    'specs/components/cache-manager/constraints.md': (
+        '# Cache Manager — Non-Functional Constraints\n'
+        '\n'
+        '- **Pure.** No I/O.\n'
+    ),
+}
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _tool_gen():
-    return next(
-        p for p in Path(spec_linter.__file__).resolve().parents if p.name == "gen"
-    )
+def tool_root():
+    """Parent of the nearest `gen` directory above the linter's own file, or None."""
+    module_file = getattr(spec_linter, "__file__", None)
+    if not module_file:
+        return None
+    for p in Path(module_file).resolve().parents:
+        if p.name == "gen":
+            return p.parent
+    return None
 
 
-PRODUCT = """---
-id: P-FOO
-title: Foo works
-status: draft
-owners: [team-a]
----
-
-# Foo works
-
-## Purpose
-
-A foo can be made.
-
-### CS-FOO-001
-Covers: P-FOO
-Kind: generated-test
-
-```gherkin
-Given nothing
-When a foo is made
-Then it exists
-```
-"""
+@pytest.fixture
+def tool_has_cache_manager():
+    root = tool_root()
+    if root is None:
+        yield None
+        return
+    gen = root / "gen"
+    target = gen / "cache-manager"
+    created = False
+    if not target.is_dir():
+        target.mkdir(parents=True, exist_ok=True)
+        created = True
+    try:
+        yield target
+    finally:
+        if created and target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
 
 
-def _component_md(slug, title, upper):
-    return (
-        "---\n"
-        "id: comp-" + slug + "\n"
-        "title: " + title + "\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
-        "realizes: [P-FOO]\n"
-        "sealed: false\n"
-        "---\n"
-        "\n"
-        "# " + title + "\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Makes a " + slug + ".\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "**In scope:** making a " + slug + ". **Out of scope:** everything else.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "No deltas from `specs/glossary.md`.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial draft.\n"
-    )
+def build_project(repo_root, with_tool_marker):
+    write_corpus(repo_root, CACHE_MANAGER_FILES)
+    if with_tool_marker:
+        (repo_root / ".hotdocs-tool.json").write_text("{}\n", encoding="utf-8")
 
 
-def _write_component(repo_root, slug, title, upper, func, module):
-    base = repo_root / "specs" / "components" / slug
-    (base / "requirements").mkdir(parents=True)
-    (base / "interface").mkdir(parents=True)
-    (base / "acceptance").mkdir(parents=True)
-    (base / "component.md").write_text(_component_md(slug, title, upper))
-    (base / "requirements" / ("R-" + upper + "-001.md")).write_text(
-        "# R-" + upper + "-001\n\n"
-        "**R-" + upper + "-001** — `" + func + "()` MUST return the string `\"" + slug + "\"`.\n"
-    )
-    (base / "interface" / "library.md").write_text(
-        "# Library\n\n"
-        "One module file, `" + module + ".py`.\n\n"
-        "```\n" + func + "() -> str\n```\n"
-    )
-    (base / "acceptance" / ("AC-" + upper + "-001.md")).write_text(
-        "# AC-" + upper + "-001\n\n"
-        "Covers: R-" + upper + "-001\n"
-        "Kind: generated-test\n\n"
-        "```gherkin\n"
-        "Given nothing\n"
-        "When " + func + "() is called\n"
-        "Then the result is \"" + slug + "\"\n"
-        "```\n"
-    )
-    (base / "constraints.md").write_text(
-        "# " + title + " — Non-Functional Constraints\n\n- **Pure.** No I/O.\n"
-    )
-
-
-def _build_project(repo_root):
-    (repo_root / "specs" / "product").mkdir(parents=True)
-    (repo_root / "specs" / "product" / "foo.md").write_text(PRODUCT)
-    _write_component(repo_root, "foo", "Foo", "FOO", "make_foo", "foo")
-    _write_component(
-        repo_root,
-        "cache-manager",
-        "Cache Manager",
-        "CACHE",
-        "make_cache_manager",
-        "cache_manager",
-    )
-
-
-def _r032(report):
+def lint032(report):
     return [f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-032"]
 
 
-def _preconditions():
-    gen = _tool_gen()
-    assert (gen / "cache-manager").is_dir(), "tool gen/ must hold cache-manager"
-    assert not (gen / "foo").exists(), "tool gen/ must not hold foo"
-    return gen
-
-
-def test_project_component_shadowing_tool_component_fails(tmp_path):
-    _preconditions()
+def test_project_component_shadowing_tool_component_fails(tmp_path, tool_has_cache_manager):
     repo_root = tmp_path / "project"
     repo_root.mkdir()
-    _build_project(repo_root)
+    build_project(repo_root, with_tool_marker=True)
 
-    # Precondition: without the marker, the corpus lints clean.
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
-
-    (repo_root / ".hotdocs-tool.json").write_text("{}\n")
     report = spec_linter.lint(None, repo_root)
-    findings = _r032(report)
 
-    assert len(findings) == 1, findings
-    finding = findings[0]
-    assert field(finding, "severity") == "fail"
-    assert "cache-manager" in field(finding, "message")
+    if tool_has_cache_manager is None:
+        pytest.skip("linter module is not under a gen/ directory; no tool root")
+    root = tool_root()
+    if (root / "gen" / "foo").is_dir():
+        pytest.skip("tool root unexpectedly has gen/foo")
+
+    findings = lint032(report)
+
+    cm = [f for f in findings if "cache-manager" in str(field(f, "message"))]
+    assert cm, "expected an R-LINT-032 finding naming cache-manager, got " + repr(findings)
+    for f in cm:
+        assert field(f, "severity") == "fail"
 
     for f in findings:
-        assert not str(field(f, "file")).startswith("specs/components/foo/")
-        assert not re.search(r"(?<![\w-])foo(?![\w-])", field(f, "message"))
+        message = str(field(f, "message")).replace("cache-manager", "")
+        file = str(field(f, "file"))
+        assert not re.search(r"\bfoo\b", message), (
+            "foo must get no R-LINT-032 finding: " + repr(f)
+        )
+        assert "components/foo/" not in file, "foo must get no R-LINT-032 finding: " + repr(f)
 
-    assert report.hard_failures >= 1
+    assert field(report, "hard_failures") >= 1
 
 
-def test_project_without_marker_has_no_r_lint_032(tmp_path):
-    _preconditions()
+def test_project_without_tool_marker_has_no_finding(tmp_path, tool_has_cache_manager):
     repo_root = tmp_path / "project"
     repo_root.mkdir()
-    _build_project(repo_root)
-    assert not (repo_root / ".hotdocs-tool.json").exists()
+    build_project(repo_root, with_tool_marker=False)
 
     report = spec_linter.lint(None, repo_root)
-    assert _r032(report) == []
+    assert lint032(report) == []
 
 
-def test_tool_own_repository_has_no_r_lint_032():
-    gen = _preconditions()
-    tool_root = gen.parent
-    if not (tool_root / "specs").is_dir():
-        pytest.skip("tool repository has no specs/ tree to lint")
-    if (tool_root / ".hotdocs-tool.json").exists():
-        pytest.skip("tool root unexpectedly carries .hotdocs-tool.json")
-    report = spec_linter.lint(None, tool_root)
-    assert _r032(report) == []
+def test_tool_own_repository_has_no_finding(tmp_path):
+    root = tool_root()
+    if root is None or not (root / "specs").is_dir() or (root / ".hotdocs-tool.json").exists():
+        # Still exercise the linter on a project without the marker.
+        repo_root = tmp_path / "project"
+        repo_root.mkdir()
+        build_project(repo_root, with_tool_marker=False)
+        report = spec_linter.lint(None, repo_root)
+        assert lint032(report) == []
+        pytest.skip("tool root has no lintable specs/ tree without .hotdocs-tool.json")
+    report = spec_linter.lint(None, root)
+    assert lint032(report) == []

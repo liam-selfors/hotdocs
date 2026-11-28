@@ -1,13 +1,16 @@
-# hotdocs-criterion: sha256:d3888d93e18eb767b51760ac5a84aab1367f012b8e0b8713543b6b156c45de42
+# hotdocs-criterion: sha256:9a1ff7509968ff9ec4f18f8dd6260d512ea93a4eef94de3ecf7089fd35247fc1
 import shutil
 from pathlib import Path
 
 import verifier_orchestrator
 
 
-SLUG = "widget"
-COMPONENT_ID = "comp-widget"
+COMPONENT_ID = "comp-widget-maker"
+SLUG = "widget-maker"
+MODULE = "widget_maker"
 CRITERION_ID = "AC-WIDGET-001"
+REQUIREMENT_ID = "R-WIDGET-001"
+CAPABILITY_ID = "P-WIDGET"
 
 
 def field(value, name):
@@ -19,171 +22,111 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def live_root():
-    here = Path(verifier_orchestrator.__file__).resolve()
-    gen_dir = next(p for p in here.parents if p.name == "gen")
-    return (gen_dir / "spec-bundle-assembler").resolve().parents[1]
-
-
-def assembler_source():
-    return (
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return {\n"
-        "        'component_id': component_id,\n"
-        "        'criterion_id': criterion_id,\n"
-        "        'covers': " + repr("R-WIDGET-001") + ",\n"
-        "        'criterion_text': " + repr("Then foo equals 5") + ",\n"
-        "        'requirement_text': " + repr("make_thing returns foo 5") + ",\n"
-        "        'interface': " + repr("make_thing(x) -> Thing") + ",\n"
-        "        'glossary': '',\n"
-        "        'dependency_interfaces': {},\n"
-        "        'testing': '',\n"
-        "    }\n"
-    )
-
-
-def probe_source():
-    return (
-        "class _Report:\n"
-        "    def __init__(self):\n"
-        "        self.ok = True\n"
-        "        self.findings = []\n"
-        "        self.tests_run = 0\n"
-        "        self.tests_reached = 0\n"
-        "\n"
-        "    def to_dict(self):\n"
-        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-        "                'tests_run': self.tests_run,\n"
-        "                'tests_reached': self.tests_reached}\n"
-        "\n"
-        "\n"
-        "GATE_VERSION = 'test-probe@1.4.0'\n"
-        "\n"
-        "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None):\n"
-        "    return _Report()\n"
+def copy_real_compiler(repo_root):
+    live = (
+        Path(verifier_orchestrator.__file__).resolve().parents[1]
+        / "spec-bundle-assembler"
+    ).resolve().parents[1]
+    source = live / "pipeline" / "criterion-compiler"
+    target = repo_root / "pipeline" / "criterion-compiler"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        source,
+        target,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
 
 
 def build_fixture(repo_root):
+    comp_dir = repo_root / "specs" / "components" / SLUG
+
     write(
-        repo_root / "specs" / "product" / "widget.md",
-        "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget capability\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "---\n"
-        "\n"
-        "# Widget\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Make widgets.\n",
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** - a thing with a foo.\n",
     )
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
-    comp = repo_root / "specs" / "components" / SLUG
+
     write(
-        comp / "component.md",
+        repo_root / "specs" / "product" / (CAPABILITY_ID + ".md"),
         "---\n"
-        "id: " + COMPONENT_ID + "\n"
-        "title: Widget\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "realizes: [P-WIDGET]\n"
+        + "id: " + CAPABILITY_ID + "\n"
+        + "title: Widget capability\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "---\n"
+        + "\n"
+        + "# Widget capability\n"
+        + "\n"
+        + "Makes widgets.\n",
+    )
+
+    write(
+        comp_dir / "component.md",
         "---\n"
-        "\n"
-        "# Widget\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Makes things.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: making things.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial.\n",
+        + "id: " + COMPONENT_ID + "\n"
+        + "title: Widget maker\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "depends_on: []\n"
+        + "realizes: [" + CAPABILITY_ID + "]\n"
+        + "---\n"
+        + "\n"
+        + "# Widget maker\n"
+        + "\n"
+        + "## Purpose\n"
+        + "\n"
+        + "Makes a widget whose foo is 5.\n",
     )
+
+    write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+
     write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n"
-        "\n"
-        "**R-WIDGET-001** — `make_thing(x)` MUST return a `Thing` whose "
-        "`foo` is 5.\n",
+        comp_dir / "requirements" / (REQUIREMENT_ID + ".md"),
+        "# " + REQUIREMENT_ID + "\n"
+        + "\n"
+        + "**" + REQUIREMENT_ID + "** - `make_widget(x)` MUST return a widget "
+        + "whose `foo` attribute is `5`.\n",
     )
+
     write(
-        comp / "interface" / "library.md",
+        comp_dir / "interface" / "library.md",
         "# Library\n"
-        "\n"
-        "```\n"
-        "make_thing(x) -> Thing\n"
-        "```\n",
+        + "\n"
+        + "```\n"
+        + "make_widget(x) -> Widget\n"
+        + "```\n"
+        + "\n"
+        + "Returns an object with attribute `foo`.\n",
     )
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+
     write(
-        comp / "acceptance" / (CRITERION_ID + ".md"),
+        comp_dir / "acceptance" / (CRITERION_ID + ".md"),
         "# " + CRITERION_ID + "\n"
-        "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: compiled\n"
-        "\n"
-        "```gherkin\n"
-        "Given a seed is 1\n"
-        "When make_thing is invoked with {\"x\": seed}\n"
-        "Then foo equals 5\n"
-        "```\n",
-    )
-    write(
-        repo_root / "gen" / SLUG / (SLUG + ".py"),
-        "import types\n"
-        "\n"
-        "\n"
-        "def make_thing(x):\n"
-        "    return types.SimpleNamespace(foo=3)\n",
-    )
-    write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_source(),
-    )
-    write(repo_root / "gen" / "test-probe" / "test_probe.py", probe_source())
-    shutil.copytree(
-        live_root() / "pipeline" / "criterion-compiler",
-        repo_root / "pipeline" / "criterion-compiler",
-        ignore=shutil.ignore_patterns("__pycache__"),
+        + "\n"
+        + "Covers: " + REQUIREMENT_ID + "\n"
+        + "Kind: compiled\n"
+        + "\n"
+        + "```gherkin\n"
+        + "Given a seed is 1\n"
+        + "When make_widget is invoked with [seed]\n"
+        + "Then foo equals 5\n"
+        + "```\n",
     )
 
+    write(
+        repo_root / "gen" / SLUG / (MODULE + ".py"),
+        "class Widget:\n"
+        + "    def __init__(self, foo):\n"
+        + "        self.foo = foo\n"
+        + "\n"
+        + "\n"
+        + "def make_widget(x):\n"
+        + "    return Widget(3)\n",
+    )
 
-def test_compiled_failure_detail_carries_expected_and_actual(tmp_path):
+    copy_real_compiler(repo_root)
+
+
+def test_failed_compiled_criterion_carries_expected_and_actual(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
@@ -195,12 +138,18 @@ def test_compiled_failure_detail_carries_expected_and_actual(tmp_path):
     assert len(matching) == 1, criteria
     criterion = matching[0]
 
+    assert field(criterion, "kind") == "compiled", criterion
     assert field(criterion, "result") == "fail", criterion
+
     detail = field(criterion, "failure_detail")
     assert detail is not None, criterion
 
+    message = field(detail, "message")
+    assert isinstance(message, str) and message.strip(), detail
+
     expected = field(detail, "expected")
     actual = field(detail, "actual")
+
     assert expected == 5, detail
     assert type(expected) is int, detail
     assert actual == 3, detail
