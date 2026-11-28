@@ -13,6 +13,7 @@ And for each of "--color-text", "--color-text-muted" and
   run("contrast", [a, b]) and run("contrast", [a, b, "dark"]) are each
   at least 4.5
 And for each of "--color-focus", "--color-ok", "--color-warn",
-  "--color-fail" and "--color-neutral", against each of "--color-bg"
+  "--color-fail", "--color-neutral", "--color-edge-depends-on",
+  "--color-edge-realizes" and "--color-edge-other", against each of "--color-bg"
   and "--color-surface", both are at least 3
 ```

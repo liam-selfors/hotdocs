@@ -17,6 +17,9 @@ criteria" compares it), and no other rule:
 | `.tone-warn` | `border-left: 4px solid var(--color-warn)` |
 | `.tone-fail` | `border-left: 4px solid var(--color-fail)` |
 | `.tone-neutral` | `border-left: 4px solid var(--color-neutral)` |
+| `.edge-depends-on` | `stroke: var(--color-edge-depends-on)` |
+| `.edge-realizes` | `stroke: var(--color-edge-realizes)` |
+| `.edge-other` | `stroke: var(--color-edge-other)` |
 | `.muted` | `color: var(--color-text-muted)` |
 | `:focus-visible` | `outline: 2px solid var(--color-focus)`; `outline-offset: 2px` |
 

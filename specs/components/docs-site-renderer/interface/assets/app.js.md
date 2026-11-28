@@ -26,10 +26,11 @@ Returns `{"width", "height", "nodes", "edges"}`:
   `labelX = x + 12`, `labelY = y + 4`.
 - `"edges"`: for each edge whose `from` and `to` are both node ids, in
   input order, `{"index", "from", "to", "x1", "y1", "x2", "y2",
-  "color"}`: `index` its position in `edges`, `(x1, y1)` the `from`
-  node's `(x, y)`, `(x2, y2)` the `to` node's; `color` `"#1565c0"` for
-  kind `"depends_on"`, `"#2e7d32"` for `"realizes"`, `"#ef6c00"` for
-  any other kind. An edge with either end missing is left out.
+  "class"}`: `index` its position in `edges`, `(x1, y1)` the `from`
+  node's `(x, y)`, `(x2, y2)` the `to` node's; `class` `"edge-depends-on"`
+  for kind `"depends_on"`, `"edge-realizes"` for `"realizes"`,
+  `"edge-other"` for any other kind (`specs/architecture/visual-style.md`
+  "Edges"). An edge with either end missing is left out.
 - `"width"`: always `1100`. `"height"`: `60 + 40 * m`, `m` the largest
   number of nodes in one column, or `1` when `nodes` is empty.
 
@@ -50,8 +51,8 @@ Returns `{"hiddenNodes", "hiddenEdges"}`:
 Browser-only, never called by tests. Reads `nodes` from `#nodes .node`
 (`data-id`, `data-type`) and `edges` from `#edges .edge` (`data-from`,
 `data-to`, `data-kind`); draws `layoutGraph`'s result into `svg#dag`
-(sets its `width`/`height`, one `line` per laid-out edge with `stroke`
-its color, one clickable `g` per node with a circle at `(x, y)`, radius
+(sets its `width`/`height`, one `line` per laid-out edge with its
+`class` attribute set to the edge's `class` and no `stroke` attribute, one clickable `g` per node with a circle at `(x, y)`, radius
 8, and its id as text at `(labelX, labelY)`, linking to the `href` of
 the `a` inside that node's `li`, copied unchanged). On `input` in `#search`, calls `filterGraph` with the
 field's value and toggles class `hidden` on each list item and drawn

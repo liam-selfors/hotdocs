@@ -29,12 +29,12 @@ Then it returns exactly {"width": 1100, "height": 180, "nodes": N, "edges": E}
   | comp-b | 380 | 70  | 392    | 74     |
   | comp-c | 380 | 110 | 392    | 114    |
   | zz     | 900 | 30  | 912    | 34     |
-  and E lists, in this order, {"index", "from", "to", "x1", "y1", "x2", "y2", "color"}:
-  | index | from   | to    | x1  | y1 | x2  | y2 | color     |
-  | 0     | comp-a | comp-b| 380 | 30 | 380 | 70 | "#1565c0" |
-  | 1     | comp-a | P-A   | 380 | 30 | 120 | 30 | "#2e7d32" |
-  | 2     | comp-b | VAR-X | 380 | 70 | 640 | 30 | "#ef6c00" |
-  | 5     | zz     | P-B   | 900 | 30 | 120 | 70 | "#ef6c00" |
+  and E lists, in this order, {"index", "from", "to", "x1", "y1", "x2", "y2", "class"}:
+  | index | from   | to    | x1  | y1 | x2  | y2 | class             |
+  | 0     | comp-a | comp-b| 380 | 30 | 380 | 70 | "edge-depends-on" |
+  | 1     | comp-a | P-A   | 380 | 30 | 120 | 30 | "edge-realizes"   |
+  | 2     | comp-b | VAR-X | 380 | 70 | 640 | 30 | "edge-other"      |
+  | 5     | zz     | P-B   | 900 | 30 | 120 | 70 | "edge-other"      |
 
 Given the same run
 When run("layoutGraph", [[], []]) is called
@@ -46,5 +46,5 @@ When run("layoutGraph", [[{"id": "v", "type": "var"}],
 Then it returns {"width": 1100, "height": 100,
   "nodes": [{"id": "v", "x": 640, "y": 30, "labelX": 652, "labelY": 34}],
   "edges": [{"index": 0, "from": "v", "to": "v", "x1": 640, "y1": 30,
-             "x2": 640, "y2": 30, "color": "#2e7d32"}]}
+             "x2": 640, "y2": 30, "class": "edge-realizes"}]}
 ```

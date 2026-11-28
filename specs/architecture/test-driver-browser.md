@@ -48,7 +48,9 @@ given, and every value crossing it is plain Python (`str`, `int`,
   `tmp_path`) opened as a `file://` URL, or an `http://` URL whose host
   is `127.0.0.1`, `localhost` or `[::1]`. Anything else raises
   `only file paths and loopback URLs can be opened: <target>`; a missing
-  file raises `no such file: <path>`, `<path>` its absolute path. It returns once the page's `load`
+  file raises `no such file: <path>`, `<path>` its absolute path. Each
+  `open` returns a new page; pages opened earlier stay open, each with
+  its own reads, until `close()`. It returns once the page's `load`
   event has fired and two animation frames have passed.
 
 **Page**
@@ -76,6 +78,13 @@ given, and every value crossing it is plain Python (`str`, `int`,
 - `screenshot(name) -> Path` — a full-page PNG at
   `<tmp_path>/screenshots/<name>.png`. Its pixels are for people
   reading a failure; no criterion asserts on them (`D373`).
+
+**Closing.** The session's `close()`, before it stops the browser, saves
+a full-page PNG of each page still open, in the order they were opened,
+as `<tmp_path>/screenshots/final-<n>.png`, `<n>` counting from `1`, so a
+reviewer sees what every browser criterion left on screen (`D390`). A
+page that cannot be captured is skipped, never an error; a second
+`close()` saves nothing and does nothing.
 
 **Element**
 

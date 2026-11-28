@@ -17,6 +17,9 @@ declares exactly these colour tokens, in this order, and nothing else:
 | `--color-warn` | `#d29922` |
 | `--color-fail` | `#f85149` |
 | `--color-neutral` | `#8b949e` |
+| `--color-edge-depends-on` | `#4493f8` |
+| `--color-edge-realizes` | `#3fb950` |
+| `--color-edge-other` | `#db6d28` |
 
 Every value of `R-STYLE-002` and of this table meets
 `specs/architecture/visual-style.md` "Contrast": each text pair at
