@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:42a5b60a13fd89bbb797dd84a15c52790425eb241dfdc1b4577c4810787ad554
+# hotdocs-criterion: sha256:40d0303918a48603e7686f2dbef1f3e7f0c3fdfd5c0341b15f0c82c045caf824
 import re
 from pathlib import Path
 
@@ -7,7 +7,7 @@ import pytest
 import driver_browser
 
 
-REPO_ROOT = Path.home() / ".cache" / "hotdocs-test"
+ENV_ROOT = Path.home() / ".cache" / "hotdocs-test"
 
 
 def field(value, name):
@@ -16,33 +16,35 @@ def field(value, name):
 
 @pytest.fixture(scope="session")
 def provisioned():
-    result = driver_browser.provision(REPO_ROOT)
+    result = driver_browser.provision(ENV_ROOT)
     if not field(result, "ok"):
         pytest.fail("provision failed: " + str(field(result, "reason")))
     return result
 
 
-PAGE = (
-    "<!DOCTYPE html>\n"
-    "<html>\n"
-    "<head><meta charset=\"utf-8\"><title>AC-DRV-006</title></head>\n"
-    "<body>\n"
-    "<input id=\"n\" value=\"7\">\n"
-    "<a id=\"l\" href=\"x.html\" data-k=\"v\">Link</a>\n"
-    "<input id=\"c\" type=\"checkbox\" checked>\n"
-    "<div id=\"box\" style=\"position:absolute;left:10px;top:20px;"
-    "width:30px;height:40px\"></div>\n"
-    "<ul><li>one</li><li>two</li><li>three</li></ul>\n"
-    "</body>\n"
-    "</html>\n"
-)
+def _write_page(tmp_path):
+    html = (
+        "<!DOCTYPE html>\n"
+        "<html>\n"
+        "<head><meta charset=\"utf-8\"><title>AC-DRV-006</title></head>\n"
+        "<body>\n"
+        "<input id=\"n\" value=\"7\">\n"
+        "<a id=\"l\" href=\"x.html\" data-k=\"v\">Link</a>\n"
+        "<input id=\"c\" type=\"checkbox\" checked>\n"
+        "<div id=\"box\" style=\"position:absolute;left:10px;top:20px;"
+        "width:30px;height:40px\"></div>\n"
+        "<ul><li>one</li><li>two</li><li>three</li></ul>\n"
+        "</body>\n"
+        "</html>\n"
+    )
+    path = tmp_path / "index.html"
+    path.write_text(html, encoding="utf-8")
+    return path
 
 
 def test_ac_drv_006_element_reads(provisioned, tmp_path):
-    page_path = tmp_path / "index.html"
-    page_path.write_text(PAGE, encoding="utf-8")
-
-    session = driver_browser.open_session(REPO_ROOT, tmp_path)
+    page_path = _write_page(tmp_path)
+    session = driver_browser.open_session(ENV_ROOT, tmp_path)
     try:
         page = session.open(page_path, width=400, height=300)
 
@@ -67,9 +69,8 @@ def test_ac_drv_006_element_reads(provisioned, tmp_path):
 
         with pytest.raises(
             driver_browser.BrowserError,
-            match=re.escape("3 elements match css=li"),
-        ) as excinfo:
+            match="^" + re.escape("3 elements match css=li") + "$",
+        ):
             page.find(css="li").text()
-        assert str(excinfo.value) == "3 elements match css=li"
     finally:
         session.close()

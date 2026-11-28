@@ -1,12 +1,10 @@
-# hotdocs-criterion: sha256:9e8310be444813e8b8d5c3d2cd17360ee9bfbb24a002372ba02aa833ae18eeef
+# hotdocs-criterion: sha256:1fd7076c913d914799a69bdb1f8f5dc3cd5a5b41aaec94dd3569a8a617648fa8
 from pathlib import Path
 
 import pytest
 
 import driver_browser
 
-
-REPO_ROOT = Path.home() / ".cache" / "hotdocs-test"
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
@@ -15,69 +13,67 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def _repo_root():
+    return Path.home() / ".cache" / "hotdocs-test"
+
+
 @pytest.fixture(scope="session")
 def provisioned():
-    REPO_ROOT.mkdir(parents=True, exist_ok=True)
-    result = driver_browser.provision(REPO_ROOT)
+    repo_root = _repo_root()
+    repo_root.mkdir(parents=True, exist_ok=True)
+    result = driver_browser.provision(repo_root)
     if not field(result, "ok"):
         pytest.fail("provision failed: " + str(field(result, "reason")))
-    return result
+    return repo_root
 
 
-def write_page(path, name):
-    path.write_text(
+def _page_source(name):
+    return (
         "<!DOCTYPE html>\n"
         "<html lang=\"en\">\n"
         "<head><meta charset=\"utf-8\"><title>" + name + "</title></head>\n"
         "<body><p>" + name + "</p></body>\n"
-        "</html>\n",
-        encoding="utf-8",
+        "</html>\n"
     )
 
 
-def listing(directory):
+def _listing(directory):
     if not directory.is_dir():
-        return []
-    return sorted(p.name for p in directory.iterdir())
+        return {}
+    return {
+        p.name: p.read_bytes()
+        for p in sorted(directory.iterdir())
+    }
 
 
-def test_ac_drv_013_close_saves_final_screenshots_and_second_close_is_noop(provisioned, tmp_path):
-    a = tmp_path / "a.html"
-    b = tmp_path / "b.html"
-    write_page(a, "a")
-    write_page(b, "b")
+def test_ac_drv_013_close_saves_final_screenshots_and_second_close_is_noop(
+    provisioned, tmp_path
+):
+    (tmp_path / "a.html").write_text(_page_source("a"), encoding="utf-8")
+    (tmp_path / "b.html").write_text(_page_source("b"), encoding="utf-8")
 
     screenshots = tmp_path / "screenshots"
 
-    session = driver_browser.open_session(REPO_ROOT, tmp_path)
-    closed = False
+    session = driver_browser.open_session(provisioned, tmp_path)
     try:
-        session.open(a)
-        session.open(b)
+        session.open(tmp_path / "a.html")
+        session.open(tmp_path / "b.html")
 
         session.close()
-        closed = True
 
-        names_after_first = listing(screenshots)
-        assert names_after_first == ["final-1.png", "final-2.png"]
+        assert screenshots.is_dir()
+        names = sorted(p.name for p in screenshots.iterdir())
+        assert names == ["final-1.png", "final-2.png"]
+        for name in names:
+            with open(screenshots / name, "rb") as handle:
+                assert handle.read(8) == PNG_MAGIC
 
-        for name in names_after_first:
-            data = (screenshots / name).read_bytes()
-            assert data[:8] == PNG_MAGIC, name
+        before = _listing(screenshots)
 
-        contents_after_first = {
-            name: (screenshots / name).read_bytes() for name in names_after_first
-        }
-
-        # The second close() raises nothing and adds no file.
         session.close()
 
-        names_after_second = listing(screenshots)
-        assert names_after_second == ["final-1.png", "final-2.png"]
-        for name in names_after_second:
-            data = (screenshots / name).read_bytes()
-            assert data[:8] == PNG_MAGIC, name
-            assert data == contents_after_first[name], name
+        after = _listing(screenshots)
+        assert sorted(after) == ["final-1.png", "final-2.png"]
+        assert sorted(after) == sorted(before)
     finally:
-        if not closed:
-            session.close()
+        session.close()

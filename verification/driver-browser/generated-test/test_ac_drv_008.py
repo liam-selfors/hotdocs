@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:62d286151d9a2592f2a12e076ab79fd26f7f236c07981eec7e8ad1a6fd907407
+# hotdocs-criterion: sha256:07f1c8948e69894a6a687b326f13e8de7134c7d19c397385d5840fcaac278559
 import re
 from pathlib import Path
 
@@ -10,22 +10,20 @@ import driver_browser
 REPO_ROOT = Path.home() / ".cache" / "hotdocs-test"
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
 @pytest.fixture(scope="session")
 def provisioned():
-    result = driver_browser.provision(REPO_ROOT)
-    if not field(result, "ok"):
-        pytest.fail("provision failed: " + str(field(result, "reason")))
-    return result
+    report = driver_browser.provision(REPO_ROOT)
+    ok = report["ok"] if isinstance(report, dict) else getattr(report, "ok")
+    if not ok:
+        reason = report["reason"] if isinstance(report, dict) else getattr(report, "reason")
+        pytest.fail("browser provisioning failed: " + str(reason))
+    return report
 
 
-PAGE_HTML = (
+PAGE = (
     "<!DOCTYPE html>\n"
     "<html lang=\"en\">\n"
-    "<head><meta charset=\"utf-8\"><title>AC-DRV-008</title></head>\n"
+    "<head><meta charset=\"utf-8\"><title>Page</title></head>\n"
     "<body>\n"
     "<label for=\"q\">Query</label><input id=\"q\">\n"
     "<span data-testid=\"badge\">New</span>\n"
@@ -35,10 +33,15 @@ PAGE_HTML = (
 )
 
 
-def test_relative_open_and_selectors(provisioned, tmp_path):
+def test_relative_path_opens_and_selectors_work(provisioned, tmp_path, monkeypatch):
     sub = tmp_path / "sub"
     sub.mkdir()
-    (sub / "page.html").write_text(PAGE_HTML, encoding="utf-8")
+    (sub / "page.html").write_text(PAGE, encoding="utf-8")
+
+    # Make sure "relative" means relative to tmp_path, not the process cwd.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
 
     session = driver_browser.open_session(REPO_ROOT, tmp_path)
     try:
@@ -51,12 +54,17 @@ def test_relative_open_and_selectors(provisioned, tmp_path):
         session.close()
 
 
-def test_open_missing_file_raises(provisioned, tmp_path):
+def test_missing_file_raises_browser_error(provisioned, tmp_path, monkeypatch):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    expected = str(tmp_path / "missing.html")
     session = driver_browser.open_session(REPO_ROOT, tmp_path)
     try:
-        candidates = {str(tmp_path / "missing.html"), str((tmp_path / "missing.html").resolve())}
-        pattern = "^no such file: (" + "|".join(re.escape(c) for c in sorted(candidates)) + ")$"
-        with pytest.raises(driver_browser.BrowserError, match=pattern):
+        with pytest.raises(driver_browser.BrowserError) as excinfo:
             session.open("missing.html")
+        assert str(excinfo.value) == "no such file: " + expected
+        assert re.fullmatch(re.escape("no such file: " + expected), str(excinfo.value))
     finally:
         session.close()

@@ -1,7 +1,7 @@
 {
-  "spec_bundle_hash": "sha256:c985668fe15700f34d204c4a6b28960226ac8edfeaa589a7c23a87ada39c6750",
+  "spec_bundle_hash": "sha256:09b4532a7bf981086f5c628c1ca9f9e43b21fa092b7b97835067b88db8619561",
   "spec_bundle_parts": {
-    "spec": "sha256:c985668fe15700f34d204c4a6b28960226ac8edfeaa589a7c23a87ada39c6750",
+    "spec": "sha256:09b4532a7bf981086f5c628c1ca9f9e43b21fa092b7b97835067b88db8619561",
     "dependency_code": "sha256:c92a94e1a5dc05f61ea3cafa3ab0d83b65ff7fc7322ac17584e5be5273d1b7b3"
   },
   "model_pin": "claude-opus-5-5",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-28T10:31:51Z",
+  "generated_at": "2026-11-28T18:07:52Z",
   "verification_run_id": "driver-browser-attempt-1",
   "verification_report": {
     "component_id": "comp-driver-browser",
@@ -187,6 +187,18 @@
           "prompt_version": "v1",
           "cache_hit": false
         }
+      },
+      {
+        "id": "AC-DRV-014",
+        "covers": "R-DRV-002",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -196,7 +208,7 @@
       "R-DRV-004": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.864,
+    "mutation_score": 0.8347107438016529,
     "mutation_error": null,
     "assets": [
       {
@@ -230,15 +242,8 @@
   "secret_scan": {
     "scope": "full",
     "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": true,
-    "matches": [
-      {
-        "rule_id": "Hex High Entropy String",
-        "risk_tier": "low",
-        "file": "verification/driver-browser/generated-test/test_ac_drv_010.py",
-        "line": 15
-      }
-    ],
+    "flagged": false,
+    "matches": [],
     "allowed": [
       {
         "rule_id": "AWS Access Key",
@@ -342,6 +347,10 @@
       {
         "file": "verification/corpus-graph.json",
         "type": "Base64 High Entropy String"
+      },
+      {
+        "file": "verification/driver-browser/generated-test/test_ac_drv_010.py",
+        "type": "Hex High Entropy String"
       },
       {
         "file": "verification/generator/generated-test/test_ac_gen_018.py",

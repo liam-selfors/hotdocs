@@ -1,12 +1,8 @@
-# hotdocs-criterion: sha256:8370c8e02f875c48f97df05614cb5e672b6abe1e504570065cf8cbb60953da0d
+# hotdocs-criterion: sha256:d822aad5d000e84ae63da29bcad363c2b436be1f8cb90838a319f6f4f94c50e1
 import driver_browser
 
 
-START = "Drive pages only through the `browser` fixture."
-END = "`pytest.raises(Exception, match=...)` on the message."
-
-
-def test_guidance_returns_only_test_author_with_expected_text():
+def test_ac_drv_005_guidance_returns_only_test_author_text():
     result = driver_browser.guidance()
 
     assert isinstance(result, dict)
@@ -14,5 +10,5 @@ def test_guidance_returns_only_test_author_with_expected_text():
 
     text = result["test_author"]
     assert isinstance(text, str)
-    assert text.startswith(START), repr(text[:120])
-    assert text.endswith(END), repr(text[-120:])
+    assert text.startswith("Drive pages only through the `browser` fixture.")
+    assert text.endswith("`pytest.raises(Exception, match=...)` on the message.")
