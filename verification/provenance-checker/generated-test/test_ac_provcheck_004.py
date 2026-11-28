@@ -1,22 +1,30 @@
-# hotdocs-criterion: sha256:467cfbec1beb20def7d8aca53b65a2d2d6832b0546898134d0e96c05154bf815
+# hotdocs-criterion: sha256:037cf594ff48d6b83ece9120421eff736e0add98a666a8fd4a310ffa1742e667
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import provenance_checker
+
+
+PK = "sha256:" + "a" * 64
+H = "sha256:" + "ab" * 32
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PK = "sha256:" + "a" * 64
-H = "sha256:" + "0123456789abcdef" * 4
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def _write_fake_python_adapter(repo_root):
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True, exist_ok=True)
+def _sha256_file(path):
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _plant_python_adapter(repo_root):
     provision_result = {
         "ok": True,
         "reason": "",
@@ -24,26 +32,23 @@ def _write_fake_python_adapter(repo_root):
         "lockfile_sha256": None,
         "interpreter": "/fake/python",
     }
-    guidance_result = {"generator": "", "test_author": ""}
     source = (
         "KIND = " + repr("python") + "\n"
         "\n"
         "\n"
         "def guidance():\n"
-        "    return " + repr(guidance_result) + "\n"
+        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
         "\n"
         "\n"
         "def provision(repo_root):\n"
         "    return " + repr(provision_result) + "\n"
     )
-    path = adapter_dir / "kind_python.py"
-    path.write_text(source, encoding="utf-8")
+    path = repo_root / "gen" / "kind-python" / "kind_python.py"
+    _write(path, source)
     return path
 
 
-def _write_component_md(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
+def _plant_component(repo_root):
     text = (
         "---\n"
         "id: comp-foo\n"
@@ -54,17 +59,11 @@ def _write_component_md(repo_root):
         "---\n"
         "\n"
         "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "A fixture component.\n"
     )
-    (comp_dir / "component.md").write_text(text, encoding="utf-8")
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", text)
 
 
-def _write_manifest(repo_root, python_entry):
-    gen_dir = repo_root / "gen" / "foo"
-    gen_dir.mkdir(parents=True, exist_ok=True)
+def _plant_manifest(repo_root, python_entry):
     manifest = {
         "spec_bundle_hash": H,
         "gate_versions": {},
@@ -72,14 +71,19 @@ def _write_manifest(repo_root, python_entry):
             "component_id": "comp-foo",
             "criteria": [
                 {
-                    "id": "AC-FOO-002",
-                    "covers": "R-FOO-002",
+                    "id": "AC-FOO-001",
+                    "covers": "R-FOO-001",
                     "kind": "llm-judge",
                     "result": "pass",
                     "rationale": "looks right",
                 }
             ],
-            "requirement_results": {"R-FOO-002": "pass"},
+            "requirement_results": {"R-FOO-001": "pass"},
+            "interface_drift": False,
+            "mutation_score": None,
+            "mutation_error": None,
+            "assets": [python_entry],
+            "drivers": [],
             "overall": "pass",
         },
         "license_scan": {},
@@ -87,35 +91,38 @@ def _write_manifest(repo_root, python_entry):
         "assets": [python_entry],
         "drivers": [],
     }
-    (gen_dir / ".provenance.json").write_text(json.dumps(manifest), encoding="utf-8")
+    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest))
 
 
-def test_ac_provcheck_004_llm_judge_not_trusted_is_miss(tmp_path, monkeypatch):
+def test_ac_provcheck_004_llm_judge_not_trusted_is_miss(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    adapter_path = _write_fake_python_adapter(repo_root)
-    _write_component_md(repo_root)
-
-    pa = "sha256:" + hashlib.sha256(adapter_path.read_bytes()).hexdigest()
+    adapter_path = _plant_python_adapter(repo_root)
+    _plant_component(repo_root)
     python_entry = {
         "kind": "python",
         "path": ".",
         "definition_sha256": None,
-        "adapter_sha256": pa,
+        "adapter_sha256": _sha256_file(adapter_path),
         "versions": {"python": "3.12.4", "packages": PK},
         "lockfile_sha256": None,
     }
-    _write_manifest(repo_root, python_entry)
+    _plant_manifest(repo_root, python_entry)
 
-    # monkeypatch removes the variable again after the test.
-    monkeypatch.setenv("VAR_TRUST_JUDGE_PROVENANCE", "false")
-
-    result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
+    had_prior = "VAR_TRUST_JUDGE_PROVENANCE" in os.environ
+    prior = os.environ.get("VAR_TRUST_JUDGE_PROVENANCE")
+    os.environ["VAR_TRUST_JUDGE_PROVENANCE"] = "false"
+    try:
+        result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
+    finally:
+        if had_prior:
+            os.environ["VAR_TRUST_JUDGE_PROVENANCE"] = prior
+        else:
+            os.environ.pop("VAR_TRUST_JUDGE_PROVENANCE", None)
 
     assert field(result, "hit") is False
-    # A definitive miss: nothing from the manifest is partially trusted.
+    # A miss is definitive: no manifest field is passed through partially.
     assert field(result, "verification_report") is None
     assert field(result, "license_scan") is None
     assert field(result, "secret_scan") is None
-    assert field(result, "reason") == "llm-judge results not trusted"

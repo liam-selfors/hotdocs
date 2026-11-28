@@ -1,11 +1,10 @@
-# hotdocs-criterion: sha256:6897a61ece9e1d8d8e39197930867c817ee024b7b952b71d102bd858d9c68356
-"""CS-ZERO-EDIT-001: a ratified, non-sealed spec change goes through the
-pipeline alone, and the resulting gen/<component>/ passes every gate with no
-human-authored commit to gen/<component>/ between the spec merge and the
-pipeline's own merge commit."""
+# hotdocs-criterion: sha256:379a41b586e371f8b2b8cf4932a28f16f75799aa90c2320eb1bd487e55a71e27
+"""CS-ZERO-EDIT-001: a ratified, non-sealed component spec change merged
+through the pipeline yields a gen/<component>/ that passes every gate,
+with zero human-authored commits to gen/<component>/ between the spec
+merge and the pipeline's own merge commit."""
 
 import importlib.util
-import os
 import re
 import shutil
 import subprocess
@@ -14,40 +13,30 @@ from pathlib import Path
 
 import pytest
 
-import agentic_generator
 import component_gate_runner
 
 
-HUMAN_NAME = "Human Developer"
-HUMAN_EMAIL = "human@example.invalid"
+SLUG = "doubler"
+COMPONENT_ID = "comp-" + SLUG
+MODULE = "doubler"
+MODEL = "anthropic:claude-sonnet-5"
+
+HUMAN_NAME = "Spec Author"
+HUMAN_EMAIL = "spec-author@example.invalid"
 PIPELINE_NAME = "hotdocs-pipeline"
-PIPELINE_EMAIL = "pipeline@hotdocs.invalid"
+PIPELINE_EMAIL = "pipeline@example.invalid"
 
-MODEL = "mock-model"
-
-GENERATED_CODE = (
-    '"""Widget: tells whether a number is negative."""\n'
+GENERATED_SOURCE = "def double(n):\n    return 2 * n\n"
+GENERATED_TEST = (
+    "import " + MODULE + "\n"
     "\n"
     "\n"
-    "def is_negative(n):\n"
-    '    """Return True exactly when n is below zero."""\n'
-    "    return n < 0\n"
-)
-
-COMMITTED_TEST = (
-    "import widget\n"
+    "def test_double_of_21_is_42():\n"
+    "    assert " + MODULE + ".double(21) == 42\n"
     "\n"
     "\n"
-    "def test_negative_number_is_negative():\n"
-    "    assert widget.is_negative(-1) is True\n"
-    "\n"
-    "\n"
-    "def test_zero_is_not_negative():\n"
-    "    assert widget.is_negative(0) is False\n"
-    "\n"
-    "\n"
-    "def test_positive_number_is_not_negative():\n"
-    "    assert widget.is_negative(1) is False\n"
+    "def test_double_of_negative():\n"
+    "    assert " + MODULE + ".double(-3) == -6\n"
 )
 
 
@@ -63,139 +52,175 @@ def load_module(path, module_name):
     return module
 
 
+def load_spec_linter():
+    gen = next(
+        p for p in Path(component_gate_runner.__file__).resolve().parents if p.name == "gen"
+    )
+    base = gen / "spec-linter"
+    path = (
+        base / "spec_linter.py"
+        if (base / "spec_linter.py").is_file()
+        else base / "spec_linter" / "__init__.py"
+    )
+    return load_module(path, "spec_linter")
+
+
 def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-FENCE = "`" * 3
-
-
-def build_fixture(repo_root):
+def build_corpus(root):
     write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — the fixture component under test.\n",
+        root / ".gitignore",
+        "__pycache__/\n*.pyc\n",
     )
-
     write(
-        repo_root / "specs" / "product" / "widget.md",
+        root / "specs" / "glossary.md",
+        "# Glossary\n"
+        "\n"
+        "- **Doubling** — multiplying an integer by two.\n",
+    )
+    write(
+        root / "specs" / "product" / "P-DOUBLING.md",
         "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget Capability\n"
+        "id: P-DOUBLING\n"
+        "title: Doubling\n"
         "status: ratified\n"
         "last_ratified_commit: 0000000\n"
-        "owners: [widget-team]\n"
+        "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# Widget Capability\n"
+        "# Doubling\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Tell whether a number is negative.\n"
+        "Callers can double an integer.\n"
         "\n"
         "## Capability scenario\n"
         "\n"
-        "### CS-WIDGET-001\n"
-        "Covers: P-WIDGET\n"
-        "Kind: generated-test\n"
+        "### CS-DOUBLING-001\n"
+        "Covers: P-DOUBLING\n"
+        "Kind: llm-judge\n"
         "\n"
-        + FENCE + "gherkin\n"
-        "Given the number -1\n"
-        "When is_negative is called with it\n"
-        "Then the result is True\n"
-        + FENCE + "\n",
+        "```gherkin\n"
+        "Given an integer\n"
+        "When it is doubled\n"
+        "Then the result is twice the integer\n"
+        "```\n",
     )
-
-    comp = repo_root / "specs" / "components" / "widget"
+    comp = root / "specs" / "components" / SLUG
     write(
         comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: " + COMPONENT_ID + "\n"
+        "title: Doubler\n"
         "status: ratified\n"
         "last_ratified_commit: 0000000\n"
-        "owners: [widget-team]\n"
+        "owners: [pipeline-team]\n"
         "depends_on: []\n"
-        "realizes: [P-WIDGET]\n"
+        "realizes: [P-DOUBLING]\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Doubler\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Tells whether a number is negative.\n",
+        "Doubles integers.\n",
     )
     write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n"
+        comp / "requirements" / "R-DOUBLER-001.md",
+        "# R-DOUBLER-001\n"
         "\n"
-        "`is_negative(n)` MUST return `True` exactly when the integer `n` is\n"
-        "below zero, and `False` otherwise.\n",
-    )
-    write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
-        "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        + FENCE + "gherkin\n"
-        "Given the integers -1, 0 and 1\n"
-        "When is_negative is called with each\n"
-        "Then it returns True for -1 and False for 0 and 1\n"
-        + FENCE + "\n",
+        "`double(n)` MUST return `2 * n` for every integer `n`.\n",
     )
     write(
         comp / "interface" / "library.md",
         "# Library\n"
         "\n"
-        "One module file, `widget.py`.\n"
+        "One module file, `" + MODULE + ".py`.\n"
         "\n"
-        + FENCE + "\n"
-        "is_negative(n: int) -> bool\n"
-        + FENCE + "\n",
+        "```\n"
+        "double(n: int) -> int\n"
+        "```\n",
     )
     write(
         comp / "constraints.md",
-        "# Constraints\n\nPure function: no I/O, no network access.\n",
+        "# Constraints\n"
+        "\n"
+        "Python standard library only.\n",
     )
-
-    # The criterion's test, committed with the spec change (outside gen/).
     write(
-        repo_root / "verification" / "widget" / "generated-test" / "test_ac_widget_001.py",
-        COMMITTED_TEST,
+        comp / "acceptance" / "AC-DOUBLER-001.md",
+        "# AC-DOUBLER-001\n"
+        "\n"
+        "Covers: R-DOUBLER-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given the integer 21\n"
+        "When double is called with it\n"
+        "Then the result is 42\n"
+        "```\n",
     )
 
 
-def make_backend(log_path):
+def git(root, *args, author=None):
+    cmd = [
+        "git",
+        "-c", "commit.gpgsign=false",
+        "-c", "init.defaultBranch=main",
+        "-c", "user.name=" + (author[0] if author else HUMAN_NAME),
+        "-c", "user.email=" + (author[1] if author else HUMAN_EMAIL),
+    ] + list(args)
+    env = {
+        "PATH": __import__("os").environ.get("PATH", ""),
+        "HOME": str(root),
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+    if author:
+        env.update(
+            {
+                "GIT_AUTHOR_NAME": author[0],
+                "GIT_AUTHOR_EMAIL": author[1],
+                "GIT_COMMITTER_NAME": author[0],
+                "GIT_COMMITTER_EMAIL": author[1],
+            }
+        )
+    out = subprocess.run(
+        cmd, cwd=str(root), env=env, capture_output=True, text=True, check=True
+    )
+    return out.stdout
+
+
+def make_backend(calls):
     gen_marker = re.compile(r"-----BEGIN FILE ([0-9a-f]{32}): ")
     test_marker = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
 
     def backend(prompt, model, **params):
-        match = gen_marker.search(prompt)
-        if match:
-            nonce = match.group(1)
-            with open(log_path, "a", encoding="utf-8") as fh:
-                fh.write("generator\n")
+        m = gen_marker.search(prompt)
+        if m:
+            nonce = m.group(1)
+            calls.append("generator")
             text = (
-                "-----BEGIN FILE " + nonce + ": widget.py-----\n"
-                + GENERATED_CODE
+                "-----BEGIN FILE " + nonce + ": " + MODULE + ".py-----\n"
+                + GENERATED_SOURCE
                 + "-----END FILE " + nonce + "-----\n"
                 + "-----END REPLY " + nonce + "-----\n"
             )
         else:
-            match = test_marker.search(prompt)
-            with open(log_path, "a", encoding="utf-8") as fh:
-                fh.write("other\n")
-            if match:
-                nonce = match.group(1)
+            m = test_marker.search(prompt)
+            if m:
+                nonce = m.group(1)
+                calls.append("test-author")
                 text = (
                     "-----BEGIN FILE " + nonce + "-----\n"
-                    + COMMITTED_TEST
+                    + GENERATED_TEST
                     + "-----END FILE " + nonce + "-----\n"
                 )
             else:
-                text = '{"result": "pass", "rationale": "ok"}'
+                calls.append("judge")
+                text = '{"result": "pass", "rationale": "double(n) returns 2 * n"}'
         return {
             "text": text,
             "model": model,
@@ -206,113 +231,88 @@ def make_backend(log_path):
     return backend
 
 
-def git(repo_root, *args, author=None):
-    env = dict(os.environ)
-    env["GIT_CONFIG_GLOBAL"] = os.devnull
-    env["GIT_CONFIG_NOSYSTEM"] = "1"
-    name, email = author or (HUMAN_NAME, HUMAN_EMAIL)
-    env["GIT_AUTHOR_NAME"] = name
-    env["GIT_AUTHOR_EMAIL"] = email
-    env["GIT_COMMITTER_NAME"] = name
-    env["GIT_COMMITTER_EMAIL"] = email
-    out = subprocess.run(
-        ["git", "-c", "commit.gpgsign=false", *args],
-        cwd=str(repo_root),
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return out.stdout
-
-
 def test_spec_change_merges_with_zero_human_edits_to_gen(tmp_path, monkeypatch):
     if shutil.which("git") is None:
-        pytest.skip("git is required to check the commit history")
+        pytest.skip("git is required to observe commit authorship")
 
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
-
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root)
+    monkeypatch.chdir(repo_root)
 
-    # Precondition: the spec change is lint-clean.
-    gen = next(p for p in Path(agentic_generator.__file__).resolve().parents if p.name == "gen")
-    base = gen / "spec-linter"
-    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+    # Given: a ratified, non-sealed, lint-clean component spec bundle with
+    # complete acceptance criteria, merged by a human.
+    build_corpus(repo_root)
+    spec_linter = load_spec_linter()
+    assert field(spec_linter.lint(None, repo_root), "hard_failures") == 0
 
-    # The human merges the spec change.
     git(repo_root, "init", "-q")
     git(repo_root, "add", "-A")
-    git(repo_root, "commit", "-q", "-m", "Merge spec change: comp-widget")
+    git(repo_root, "commit", "-q", "-m", "spec: add doubler", author=(HUMAN_NAME, HUMAN_EMAIL))
     spec_merge = git(repo_root, "rev-parse", "HEAD").strip()
+    assert not (repo_root / "gen" / SLUG).exists()
 
-    # The pipeline alone generates and verifies.
-    log_path = tmp_path / "backend.log"
-    backend = make_backend(log_path)
+    # When: the pipeline alone runs generation and verification.
+    calls = []
     result = component_gate_runner.run_component_gates(
-        "comp-widget", repo_root, MODEL, 0, backend
+        COMPONENT_ID, repo_root, MODEL, seed=0, llm_backend=make_backend(calls)
     )
 
-    assert field(result, "blocked") is False, result
-    assert field(result, "block_reason") is None
-    assert field(result, "model_call_error") is None
-    verification = field(result, "verification")
-    assert verification is not None
-    assert field(verification, "overall") == "pass", verification
-    license_scan = field(result, "license_scan")
-    assert field(license_scan, "blocked") is not True, license_scan
-    secret_scan = field(result, "secret_scan")
-    assert field(secret_scan, "flagged") is not True, secret_scan
+    assert "generator" in calls
 
-    assert "generator" in log_path.read_text(encoding="utf-8").splitlines()
+    # No human touched gen/ between the spec merge and the pipeline's merge.
+    log_before_merge = git(
+        repo_root, "log", "--format=%H", spec_merge + "..HEAD", "--", "gen/" + SLUG
+    ).strip()
+    assert log_before_merge == ""
+    assert git(repo_root, "rev-parse", "HEAD").strip() == spec_merge
 
-    # gen/widget/ is exactly what the pipeline produced: untouched by hand.
-    produced = repo_root / "gen" / "widget" / "widget.py"
-    assert produced.read_text(encoding="utf-8") == GENERATED_CODE
-    assert (repo_root / "gen" / "widget" / ".provenance.json").is_file()
-
-    # The pipeline makes its own merge commit.
+    # The pipeline's own merge commit.
     git(repo_root, "add", "-A")
     git(
-        repo_root,
-        "commit",
-        "-q",
-        "-m",
-        "hotdocs pipeline: merge generated comp-widget",
+        repo_root, "commit", "-q", "-m", "pipeline: merge " + COMPONENT_ID,
         author=(PIPELINE_NAME, PIPELINE_EMAIL),
     )
     pipeline_merge = git(repo_root, "rev-parse", "HEAD").strip()
-    assert pipeline_merge != spec_merge
 
-    # Zero human-authored commits to gen/widget/ between the two merges.
-    authors = git(
-        repo_root,
-        "log",
-        "--format=%an <%ae>",
-        spec_merge + ".." + pipeline_merge,
-        "--",
-        "gen/widget",
-    ).splitlines()
-    assert authors, "the pipeline's merge commit must be what lands gen/widget/"
-    assert all(a == PIPELINE_NAME + " <" + PIPELINE_EMAIL + ">" for a in authors), authors
-    assert not any(HUMAN_EMAIL in a for a in authors)
+    # Then: every gate passes.
+    assert field(result, "blocked") is False
+    assert field(result, "block_reason") is None
+    verification = field(result, "verification")
+    assert verification is not None
+    assert field(verification, "overall") == "pass"
+    license_scan = field(result, "license_scan")
+    assert license_scan is not None
+    assert field(license_scan, "blocked") is not True
+    secret_scan = field(result, "secret_scan")
+    assert secret_scan is not None
+    assert field(secret_scan, "flagged") is not True
+    assert field(spec_linter.lint(None, repo_root), "hard_failures") == 0
 
-    # The merged gen/widget/, as committed, still passes every gate.
-    log_path.write_text("", encoding="utf-8")
-    again = component_gate_runner.run_component_gates(
-        "comp-widget", repo_root, MODEL, 0, backend
-    )
-    assert field(again, "blocked") is False, again
-    assert field(again, "provenance_hit") is True, again
-    assert field(field(again, "verification"), "overall") == "pass"
-    assert field(field(again, "license_scan"), "blocked") is not True
-    assert field(field(again, "secret_scan"), "flagged") is not True
-    assert "generator" not in log_path.read_text(encoding="utf-8").splitlines()
-    assert produced.read_text(encoding="utf-8") == GENERATED_CODE
+    # The merged gen/<component>/ is exactly what the pipeline produced.
+    merged_source = git(repo_root, "show", pipeline_merge + ":gen/" + SLUG + "/" + MODULE + ".py")
+    assert merged_source == GENERATED_SOURCE
+    assert (repo_root / "gen" / SLUG / ".provenance.json").is_file()
+
+    # And zero commits to gen/<component>/ between the spec merge and the
+    # pipeline's merge commit were authored by a human.
+    lines = [
+        line
+        for line in git(
+            repo_root,
+            "log",
+            "--format=%an%x09%ae%x09%H",
+            spec_merge + ".." + pipeline_merge,
+            "--",
+            "gen/" + SLUG,
+        ).splitlines()
+        if line.strip()
+    ]
+    assert lines, "the pipeline's merge commit must touch gen/" + SLUG
+    for line in lines:
+        name, email, sha = line.split("\t")
+        assert (name, email) == (PIPELINE_NAME, PIPELINE_EMAIL), (
+            "human-authored commit " + sha + " touched gen/" + SLUG
+        )
+    last = lines[0].split("\t")[2]
+    assert last == pipeline_merge

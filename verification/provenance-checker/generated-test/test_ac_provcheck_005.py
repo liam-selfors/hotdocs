@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:3b9013a3c76f17527d67a5e72b36191a7683379be6b38d989684344fb9f76c31
+# hotdocs-criterion: sha256:5b43acec8ee7d95f28fe0b52b3e7e3abd0feaf5573fe76481a5d8ff583b81a22
 import hashlib
 import json
 from pathlib import Path
@@ -6,49 +6,47 @@ from pathlib import Path
 import provenance_checker
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
 PK = "sha256:" + "a" * 64
 H = "sha256:" + "0123456789abcdef" * 4
 
 
-def _sha256_file(path):
-    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def _plant_python_adapter(repo_root):
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True, exist_ok=True)
-    provision_result = {
-        "ok": True,
-        "reason": "",
-        "versions": {"python": "3.12.4", "packages": PK},
-        "lockfile_sha256": None,
-        "interpreter": "/fake/python",
-    }
-    guidance_result = {"generator": "", "test_author": ""}
     source = (
         "KIND = " + repr("python") + "\n"
         "\n"
         "\n"
         "def guidance():\n"
-        "    return " + repr(guidance_result) + "\n"
+        "    return {" + repr("generator") + ": " + repr("") + ", "
+        + repr("test_author") + ": " + repr("") + "}\n"
         "\n"
         "\n"
         "def provision(repo_root):\n"
-        "    return " + repr(provision_result) + "\n"
+        "    return {\n"
+        "        " + repr("ok") + ": True,\n"
+        "        " + repr("reason") + ": " + repr("") + ",\n"
+        "        " + repr("versions") + ": {" + repr("python") + ": " + repr("3.12.4")
+        + ", " + repr("packages") + ": " + repr(PK) + "},\n"
+        "        " + repr("lockfile_sha256") + ": None,\n"
+        "        " + repr("interpreter") + ": " + repr("/fake/python") + ",\n"
+        "    }\n"
     )
-    path = adapter_dir / "kind_python.py"
-    path.write_text(source, encoding="utf-8")
-    return path
+    path = repo_root / "gen" / "kind-python" / "kind_python.py"
+    _write(path, source)
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _plant_component(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    text = (
+    _write(
+        repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -61,20 +59,18 @@ def _plant_component(repo_root):
         "\n"
         "## Purpose\n"
         "\n"
-        "A fixture component.\n"
+        "A fixture component.\n",
     )
-    (comp_dir / "component.md").write_text(text, encoding="utf-8")
 
 
-def test_ac_provcheck_005_llm_judge_trusted_hit(tmp_path, monkeypatch):
+def test_ac_provcheck_005_llm_judge_hit_when_judge_provenance_trusted(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    adapter_path = _plant_python_adapter(repo_root)
+    pa = _plant_python_adapter(repo_root)
     _plant_component(repo_root)
 
-    pa = _sha256_file(adapter_path)
-    python_entry = {
+    p_entry = {
         "kind": "python",
         "path": ".",
         "definition_sha256": None,
@@ -84,6 +80,7 @@ def test_ac_provcheck_005_llm_judge_trusted_hit(tmp_path, monkeypatch):
     }
 
     verification_report = {
+        "component_id": "comp-foo",
         "criteria": [
             {
                 "id": "AC-FOO-001",
@@ -92,7 +89,14 @@ def test_ac_provcheck_005_llm_judge_trusted_hit(tmp_path, monkeypatch):
                 "result": "pass",
                 "rationale": "looks right",
             }
-        ]
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": None,
+        "mutation_error": None,
+        "assets": [p_entry],
+        "drivers": [],
+        "overall": "pass",
     }
     manifest = {
         "spec_bundle_hash": H,
@@ -100,16 +104,16 @@ def test_ac_provcheck_005_llm_judge_trusted_hit(tmp_path, monkeypatch):
         "verification_report": verification_report,
         "license_scan": {},
         "secret_scan": {},
-        "assets": [python_entry],
+        "assets": [p_entry],
         "drivers": [],
     }
-    gen_dir = repo_root / "gen" / "foo"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    (gen_dir / ".provenance.json").write_text(json.dumps(manifest), encoding="utf-8")
+    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest))
 
     monkeypatch.setenv("VAR_TRUST_JUDGE_PROVENANCE", "true")
-
-    result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
+    try:
+        result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
+    finally:
+        monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
 
     assert field(result, "hit") is True, (
         "expected a hit, got reason " + repr(field(result, "reason"))

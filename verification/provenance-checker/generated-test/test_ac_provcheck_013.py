@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:219f3801e82a279986095f2067956c4f755b7915a0d2b925d7b4c14efc44da09
+# hotdocs-criterion: sha256:13c1a36761b4b77b0b0239119d1937b59d00b09b4a2705e7105bce89989652fc
 import copy
-import hashlib
 import json
 from pathlib import Path
 
@@ -9,57 +8,55 @@ import pytest
 import provenance_checker
 
 
-PK = "sha256:" + "a" * 64
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+PYTHON_ADAPTER_SRC = (
+    "KIND = " + repr("python") + "\n"
+    "\n"
+    "def guidance():\n"
+    "    return {" + repr("generator") + ": " + repr("") + ", "
+    + repr("test_author") + ": " + repr("") + "}\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("") + ", "
+    + repr("versions") + ": {" + repr("python") + ": " + repr("3.12.4") + ", "
+    + repr("packages") + ": " + repr("sha256:" + "a" * 64) + "}, "
+    + repr("lockfile_sha256") + ": None, "
+    + repr("interpreter") + ": " + repr("/fake/python") + "}\n"
+)
+
+VERIFIER_SRC = (
+    "GATE_VERSION = " + repr("verifier-orchestrator@2.0.0") + "\n"
+    "DEFAULT_TEST_TIMEOUT = 300.0\n"
+    "\n"
+    "def verify(component_id, repo_root, judge=None, test_author=None):\n"
+    "    return {\n"
+    "        " + repr("component_id") + ": component_id,\n"
+    "        " + repr("criteria") + ": [],\n"
+    "        " + repr("requirement_results") + ": {},\n"
+    "        " + repr("interface_drift") + ": False,\n"
+    "        " + repr("mutation_score") + ": None,\n"
+    "        " + repr("mutation_error") + ": None,\n"
+    "        " + repr("assets") + ": [],\n"
+    "        " + repr("drivers") + ": [],\n"
+    "        " + repr("overall") + ": " + repr("pass") + ",\n"
+    "    }\n"
+)
 
 
-def _build_repo(repo_root, sealed=True):
-    # Fake python adapter (testing.md, "The fake python adapter").
-    _write(
-        repo_root / "gen" / "kind-python" / "kind_python.py",
-        "KIND = " + repr("python") + "\n"
-        "\n"
-        "def guidance():\n"
-        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
-        "\n"
-        "def provision(repo_root):\n"
-        "    return " + repr({
-            "ok": True,
-            "reason": "",
-            "versions": {"python": "3.12.4", "packages": PK},
-            "lockfile_sha256": None,
-            "interpreter": "/fake/python",
-        }) + "\n",
-    )
+def make_repo(root, sealed=True):
+    root.mkdir(parents=True, exist_ok=True)
+    kp = root / "gen" / "kind-python"
+    kp.mkdir(parents=True)
+    (kp / "kind_python.py").write_text(PYTHON_ADAPTER_SRC)
+    vo = root / "gen" / "verifier-orchestrator"
+    vo.mkdir(parents=True)
+    (vo / "verifier_orchestrator.py").write_text(VERIFIER_SRC)
 
-    # verifier-orchestrator stand-in, providing every name its interface lists.
-    _write(
-        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
-        "GATE_VERSION = " + repr("verifier-orchestrator@2.0.0") + "\n"
-        "DEFAULT_TEST_TIMEOUT = 300.0\n"
-        "\n"
-        "def verify(component_id, repo_root, judge=None, test_author=None):\n"
-        "    return " + repr({
-            "component_id": "comp-foo",
-            "criteria": [],
-            "requirement_results": {},
-            "interface_drift": False,
-            "mutation_score": None,
-            "mutation_error": None,
-            "assets": [],
-            "drivers": [],
-            "overall": "pass",
-        }) + "\n",
-    )
-
+    comp = root / "specs" / "components" / "foo"
+    comp.mkdir(parents=True)
     lines = [
         "---",
         "id: comp-foo",
@@ -79,19 +76,15 @@ def _build_repo(repo_root, sealed=True):
     lines.append("")
     lines.append("A fixture component.")
     lines.append("")
-    _write(repo_root / "specs" / "components" / "foo" / "component.md", "\n".join(lines))
+    (comp / "component.md").write_text("\n".join(lines))
 
-    # Sealed source.
-    _write(repo_root / "pipeline" / "foo" / "foo.py", "def foo():\n    return 1\n")
-
-
-def _source_hash(repo_root):
-    key = provenance_checker.current_sealed_key("comp-foo", repo_root)
-    assert key is not None
-    return field(key, "source_hash")
+    src = root / "pipeline" / "foo"
+    src.mkdir(parents=True)
+    (src / "foo.py").write_text("def foo():\n    return 1\n")
+    return root
 
 
-def _valid_manifest(source_hash):
+def valid_manifest(source_hash):
     return {
         "kind": "sealed-provenance",
         "version": 1,
@@ -105,49 +98,53 @@ def _valid_manifest(source_hash):
     }
 
 
-def _manifest_path(repo_root):
-    return repo_root / "pipeline" / "foo" / ".sealed-provenance.json"
+def manifest_path(root):
+    return root / "pipeline" / "foo" / ".sealed-provenance.json"
 
 
-def _write_manifest_doc(repo_root, doc):
-    _manifest_path(repo_root).write_text(json.dumps(doc), encoding="utf-8")
+def write_manifest_text(root, text):
+    manifest_path(root).write_text(text)
 
 
-def _check(repo_root):
-    return provenance_checker.check_sealed_provenance("comp-foo", repo_root)
+@pytest.fixture
+def sealed_repo(tmp_path):
+    root = make_repo(tmp_path / "repo", sealed=True)
+    key = provenance_checker.current_sealed_key("comp-foo", root)
+    assert key is not None
+    source_hash = field(key, "source_hash")
+    return root, source_hash
 
 
-def _assert_miss(result, reason):
+def check(root):
+    return provenance_checker.check_sealed_provenance("comp-foo", root)
+
+
+def assert_miss(result, reason):
     assert field(result, "reason") == reason
-    assert field(result, "sealed") is True
     assert field(result, "hit") is False
+    assert field(result, "sealed") is True
     for name in ("verification_report", "owners", "source_hash", "written_at"):
         assert field(result, name) is None
 
 
-@pytest.fixture
-def repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_repo(repo_root, sealed=True)
-    source_hash = _source_hash(repo_root)
-    return repo_root, source_hash
-
-
-def test_valid_current_manifest_hits(repo):
-    repo_root, source_hash = repo
-    _write_manifest_doc(repo_root, _valid_manifest(source_hash))
-    result = _check(repo_root)
+def test_valid_current_manifest_hits(sealed_repo):
+    root, source_hash = sealed_repo
+    write_manifest_text(root, json.dumps(valid_manifest(source_hash)))
+    result = check(root)
     assert field(result, "reason") is None
     assert field(result, "hit") is True
     assert field(result, "sealed") is True
 
 
-@pytest.mark.parametrize("doc", [[], [1, 2], 5, "sealed-provenance", None])
-def test_non_object_document_is_invalid(repo, doc):
-    repo_root, _ = repo
-    _write_manifest_doc(repo_root, doc)
-    _assert_miss(_check(repo_root), "manifest_invalid")
+@pytest.mark.parametrize(
+    "doc",
+    [[], [1, 2], 5, "sealed-provenance", None],
+    ids=["empty-list", "list", "number", "string", "null"],
+)
+def test_non_object_document_is_invalid(sealed_repo, doc):
+    root, _ = sealed_repo
+    write_manifest_text(root, json.dumps(doc))
+    assert_miss(check(root), "manifest_invalid")
 
 
 TOP_LEVEL_CASES = [
@@ -170,7 +167,7 @@ TOP_LEVEL_CASES = [
     ("source_path", "/abs/"),
     ("source_path", "a b/"),
     ("source_hash", 5),
-    ("source_hash", "sha256:" + "0" * 63),
+    ("source_hash", "sha256:" + "a" * 63),
     ("source_hash", "sha256:" + "A" * 64),
     ("source_hash", "sha1:" + "a" * 64),
     ("verifier_version", 5),
@@ -183,61 +180,96 @@ TOP_LEVEL_CASES = [
 ]
 
 
-@pytest.mark.parametrize("key,value", TOP_LEVEL_CASES, ids=[k + "=" + repr(v) for k, v in TOP_LEVEL_CASES])
-def test_invalid_top_level_field(repo, key, value):
-    repo_root, source_hash = repo
-    doc = _valid_manifest(source_hash)
-    doc[key] = value
-    _write_manifest_doc(repo_root, doc)
-    _assert_miss(_check(repo_root), "manifest_invalid")
+@pytest.mark.parametrize(
+    "key,value",
+    TOP_LEVEL_CASES,
+    ids=[k + "=" + repr(v) for k, v in TOP_LEVEL_CASES],
+)
+def test_top_level_field_invalid(sealed_repo, key, value):
+    root, source_hash = sealed_repo
+    m = valid_manifest(source_hash)
+    m[key] = copy.deepcopy(value)
+    write_manifest_text(root, json.dumps(m))
+    assert_miss(check(root), "manifest_invalid")
 
 
-CHARACTERIZATION_CASES = [
-    ("list", [{"overall": "pass", "criteria_passed": 2, "criteria_total": 2}]),
-    ("missing_total", {"overall": "pass", "criteria_passed": 2}),
-    ("extra_key", {"overall": "pass", "criteria_passed": 2, "criteria_total": 2, "extra": 1}),
-    ("overall_ok", {"overall": "ok", "criteria_passed": 2, "criteria_total": 2}),
-    ("overall_5", {"overall": 5, "criteria_passed": 2, "criteria_total": 2}),
-    ("passed_str", {"overall": "pass", "criteria_passed": "2", "criteria_total": 2}),
-    ("passed_bool", {"overall": "pass", "criteria_passed": True, "criteria_total": 2}),
-    ("total_negative", {"overall": "pass", "criteria_passed": 2, "criteria_total": -1}),
-    ("passed_gt_total", {"overall": "pass", "criteria_passed": 3, "criteria_total": 2}),
-    ("pass_zero", {"overall": "pass", "criteria_passed": 0, "criteria_total": 0}),
-]
+def _char_cases():
+    base = {"overall": "pass", "criteria_passed": 2, "criteria_total": 2}
+    cases = []
+    cases.append(("list", [base["overall"], 2, 2]))
+    c = dict(base)
+    del c["criteria_total"]
+    cases.append(("missing-total", c))
+    c = dict(base)
+    c["extra"] = 1
+    cases.append(("extra-key", c))
+    c = dict(base)
+    c["overall"] = "ok"
+    cases.append(("overall-ok", c))
+    c = dict(base)
+    c["overall"] = 5
+    cases.append(("overall-5", c))
+    c = dict(base)
+    c["criteria_passed"] = "2"
+    cases.append(("passed-string", c))
+    c = dict(base)
+    c["criteria_passed"] = True
+    cases.append(("passed-true", c))
+    c = dict(base)
+    c["criteria_total"] = -1
+    cases.append(("total-negative", c))
+    c = dict(base)
+    c["criteria_passed"] = 3
+    c["criteria_total"] = 2
+    cases.append(("passed-over-total", c))
+    cases.append(("pass-zero", {"overall": "pass", "criteria_passed": 0, "criteria_total": 0}))
+    return cases
 
 
-@pytest.mark.parametrize("label,value", CHARACTERIZATION_CASES, ids=[c[0] for c in CHARACTERIZATION_CASES])
-def test_invalid_characterization(repo, label, value):
-    repo_root, source_hash = repo
-    doc = _valid_manifest(source_hash)
-    doc["characterization"] = copy.deepcopy(value)
-    _write_manifest_doc(repo_root, doc)
-    _assert_miss(_check(repo_root), "manifest_invalid")
+CHAR_CASES = _char_cases()
 
 
 @pytest.mark.parametrize(
-    "value",
+    "characterization",
+    [c for _, c in CHAR_CASES],
+    ids=[n for n, _ in CHAR_CASES],
+)
+def test_characterization_invalid(sealed_repo, characterization):
+    root, source_hash = sealed_repo
+    m = valid_manifest(source_hash)
+    m["characterization"] = copy.deepcopy(characterization)
+    write_manifest_text(root, json.dumps(m))
+    assert_miss(check(root), "manifest_invalid")
+
+
+@pytest.mark.parametrize(
+    "characterization",
     [
         {"overall": "fail", "criteria_passed": 0, "criteria_total": 2},
         {"overall": "fail", "criteria_passed": 0, "criteria_total": 0},
     ],
-    ids=["fail_0_of_2", "fail_0_of_0"],
+    ids=["fail-0-of-2", "fail-0-of-0"],
 )
-def test_failed_characterization_is_valid_manifest(repo, value):
-    repo_root, source_hash = repo
-    doc = _valid_manifest(source_hash)
-    doc["characterization"] = copy.deepcopy(value)
-    _write_manifest_doc(repo_root, doc)
-    _assert_miss(_check(repo_root), "characterization_failed")
+def test_failed_characterization_is_valid_but_failed(sealed_repo, characterization):
+    root, source_hash = sealed_repo
+    m = valid_manifest(source_hash)
+    m["characterization"] = copy.deepcopy(characterization)
+    write_manifest_text(root, json.dumps(m))
+    assert_miss(check(root), "characterization_failed")
+
+
+def test_missing_manifest_is_sealed(sealed_repo):
+    root, _ = sealed_repo
+    assert not manifest_path(root).exists()
+    assert_miss(check(root), "manifest_missing")
 
 
 def test_not_sealed_component(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_repo(repo_root, sealed=False)
-    # A manifest present at the would-be source path changes nothing.
-    _write_manifest_doc(repo_root, _valid_manifest("sha256:" + "0" * 64))
-    result = _check(repo_root)
+    root = make_repo(tmp_path / "repo", sealed=False)
+    assert provenance_checker.current_sealed_key("comp-foo", root) is None
+    result = check(root)
     assert field(result, "reason") == "not_sealed"
     assert field(result, "sealed") is False
     assert field(result, "hit") is False
+    for name in ("verification_report", "owners", "source_hash", "written_at"):
+        assert field(result, name) is None

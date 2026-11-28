@@ -93,6 +93,14 @@ hotdocs verify                  # is everything ready?
 `generate` writes `gen/slugify/` and `verification/slugify/`. Never edit
 `gen/` by hand: change the spec and generate again.
 
+After upgrading `hotdocs`, `hotdocs verify` may report components not
+ready although nothing in your project changed: a new release can change
+how a spec is hashed or tighten a gate. `hotdocs generate <component>`
+then re-verifies the committed code and tests and re-records provenance,
+with no model call, as long as git shows the component's specs unchanged
+since its manifest was committed. It regenerates only code that fails
+today's checks. Commit your `gen/` manifests before upgrading.
+
 `generate` makes up to three attempts: when a candidate fails, the next
 attempt is told which requirement ids failed (never the tests
 themselves). `--max-attempts=1` makes one. With `--mode=agentic` the model

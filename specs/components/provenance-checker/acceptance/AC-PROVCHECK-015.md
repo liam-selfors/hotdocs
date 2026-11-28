@@ -23,9 +23,10 @@ When check_provenance is called
 Then reason is "assets differ"
 
 Given that version change and the manifest's gate_versions
-  {"verifier": "v@0"}
+  {"verifier": "v@0"}, and separately {"generator": "g@0"}
 When check_provenance is called
-Then reason is "gate_versions differ"
+Then the first reason is "gates differ" (R-PROVCHECK-013: a verifier
+  change only) and the second is "gate_versions differ"
 
 Given the versions set back
 When check_provenance is called

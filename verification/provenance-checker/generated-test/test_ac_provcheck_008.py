@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:3d132566fbc81111fcd96884641da0f9a999c6af54d23acc98d4f8c72bcc15e7
+# hotdocs-criterion: sha256:3a1ca2ab13e51bc7bc3624f29b837a0b109446742a3bb8e9d7480436d8d6ff1f
 import hashlib
 import json
 from pathlib import Path
@@ -6,20 +6,15 @@ from pathlib import Path
 import provenance_checker
 
 
+H = "sha256:" + "1" * 64
+PK = "sha256:" + "a" * 64
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PK = "sha256:" + "a" * 64
-H = "sha256:" + "0123456789abcdef" * 4
-
-
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _plant_python_adapter(repo_root):
+def _python_adapter_source():
     provision_result = {
         "ok": True,
         "reason": "",
@@ -27,22 +22,29 @@ def _plant_python_adapter(repo_root):
         "lockfile_sha256": None,
         "interpreter": "/fake/python",
     }
-    source = (
+    return (
         "KIND = " + repr("python") + "\n"
+        "\n"
         "\n"
         "def guidance():\n"
         "    return " + repr({"generator": "", "test_author": ""}) + "\n"
         "\n"
+        "\n"
         "def provision(repo_root):\n"
         "    return " + repr(provision_result) + "\n"
     )
-    path = repo_root / "gen" / "kind-python" / "kind_python.py"
-    _write(path, source)
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _plant_component(repo_root):
-    text = (
+def _build_repo(repo_root):
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    adapter_path = adapter_dir / "kind_python.py"
+    adapter_path.write_text(_python_adapter_source(), encoding="utf-8")
+    pa = "sha256:" + hashlib.sha256(adapter_path.read_bytes()).hexdigest()
+
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -52,29 +54,13 @@ def _plant_component(repo_root):
         "---\n"
         "\n"
         "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A fixture component.\n",
+        encoding="utf-8",
     )
-    _write(repo_root / "specs" / "components" / "foo" / "component.md", text)
 
-
-def _plant_manifest(repo_root, gate_versions, assets):
-    manifest = {
-        "spec_bundle_hash": H,
-        "gate_versions": gate_versions,
-        "verification_report": {"criteria": []},
-        "license_scan": {},
-        "secret_scan": {},
-        "assets": assets,
-        "drivers": [],
-    }
-    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest))
-
-
-def test_ac_provcheck_008_gate_version_mismatch_is_miss(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    pa = _plant_python_adapter(repo_root)
-    _plant_component(repo_root)
     p_entry = {
         "kind": "python",
         "path": ".",
@@ -83,15 +69,40 @@ def test_ac_provcheck_008_gate_version_mismatch_is_miss(tmp_path):
         "versions": {"python": "3.12.4", "packages": PK},
         "lockfile_sha256": None,
     }
-    _plant_manifest(repo_root, {"license_scanner": "1.0.0"}, [p_entry])
+
+    manifest = {
+        "spec_bundle_hash": H,
+        "gate_versions": {"license_scanner": "1.0.0"},
+        "verification_report": {"criteria": []},
+        "license_scan": {},
+        "secret_scan": {},
+        "assets": [p_entry],
+        "drivers": [],
+    }
+    gen_foo = repo_root / "gen" / "foo"
+    gen_foo.mkdir(parents=True)
+    (gen_foo / ".provenance.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_ac_provcheck_008_gate_version_mismatch_is_miss_even_with_matching_hash(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_repo(repo_root)
 
     result = provenance_checker.check_provenance(
-        "comp-foo",
-        H,
-        {"license_scanner": "2.0.0"},
-        repo_root,
+        "comp-foo", H, {"license_scanner": "2.0.0"}, repo_root
     )
 
     assert field(result, "hit") is False
-    # The manifest exists and was read: the miss is not for want of one.
-    assert field(result, "reason") != "no manifest"
+    assert field(result, "reason") in ("gates differ", "gate_versions differ")
+    assert field(result, "verification_report") is None
+    assert field(result, "license_scan") is None
+    assert field(result, "secret_scan") is None
+
+    # Control: the very same manifest hits when gate_versions also match,
+    # so the miss above is due to gate_versions alone.
+    control = provenance_checker.check_provenance(
+        "comp-foo", H, {"license_scanner": "1.0.0"}, repo_root
+    )
+    assert field(control, "hit") is True
+    assert field(control, "reason") is None

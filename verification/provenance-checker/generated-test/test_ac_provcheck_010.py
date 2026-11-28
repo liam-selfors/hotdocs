@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:b93dc59e220f34fab68fb84efb8bfa16885ebb962ae6cf34c7bae93c2603e58f
+# hotdocs-criterion: sha256:f07abc634a1bb4d7ad549868056900723e44d34c43fe1a2d39af91f4a86ae503
 import hashlib
 import json
 from pathlib import Path
@@ -9,13 +9,15 @@ import provenance_checker
 
 
 PK = "sha256:" + "a" * 64
-GATE_VERSIONS = {"license_scanner": "1"}
-GATE_VERSIONS_JSON = json.dumps(GATE_VERSIONS)
-SPEC_BUNDLE_HASH = "sha256:0a1b"
+GATE_VERSIONS_JSON = json.dumps({"license_scanner": "1"})
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _sha256_file(path):
+    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _write(path, text):
@@ -25,13 +27,11 @@ def _write(path, text):
     return path
 
 
-def _sha256_file(path):
-    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+def _build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
 
-
-def build_repo(root):
-    root = Path(root)
-
+    # The fake python adapter (test spec: "The fake python adapter").
     provision_result = {
         "ok": True,
         "reason": "",
@@ -39,7 +39,7 @@ def build_repo(root):
         "lockfile_sha256": None,
         "interpreter": "/fake/python",
     }
-    adapter_src = (
+    kind_python_src = (
         "KIND = " + repr("python") + "\n"
         "\n"
         "\n"
@@ -50,8 +50,11 @@ def build_repo(root):
         "def provision(repo_root):\n"
         "    return " + repr(provision_result) + "\n"
     )
-    adapter_path = _write(root / "gen" / "kind-python" / "kind_python.py", adapter_src)
+    kind_python = _write(
+        repo_root / "gen" / "kind-python" / "kind_python.py", kind_python_src
+    )
 
+    # component.md for comp-foo, with no assets line.
     component_md = (
         "---\n"
         "id: comp-foo\n"
@@ -67,86 +70,69 @@ def build_repo(root):
         "\n"
         "A fixture component.\n"
     )
-    _write(root / "specs" / "components" / "foo" / "component.md", component_md)
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", component_md)
 
-    pa = _sha256_file(adapter_path)
-    p_entry = {
+    python_entry = {
         "kind": "python",
         "path": ".",
         "definition_sha256": None,
-        "adapter_sha256": pa,
+        "adapter_sha256": _sha256_file(kind_python),
         "versions": {"python": "3.12.4", "packages": PK},
         "lockfile_sha256": None,
     }
 
-    verification_report = {
-        "component_id": "comp-foo",
-        "criteria": [
-            {
-                "id": "AC-FOO-001",
-                "covers": "R-FOO-001",
-                "kind": "generated-test",
-                "result": "pass",
-            }
-        ],
-        "requirement_results": {"R-FOO-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": 1.0,
-        "mutation_error": None,
-        "assets": [p_entry],
-        "drivers": [],
-        "overall": "pass",
-    }
-
     manifest = {
-        "spec_bundle_hash": SPEC_BUNDLE_HASH,
-        "gate_versions": GATE_VERSIONS,
-        "provenance_hit": False,
-        "generated_at": "2026-01-01T00:00:00Z",
-        "verification_report": verification_report,
+        "spec_bundle_hash": "sha256:0a1b",
+        "gate_versions": {"license_scanner": "1"},
+        "verification_report": {"criteria": [], "overall": "pass"},
         "license_scan": {},
         "secret_scan": {},
-        "assets": [p_entry],
+        "assets": [python_entry],
         "drivers": [],
     }
-    text = json.dumps(manifest, indent=2)
-    _write(root / "gen" / "foo" / ".provenance.json", text)
-    _write(root / "verification" / "foo" / ".provenance.json", text)
+    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest, indent=2))
+    return repo_root
+
+
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    root = _build_repo(tmp_path)
+    monkeypatch.chdir(root)
     return root
 
 
-def test_json_hit_with_equals_form(tmp_path, capsys):
-    repo_root = build_repo(tmp_path / "repo")
-    argv = [
-        "check",
-        "comp-foo",
-        "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
-        "--gate-versions=" + GATE_VERSIONS_JSON,
-        "--repo-root=" + str(repo_root),
-        "--format=json",
-    ]
-    code = provenance_checker.main(argv)
+def test_json_equals_form_reports_hit(repo_root, capsys):
+    code = provenance_checker.main(
+        [
+            "check",
+            "comp-foo",
+            "--spec-bundle-hash=sha256:0a1b",
+            "--gate-versions=" + GATE_VERSIONS_JSON,
+            "--repo-root=" + str(repo_root),
+            "--format=json",
+        ]
+    )
     out = capsys.readouterr().out
     assert code == 0
-    doc = json.loads(out)
-    assert field(doc, "hit") is True
+    result = json.loads(out)
+    assert field(result, "hit") is True
 
 
-def test_text_miss_with_separate_value_form(tmp_path, capsys):
-    repo_root = build_repo(tmp_path / "repo")
-    argv = [
-        "check",
-        "comp-foo",
-        "--spec-bundle-hash",
-        "sha256:ffff",
-        "--gate-versions",
-        GATE_VERSIONS_JSON,
-        "--repo-root",
-        str(repo_root),
-        "--format",
-        "text",
-    ]
-    code = provenance_checker.main(argv)
+def test_text_space_form_reports_miss(repo_root, capsys):
+    code = provenance_checker.main(
+        [
+            "check",
+            "comp-foo",
+            "--spec-bundle-hash",
+            "sha256:ffff",
+            "--gate-versions",
+            GATE_VERSIONS_JSON,
+            "--repo-root",
+            str(repo_root),
+            "--format",
+            "text",
+        ]
+    )
     out = capsys.readouterr().out
     assert code == 0
     assert "miss" in out
@@ -154,29 +140,24 @@ def test_text_miss_with_separate_value_form(tmp_path, capsys):
 
 def _usage_cases(repo_root):
     rr = "--repo-root=" + str(repo_root)
+    good_hash = "--spec-bundle-hash=sha256:0a1b"
+    good_gates = "--gate-versions=" + GATE_VERSIONS_JSON
     return {
-        "missing-spec-bundle-hash": [
-            "check", "comp-foo", "--gate-versions=" + GATE_VERSIONS_JSON, rr,
-        ],
+        "missing-spec-bundle-hash": ["check", "comp-foo", good_gates, rr],
         "hash-without-prefix": [
-            "check", "comp-foo", "--spec-bundle-hash=0a1b",
-            "--gate-versions=" + GATE_VERSIONS_JSON, rr,
+            "check", "comp-foo", "--spec-bundle-hash=0a1b", good_gates, rr,
         ],
         "gate-versions-not-object": [
-            "check", "comp-foo", "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
-            "--gate-versions", "[1]", rr,
+            "check", "comp-foo", good_hash, "--gate-versions", "[1]", rr,
         ],
         "bogus-format": [
-            "check", "comp-foo", "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
-            "--gate-versions=" + GATE_VERSIONS_JSON, rr, "--format=bogus",
+            "check", "comp-foo", good_hash, good_gates, rr, "--format=bogus",
         ],
         "unknown-argument": [
-            "check", "comp-foo", "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
-            "--gate-versions=" + GATE_VERSIONS_JSON, rr, "--hotdocs-smoke-unknown",
+            "check", "comp-foo", good_hash, good_gates, rr, "--hotdocs-smoke-unknown",
         ],
-        "repo-root-last-no-value": [
-            "check", "comp-foo", "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
-            "--gate-versions=" + GATE_VERSIONS_JSON, "--repo-root",
+        "repo-root-last-without-value": [
+            "check", "comp-foo", good_hash, good_gates, "--repo-root",
         ],
     }
 
@@ -189,11 +170,10 @@ def _usage_cases(repo_root):
         "gate-versions-not-object",
         "bogus-format",
         "unknown-argument",
-        "repo-root-last-no-value",
+        "repo-root-last-without-value",
     ],
 )
-def test_usage_errors_return_2(tmp_path, capsys, case):
-    repo_root = build_repo(tmp_path / "repo")
+def test_usage_errors_return_2(repo_root, capsys, case):
     argv = _usage_cases(repo_root)[case]
     code = provenance_checker.main(argv)
     capsys.readouterr()
