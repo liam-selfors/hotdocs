@@ -12,7 +12,7 @@
       ]
     }
   },
-  "content_hash": "sha256:967d20b56599f88ffe56af7e4207eb05d1ff4d5c090c293c3e964440118d5687",
+  "content_hash": "sha256:f9a04f8cba3050ca682f49404ba39c6572c25b0608904b19bf6e6e349f2e4692",
   "gate_version": "capability_scenario_verifier@3.0.0",
   "model": "claude-opus-5-5",
   "realizing_components": [

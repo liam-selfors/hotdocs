@@ -25,8 +25,8 @@ A dataclass with these fields in this order that also reads as a mapping
 (`report["gaps"]`), with a `to_dict()` giving the JSON form.
 
 - `findings` holds the deterministic checks' results; `kind` is
-  `asset_interface_missing`, `invisible_reference` or
-  `model_unparseable`. An `asset_interface_missing` finding belongs to
+  `asset_interface_missing`, `bundle_unavailable` (`R-REVIEW-009`),
+  `invisible_reference` or `model_unparseable`. An `asset_interface_missing` finding belongs to
   no criterion: its `criterion_id` is the component's id (`comp-foo`)
   and its `token` the asset's path, such as `static/app.js`
   (`R-REVIEW-008`).

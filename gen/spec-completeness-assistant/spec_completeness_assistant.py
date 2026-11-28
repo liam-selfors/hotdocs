@@ -1,43 +1,59 @@
-"""Spec Completeness Assistant: advisory completeness preview for a spec change."""
+"""Spec Completeness Assistant: advisory completeness/redundancy checks for a spec change."""
 
+import dataclasses
 import importlib.util
-import itertools
 import json
-import os
 import re
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 
-USAGE = (
+_ID_RE = re.compile(r"R-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]+[a-z]?")
+_WORD_RE = re.compile(r"[a-z0-9_]{3,}")
+_COVERS_RE = re.compile(r"Covers:(.*)")
+_THRESHOLD = 0.35
+_MAX_CANDIDATES = 5
+
+_USAGE = (
     "usage: hotdocs assist --changed=<spec-id>... [--repo-root=<dir>] "
     "[--format=json|text] [--model=<model>]"
 )
 
-_RID = r"R-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]+[a-z]?"
-_RID_RE = re.compile(_RID)
-_WORD_RE = re.compile(r"[a-z0-9_]{3,}")
-_THRESHOLD = 0.35
-_TOP_N = 5
-_FINDING_FIELDS = ("rule_id", "severity", "file", "line", "message")
 
-_LOAD_COUNTER = itertools.count()
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-@dataclass
+def _to_dict(obj):
+    if isinstance(obj, dict):
+        return obj
+    return obj.to_dict()
+
+
+def _finding_json(finding):
+    if isinstance(finding, dict):
+        return finding
+    out = {k: getattr(finding, k, None) for k in ("rule_id", "severity", "file", "line", "message")}
+    if getattr(finding, "rationale", None) is not None:
+        out["rationale"] = finding.rationale
+    return out
+
+
+@dataclasses.dataclass
 class CompletenessReport:
-    lint_findings: list = field(default_factory=list)
-    halted: bool = False
-    predicted_blast_radius: list = field(default_factory=list)
-    criterion_reviews: dict = field(default_factory=dict)
-    completeness_score: object = None
-    completeness_rationale: object = None
-    redundancy_flags: list = field(default_factory=list)
-    degraded: bool = False
+    lint_findings: list
+    halted: bool
+    predicted_blast_radius: list
+    criterion_reviews: dict
+    completeness_score: object
+    completeness_rationale: object
+    redundancy_flags: list
+    degraded: bool
 
     def to_dict(self):
         return {
-            "lint_findings": [_finding_dict(f) for f in self.lint_findings],
+            "lint_findings": [_finding_json(f) for f in self.lint_findings],
             "halted": self.halted,
             "predicted_blast_radius": list(self.predicted_blast_radius),
             "criterion_reviews": dict(self.criterion_reviews),
@@ -48,40 +64,21 @@ class CompletenessReport:
         }
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-def _finding_dict(finding):
-    if isinstance(finding, dict):
-        return dict(finding)
-    out = {k: _get(finding, k) for k in _FINDING_FIELDS}
-    rationale = _get(finding, "rationale")
-    if rationale is not None:
-        out["rationale"] = rationale
-    return out
-
-
 # ---------------------------------------------------------------- loading
 
 
 def _tool_root():
-    for parent in Path(__file__).resolve().parents:
-        if parent.name == "gen":
-            return parent.parent
+    return next(p.parent for p in Path(__file__).resolve().parents if p.name == "gen")
 
 
-def _load(repo_root, slug, module):
-    base = Path(repo_root) / "gen" / slug
-    if not base.is_dir():
-        base = _tool_root() / "gen" / slug
-    path = base / f"{module}.py"
-    name = f"_spec_completeness_assistant_dep_{module}_{next(_LOAD_COUNTER)}"
-    spec = importlib.util.spec_from_file_location(name, path)
+def _load(slug, repo_root):
+    module = slug.replace("-", "_")
+    directory = Path(repo_root) / "gen" / slug
+    if not directory.is_dir():
+        directory = _tool_root() / "gen" / slug
+    spec = importlib.util.spec_from_file_location(module, directory / f"{module}.py")
     mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
+    sys.modules[module] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -89,227 +86,154 @@ def _load(repo_root, slug, module):
 # ---------------------------------------------------------------- corpus
 
 
-def _component_dirs(repo_root):
-    root = Path(repo_root) / "specs" / "components"
-    if not root.is_dir():
-        return {}
-    return {p.name: p for p in sorted(root.iterdir()) if p.is_dir()}
+def _resolve_changes(changed_ids, repo_root):
+    comps = repo_root / "specs" / "components"
+    slugs = []
+    reqs = {}
+    if not comps.is_dir():
+        return slugs, reqs
+    dirs = sorted(p for p in comps.iterdir() if p.is_dir())
 
+    def add(slug):
+        if slug not in slugs:
+            slugs.append(slug)
 
-def _requirement_files(comp_dir):
-    return sorted((comp_dir / "requirements").glob("R-*.md"))
-
-
-def _resolve_changed(changed_ids, dirs):
-    comps = []
-    reqs = []
     for cid in changed_ids:
         if cid.startswith("comp-"):
-            slug = cid[len("comp-"):]
-            if slug in dirs:
-                if slug not in comps:
-                    comps.append(slug)
-                for req in _requirement_files(dirs[slug]):
-                    if req not in reqs:
-                        reqs.append(req)
+            d = comps / cid[len("comp-"):]
+            if d in dirs:
+                add(d.name)
+                for r in sorted((d / "requirements").glob("*.md")):
+                    reqs.setdefault(r.stem, (d, r))
             continue
-        for slug, comp_dir in dirs.items():
-            rq = comp_dir / "requirements" / f"{cid}.md"
-            ac = comp_dir / "acceptance" / f"{cid}.md"
-            if rq.is_file() or ac.is_file():
-                if slug not in comps:
-                    comps.append(slug)
-            if rq.is_file() and rq not in reqs:
-                reqs.append(rq)
-    return comps, reqs
+        for d in dirs:
+            r = d / "requirements" / f"{cid}.md"
+            if r.is_file():
+                add(d.name)
+                reqs.setdefault(cid, (d, r))
+                break
+            if (d / "acceptance" / f"{cid}.md").is_file():
+                add(d.name)
+                break
+    return slugs, reqs
 
 
-def _read(path):
-    return path.read_text(encoding="utf-8")
-
-
-def _covering_criteria(req_path):
-    rid = req_path.stem
+def _covering(comp_dir, rid):
     out = []
-    for crit in sorted((req_path.parent.parent / "acceptance").glob("*.md")):
-        text = _read(crit)
+    for a in sorted((comp_dir / "acceptance").glob("*.md")):
+        text = a.read_text(encoding="utf-8")
         for line in text.splitlines():
-            if "Covers:" in line:
-                ids = _RID_RE.findall(line.split("Covers:", 1)[1])
-                if rid in ids:
-                    out.append((crit, text))
-                    break
+            m = _COVERS_RE.search(line)
+            if m and rid in _ID_RE.findall(m.group(1)):
+                out.append((a.stem, text))
+                break
     return out
 
 
-def _inside(finding, repo_root, comps):
-    rel = str(_get(finding, "file"))
-    if os.path.isabs(rel):
-        rel = os.path.relpath(rel, str(repo_root))
-    rel = rel.replace(os.sep, "/")
-    return any(rel.startswith(f"specs/components/{slug}/") for slug in comps)
+def _rel(file, repo_root):
+    p = Path(str(file))
+    if p.is_absolute():
+        try:
+            p = p.relative_to(repo_root)
+        except ValueError:
+            pass
+    return p.as_posix()
 
 
-# ---------------------------------------------------------------- redundancy
+def _inside(finding, slugs, repo_root):
+    rel = _rel(_get(finding, "file"), repo_root)
+    return any(rel.startswith(f"specs/components/{slug}/") for slug in slugs)
 
 
 def _words(text):
-    return set(_WORD_RE.findall(_RID_RE.sub("", text).lower()))
+    return set(_WORD_RE.findall(_ID_RE.sub("", text).lower()))
 
 
 def _jaccard(a, b):
-    if a == b:
+    union = a | b
+    if not union:
         return 1.0
-    return len(a & b) / len(a | b)
+    return len(a & b) / len(union)
 
 
-def _candidates(changed_reqs, dirs):
-    changed_set = set(changed_reqs)
+def _candidates(reqs, repo_root):
+    comps = repo_root / "specs" / "components"
     others = []
-    for comp_dir in dirs.values():
-        for req in _requirement_files(comp_dir):
-            if req not in changed_set:
-                text = _read(req)
-                others.append((req.stem, text, _words(text)))
+    for r in sorted(comps.glob("*/requirements/*.md")):
+        if r.stem not in reqs:
+            others.append((r.stem, r.read_text(encoding="utf-8")))
     pairs = []
-    for req in changed_reqs:
-        text = _read(req)
+    for rid, (_, path) in reqs.items():
+        text = path.read_text(encoding="utf-8")
         words = _words(text)
         scored = []
-        for oid, otext, owords in others:
-            score = _jaccard(words, owords)
+        for oid, otext in others:
+            score = _jaccard(words, _words(otext))
             if score >= _THRESHOLD:
                 scored.append((-score, oid, otext))
-        scored.sort(key=lambda s: (s[0], s[1]))
-        for _, oid, otext in scored[:_TOP_N]:
-            pairs.append((req.stem, text, oid, otext))
+        scored.sort(key=lambda t: (t[0], t[1]))
+        for _, oid, otext in scored[:_MAX_CANDIDATES]:
+            pairs.append((rid, text, oid, otext))
     return pairs
-
-
-# ---------------------------------------------------------------- model replies
-
-
-def _parse_json(text):
-    s = text.strip()
-    lines = s.splitlines()
-    if (
-        len(lines) >= 2
-        and lines[0].rstrip() in ("```", "```json")
-        and lines[-1].strip() == "```"
-    ):
-        s = "\n".join(lines[1:-1])
-    try:
-        return json.loads(s)
-    except ValueError:
-        return None
-
-
-def _reply_json(resp):
-    if _get(resp, "model_call_error") is not None:
-        return None
-    return _parse_json(_get(resp, "text"))
-
-
-def _parse_completeness(resp):
-    parsed = _reply_json(resp)
-    if not isinstance(parsed, dict):
-        return None, None
-    score = parsed.get("completeness_score")
-    rationale = parsed.get("completeness_rationale")
-    if isinstance(score, bool) or not isinstance(score, (int, float)):
-        return None, None
-    if not (isinstance(rationale, str) and rationale):
-        return None, None
-    return min(1.0, max(0.0, float(score))), rationale
-
-
-def _parse_redundancy(resp, candidate_keys):
-    parsed = _reply_json(resp)
-    if not isinstance(parsed, dict):
-        return []
-    entries = parsed.get("redundancy_flags")
-    if not isinstance(entries, list):
-        return []
-    out = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        vals = [entry.get(k) for k in ("new_requirement", "overlaps_with", "rationale")]
-        if not all(isinstance(v, str) and v for v in vals):
-            continue
-        if (vals[0], vals[1]) not in candidate_keys:
-            continue
-        out.append(
-            {"new_requirement": vals[0], "overlaps_with": vals[1], "rationale": vals[2]}
-        )
-    return out
 
 
 # ---------------------------------------------------------------- prompts
 
 
-def _completeness_prompt(changed_reqs, comps, criterion_reviews, inside_findings):
+def _completeness_prompt(reqs, slugs, criterion_reviews, inside_findings):
     parts = [
         "You are reviewing a spec change for completeness before it is submitted.",
         "",
-        "For each changed requirement below, judge: whether its acceptance "
-        "criteria check what it states; whether a dependent component's "
-        "`interface/` needs a matching update that was not made; and whether "
-        "a criterion expects behavior no requirement states.",
+        "## Changed requirements and their covering acceptance criteria",
         "",
     ]
-    for req in changed_reqs:
-        rid = req.stem
-        parts.append(f"## Changed requirement {rid}")
-        parts.append("")
-        parts.append(_read(req))
-        parts.append("")
-        covering = _covering_criteria(req)
+    for rid, (comp_dir, path) in reqs.items():
+        parts.append(f"### Requirement {rid}")
+        parts.append(path.read_text(encoding="utf-8"))
+        covering = _covering(comp_dir, rid)
+        for aid, text in covering:
+            parts.append(f"#### Covering criterion {aid}")
+            parts.append(text)
         if not covering:
             parts.append(f"No acceptance criterion covers {rid}.")
-            parts.append("")
-        for crit, text in covering:
-            parts.append(f"### Covering criterion {crit.stem}")
-            parts.append("")
-            parts.append(text)
-            parts.append("")
+        parts.append("")
     parts.append("## invisible_reference findings for the changed components")
-    parts.append("")
-    for slug in comps:
-        review = criterion_reviews.get(f"comp-{slug}", {})
-        for finding in review.get("findings", []):
-            if _get(finding, "kind") == "invisible_reference":
-                parts.append(json.dumps(finding, default=str))
+    for slug in slugs:
+        review = criterion_reviews.get(f"comp-{slug}")
+        for f in _get(review, "findings") or []:
+            if _get(f, "kind") == "invisible_reference":
+                parts.append(json.dumps(f, default=str))
     parts.append("")
     parts.append("## Lint findings inside the changed components")
+    for f in inside_findings:
+        parts.append(json.dumps(_finding_json(f), default=str))
     parts.append("")
-    for finding in inside_findings:
-        parts.append(json.dumps(_finding_dict(finding), default=str))
+    parts.append("## Questions")
+    parts.append("1. Do each changed requirement's acceptance criteria check what the requirement states?")
+    parts.append(
+        "2. Does a dependent component's `interface/` need a matching update that was not made?"
+    )
+    parts.append("3. Does any criterion expect behavior that no requirement states?")
     parts.append("")
     parts.append(
         "Reply with only a JSON object: "
-        '{"completeness_score": <number from 0.0 to 1.0>, '
-        '"completeness_rationale": "<text>"}'
+        '{"completeness_score": <number from 0.0 to 1.0>, "completeness_rationale": "<text>"}'
     )
     return "\n".join(parts)
 
 
 def _redundancy_prompt(pairs):
     parts = [
-        "Each pair below holds a changed requirement and an existing requirement "
-        "elsewhere in the spec corpus. Decide which pairs describe the same behavior.",
+        "Each pair below holds a changed requirement and an existing requirement elsewhere "
+        "in the spec corpus. Decide which pairs describe the same behavior.",
         "",
     ]
-    for new_id, new_text, old_id, old_text in pairs:
-        parts.append(f"## Pair: {new_id} / {old_id}")
-        parts.append("")
-        parts.append(f"### {new_id}")
-        parts.append("")
-        parts.append(new_text)
-        parts.append("")
-        parts.append(f"### {old_id}")
-        parts.append("")
-        parts.append(old_text)
+    for rid, text, oid, otext in pairs:
+        parts.append(f"## Pair: {rid} / {oid}")
+        parts.append(f"### Changed requirement {rid}")
+        parts.append(text)
+        parts.append(f"### Existing requirement {oid}")
+        parts.append(otext)
         parts.append("")
     parts.append(
         "Reply with only a JSON object: "
@@ -320,69 +244,143 @@ def _redundancy_prompt(pairs):
     return "\n".join(parts)
 
 
+# ---------------------------------------------------------------- parsing
+
+
+def _reply_json(response):
+    if _get(response, "model_call_error") is not None:
+        return None
+    text = _get(response, "text")
+    if not isinstance(text, str):
+        return None
+    lines = text.strip().splitlines()
+    if (
+        len(lines) >= 2
+        and lines[0].strip() in ("```", "```json")
+        and lines[-1].strip() == "```"
+    ):
+        text = "\n".join(lines[1:-1])
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    return obj
+
+
+def _parse_completeness(response):
+    obj = _reply_json(response)
+    if obj is None:
+        return None, None
+    score = obj.get("completeness_score")
+    rationale = obj.get("completeness_rationale")
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None, None
+    if not isinstance(rationale, str) or not rationale:
+        return None, None
+    return min(max(score, 0.0), 1.0), rationale
+
+
+def _parse_flags(response, candidate_set):
+    obj = _reply_json(response)
+    if obj is None:
+        return []
+    entries = obj.get("redundancy_flags")
+    if not isinstance(entries, list):
+        return []
+    flags = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        values = [entry.get(k) for k in ("new_requirement", "overlaps_with", "rationale")]
+        if any(v is None or v == "" for v in values):
+            continue
+        if (values[0], values[1]) not in candidate_set:
+            continue
+        flags.append(
+            {"new_requirement": values[0], "overlaps_with": values[1], "rationale": values[2]}
+        )
+    return flags
+
+
 # ---------------------------------------------------------------- assist
 
 
 def assist(changed_ids, repo_root, model=None, *, llm_backend=None):
-    deps = {}
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        return _assist(changed_ids, Path(repo_root), model, llm_backend)
+    finally:
+        sys.dont_write_bytecode = previous
 
-    def dep(slug, module):
-        if module not in deps:
-            deps[module] = _load(repo_root, slug, module)
-        return deps[module]
 
-    dirs = _component_dirs(repo_root)
-    comps, changed_reqs = _resolve_changed(changed_ids, dirs)
+def _assist(changed_ids, repo_root, model, llm_backend):
+    slugs, reqs = _resolve_changes(changed_ids, repo_root)
+    degraded = model is None
 
+    reviewer = None
     judge = None
-    if model is not None:
-        judge = dep("spec-reviewer", "spec_reviewer").glossary_judge(model, llm_backend)
+    if not degraded:
+        reviewer = _load("spec-reviewer", repo_root)
+        judge = reviewer.glossary_judge(model, llm_backend)
+    linter = _load("spec-linter", repo_root)
+    lint_report = linter.lint(None, repo_root, judge=judge)
+    findings = list(_get(lint_report, "findings"))
+    inside = [f for f in findings if _inside(f, slugs, repo_root)]
 
-    lint_report = dep("spec-linter", "spec_linter").lint(None, repo_root, judge=judge)
-    lint_findings = list(_get(lint_report, "findings"))
-    inside_findings = [f for f in lint_findings if _inside(f, repo_root, comps)]
-    halted = any(_get(f, "severity") == "fail" for f in inside_findings)
+    if any(_get(f, "severity") == "fail" for f in inside):
+        return CompletenessReport(
+            lint_findings=findings,
+            halted=True,
+            predicted_blast_radius=[],
+            criterion_reviews={},
+            completeness_score=None,
+            completeness_rationale=None,
+            redundancy_flags=[],
+            degraded=degraded,
+        )
+
+    impact = _load("impact-analyzer", repo_root)
+    blast = impact.compute_blast_radius(changed_ids, repo_root)
+    if _get(blast, "precondition_error") is None:
+        predicted = [_get(e, "component_id") for e in _get(blast, "impacted")]
+    else:
+        predicted = []
+
+    reviews = {}
+    if predicted and reviewer is None:
+        reviewer = _load("spec-reviewer", repo_root)
+    for component_id in predicted:
+        try:
+            reviews[component_id] = _to_dict(reviewer.check([component_id], repo_root))
+        except Exception as exc:  # noqa: BLE001 - R-ASSIST-003 records any failure
+            reviews[component_id] = {"error": str(exc)}
 
     report = CompletenessReport(
-        lint_findings=lint_findings, halted=halted, degraded=model is None
+        lint_findings=findings,
+        halted=False,
+        predicted_blast_radius=predicted,
+        criterion_reviews=reviews,
+        completeness_score=None,
+        completeness_rationale=None,
+        redundancy_flags=[],
+        degraded=degraded,
     )
-    if halted:
+    if degraded:
         return report
 
-    blast = dep("impact-analyzer", "impact_analyzer").compute_blast_radius(
-        changed_ids, repo_root
-    )
-    if _get(blast, "precondition_error") is None:
-        report.predicted_blast_radius = [
-            _get(entry, "component_id") for entry in _get(blast, "impacted")
-        ]
+    endpoint = _load("llm-endpoint", repo_root)
+    prompt = _completeness_prompt(reqs, slugs, reviews, inside)
+    response = endpoint.complete(prompt, model, backend=llm_backend)
+    report.completeness_score, report.completeness_rationale = _parse_completeness(response)
 
-    reviewer = dep("spec-reviewer", "spec_reviewer")
-    for cid in report.predicted_blast_radius:
-        try:
-            review = reviewer.check([cid], repo_root)
-            report.criterion_reviews[cid] = (
-                review if isinstance(review, dict) else review.to_dict()
-            )
-        except Exception as exc:
-            report.criterion_reviews[cid] = {"error": str(exc)}
-
-    if model is None:
-        return report
-
-    llm = dep("llm-endpoint", "llm_endpoint")
-    prompt = _completeness_prompt(
-        changed_reqs, comps, report.criterion_reviews, inside_findings
-    )
-    resp = llm.complete(prompt, model, backend=llm_backend)
-    report.completeness_score, report.completeness_rationale = _parse_completeness(resp)
-
-    pairs = _candidates(changed_reqs, dirs)
+    pairs = _candidates(reqs, repo_root)
     if pairs:
-        keys = {(p[0], p[2]) for p in pairs}
-        resp = llm.complete(_redundancy_prompt(pairs), model, backend=llm_backend)
-        report.redundancy_flags = _parse_redundancy(resp, keys)
-
+        candidate_set = {(p[0], p[2]) for p in pairs}
+        response = endpoint.complete(_redundancy_prompt(pairs), model, backend=llm_backend)
+        report.redundancy_flags = _parse_flags(response, candidate_set)
     return report
 
 
@@ -391,32 +389,30 @@ def assist(changed_ids, repo_root, model=None, *, llm_backend=None):
 
 def _usage_error(cause):
     print(f"usage error: {cause}", file=sys.stderr)
-    print(USAGE, file=sys.stderr)
+    print(_USAGE, file=sys.stderr)
     return 2
 
 
-def _render_text(report):
-    lines = []
-    for finding in report.lint_findings:
+def _render_text(data):
+    lines = ["lint findings:"]
+    for f in data["lint_findings"]:
         lines.append(
-            f"lint: {_get(finding, 'rule_id')} {_get(finding, 'severity')} "
-            f"{_get(finding, 'file')}:{_get(finding, 'line')}: {_get(finding, 'message')}"
+            f"  {_get(f, 'rule_id')} {_get(f, 'severity')} "
+            f"{_get(f, 'file')}:{_get(f, 'line')} {_get(f, 'message')}"
         )
-    if report.halted:
-        lines.append("halted: a fail finding lies inside a changed component")
-    for cid in report.predicted_blast_radius:
-        review = report.criterion_reviews.get(cid, {})
-        lines.append(f"{cid}: {len(review.get('findings', []))} findings")
-    if report.completeness_score is not None:
-        lines.append(f"completeness_score: {report.completeness_score}")
-        lines.append(f"completeness_rationale: {report.completeness_rationale}")
-    for entry in report.redundancy_flags:
-        lines.append(
-            f"redundancy: {entry['new_requirement']} overlaps {entry['overlaps_with']}: "
-            f"{entry['rationale']}"
-        )
-    if report.degraded:
-        lines.append("degraded: no model configured")
+    lines.append(f"halted: {str(data['halted']).lower()}")
+    lines.append("predicted blast radius:")
+    for component_id in data["predicted_blast_radius"]:
+        review = data["criterion_reviews"].get(component_id)
+        count = len(_get(review, "findings") or [])
+        lines.append(f"  {component_id}: {count} criterion review findings")
+    if data["completeness_score"] is not None:
+        lines.append(f"completeness_score: {str(data['completeness_score'])}")
+        lines.append(f"completeness_rationale: {data['completeness_rationale']}")
+    lines.append("redundancy flags:")
+    for e in data["redundancy_flags"]:
+        lines.append(f"  {e['new_requirement']} overlaps {e['overlaps_with']}: {e['rationale']}")
+    lines.append(f"degraded: {str(data['degraded']).lower()}")
     return "\n".join(lines)
 
 
@@ -430,10 +426,10 @@ def main(argv=None):
     model = None
     i = 0
     while i < len(argv):
-        tok = argv[i]
-        name, eq, value = tok.partition("=")
+        token = argv[i]
+        name, eq, value = token.partition("=")
         if name not in flags:
-            return _usage_error(f"unknown argument: {tok}")
+            return _usage_error(f"unknown argument: {token}")
         if not eq:
             if i + 1 >= len(argv):
                 return _usage_error(f"{name} requires a value")
@@ -441,7 +437,7 @@ def main(argv=None):
             value = argv[i]
         i += 1
         if name == "--changed":
-            changed.extend(p for p in value.split(",") if p)
+            changed.extend(v for v in value.split(",") if v)
         elif name == "--repo-root":
             repo_root = value
         elif name == "--format":
@@ -454,8 +450,9 @@ def main(argv=None):
         return _usage_error("--changed is required")
 
     report = assist(changed, Path(repo_root), model)
+    data = report.to_dict()
     if fmt == "json":
-        print(json.dumps(report.to_dict(), indent=2, default=str))
+        print(json.dumps(data, indent=2, default=str))
     else:
-        print(_render_text(report))
+        print(_render_text(data))
     return 1 if report.halted else 0

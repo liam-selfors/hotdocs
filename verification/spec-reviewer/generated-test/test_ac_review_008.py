@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a0c29afe1b7caf1af51626e6e693796c4964e6b69e924912213ea5688984fd3b
+# hotdocs-criterion: sha256:b62104a15d247f74990f9bbe9ec7c723791abbd271439843dc708ecc49a3375b
 import importlib.util
 import sys
 from pathlib import Path
@@ -25,16 +25,24 @@ def load_spec_linter():
     return load_module(path, "spec_linter")
 
 
+def assert_lint_clean(repo_root):
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+
 def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def build_corpus(repo_root, assets_line=None, asset_files=()):
-    specs = repo_root / "specs"
-    write(specs / "glossary.md", "# Glossary\n\n- **Foo** — a test term.\n")
-
-    comp = specs / "components" / "foo"
+def build_corpus(repo_root, assets_line=None):
+    write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n"
+        "\n"
+        "- **Foo** — a test term.\n",
+    )
+    comp = repo_root / "specs" / "components" / "foo"
     frontmatter = (
         "---\n"
         "id: comp-foo\n"
@@ -50,11 +58,19 @@ def build_corpus(repo_root, assets_line=None, asset_files=()):
     frontmatter = frontmatter + "---\n"
     write(
         comp / "component.md",
-        frontmatter + "\n# Foo\n\n## Purpose\n\nFoo doubles a number.\n",
+        frontmatter
+        + "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo doubles a number.\n",
     )
     write(
         comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
     )
     write(
         comp / "acceptance" / "AC-FOO-001.md",
@@ -71,68 +87,77 @@ def build_corpus(repo_root, assets_line=None, asset_files=()):
     )
     write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "foo(x: int) -> int\n"
+        "```\n",
     )
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    for name in asset_files:
-        write(
-            comp / "interface" / "assets" / (name + ".md"),
-            "# Asset " + name + "\n",
-        )
-    return repo_root
+    write(
+        comp / "constraints.md",
+        "# Constraints\n"
+        "\n"
+        "None.\n",
+    )
+    return comp
 
 
 ASSETS_OK = "assets: [javascript:static/app.js, javascript:static/b.js]"
 ASSETS_BROKEN = "assets: [javascript:static/app.js, broken]"
+EXPECTED_MESSAGE = (
+    "`static/app.js` has no interface file "
+    "specs/components/foo/interface/assets/app.js.md"
+)
 
 
-def test_missing_asset_interface_reported_for_criterion_target(tmp_path):
-    repo_root = build_corpus(tmp_path / "repo", ASSETS_OK, ["b.js"])
-    spec_linter = load_spec_linter()
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+def build_first_corpus(repo_root, assets_line=ASSETS_OK):
+    comp = build_corpus(repo_root, assets_line)
+    write(comp / "interface" / "assets" / "b.js.md", "# Asset b.js\n")
+    return comp
+
+
+def test_missing_asset_interface_reported(tmp_path):
+    repo_root = tmp_path / "repo"
+    build_first_corpus(repo_root)
+    assert_lint_clean(repo_root)
 
     report = spec_reviewer.check(["AC-FOO-001"], repo_root)
-    findings = list(field(report, "findings"))
+    findings = field(report, "findings")
     assert len(findings) == 1
     f = findings[0]
     assert field(f, "criterion_id") == "comp-foo"
     assert field(f, "kind") == "asset_interface_missing"
     assert field(f, "token") == "static/app.js"
-    assert field(f, "message") == (
-        "`static/app.js` has no interface file "
-        "specs/components/foo/interface/assets/app.js.md"
-    )
+    assert field(f, "message") == EXPECTED_MESSAGE
 
 
-def test_all_asset_interfaces_present_gives_no_findings(tmp_path):
-    repo_root = build_corpus(tmp_path / "repo", ASSETS_OK, ["b.js", "app.js"])
-    spec_linter = load_spec_linter()
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+def test_all_asset_interfaces_present_no_findings(tmp_path):
+    repo_root = tmp_path / "repo"
+    comp = build_first_corpus(repo_root)
+    write(comp / "interface" / "assets" / "app.js.md", "# Asset app.js\n")
 
     report = spec_reviewer.check(["comp-foo"], repo_root)
     assert list(field(report, "findings")) == []
 
 
-def test_asset_findings_reported_on_lint_failure_early_return(tmp_path):
-    repo_root = build_corpus(tmp_path / "repo", ASSETS_BROKEN, ["b.js"])
+def test_asset_finding_present_on_lint_failure_return(tmp_path):
+    repo_root = tmp_path / "repo"
+    build_first_corpus(repo_root, ASSETS_BROKEN)
 
     report = spec_reviewer.check(["comp-foo"], repo_root)
-
-    lint_findings = list(field(report, "lint_findings"))
+    lint_findings = field(report, "lint_findings")
     assert any(field(lf, "severity") == "fail" for lf in lint_findings)
     assert list(field(report, "criteria_checked")) == []
-
-    findings = list(field(report, "findings"))
+    findings = field(report, "findings")
     assert len(findings) == 1
-    f = findings[0]
-    assert field(f, "kind") == "asset_interface_missing"
-    assert field(f, "token") == "static/app.js"
+    assert field(findings[0], "kind") == "asset_interface_missing"
+    assert field(findings[0], "token") == "static/app.js"
 
 
-def test_no_assets_line_gives_no_findings(tmp_path):
-    repo_root = build_corpus(tmp_path / "repo", None, [])
-    spec_linter = load_spec_linter()
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+def test_no_assets_line_no_findings(tmp_path):
+    repo_root = tmp_path / "repo"
+    build_corpus(repo_root, None)
+    assert_lint_clean(repo_root)
 
     report = spec_reviewer.check(["comp-foo"], repo_root)
     assert list(field(report, "findings")) == []

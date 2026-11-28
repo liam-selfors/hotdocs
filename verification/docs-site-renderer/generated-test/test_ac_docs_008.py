@@ -1,7 +1,5 @@
-# hotdocs-criterion: sha256:87aeb15e62726e914e0ee6171e2485e51d1feef4b038b742566c42d0d26796bd
-"""AC-DOCS-008: document text is HTML-escaped in a detail view, and a
-component node with null verification/provenance and empty owners renders
-without error."""
+# hotdocs-criterion: sha256:a5745e7cb5bc07343a4b8772ec2177928dcb295cdf67491dc146808dd15f38e1
+"""AC-DOCS-008: detail views HTML-escape document text and tolerate null/empty fields."""
 
 import dataclasses
 import json
@@ -12,8 +10,8 @@ from urllib.parse import unquote, urlsplit
 import docs_site_renderer
 
 
-XSS_TEXT = "<script>alert(1)</script> & more"
-RAW_SCRIPT = "<script>alert(1)</script>"
+RAW = "<script>alert(1)</script>"
+DOC_TEXT = "<script>alert(1)</script> & more"
 
 
 @dataclasses.dataclass
@@ -32,93 +30,97 @@ class FakeCorpusGraph:
 
 
 class _NodeLinkParser(HTMLParser):
-    """Collects, for each `#nodes .node` list item, its data-id and the
-    href of the first `a` inside it."""
+    """Collects, for each `#nodes .node` list item, the href of its first `a`."""
 
     def __init__(self):
-        super().__init__()
+        super().__init__(convert_charrefs=True)
         self.links = {}
-        self._stack = []  # list of (tag, node_id or None)
-        self._current = None
+        self._current_id = None
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         classes = (attrs.get("class") or "").split()
         if tag == "li" and "node" in classes and attrs.get("data-id") is not None:
-            self._current = attrs.get("data-id")
-            self._stack.append((tag, self._current))
+            self._current_id = attrs.get("data-id")
             return
-        if tag == "a" and self._current is not None and self._current not in self.links:
+        if tag == "a" and self._current_id is not None:
             href = attrs.get("href")
-            if href is not None:
-                self.links[self._current] = href
+            if href is not None and self._current_id not in self.links:
+                self.links[self._current_id] = href
 
     def handle_endtag(self, tag):
-        if tag == "li" and self._stack:
-            self._stack.pop()
-            self._current = self._stack[-1][1] if self._stack else None
+        if tag == "li":
+            self._current_id = None
 
 
-def _detail_page(out_dir, node_id):
-    index = out_dir / "index.html"
-    assert index.is_file(), "index.html was not written"
+def _component_node(documents, verification, provenance, owners):
+    return {
+        "type": "component",
+        "verification": verification,
+        "provenance": provenance,
+        "size_status": "ok",
+        "sealed": False,
+        "pinned_overrides": [],
+        "owners": owners,
+        "documents": documents,
+    }
+
+
+def _detail_page(out_dir, index_text, node_id):
     parser = _NodeLinkParser()
-    parser.feed(index.read_text(encoding="utf-8"))
-    assert node_id in parser.links, "no detail link found for " + repr(node_id)
+    parser.feed(index_text)
+    parser.close()
+    assert node_id in parser.links, "no detail link for " + node_id + " in index.html"
     href = parser.links[node_id]
     path_part = unquote(urlsplit(href).path)
-    if path_part == "":
-        target = index
-    else:
-        target = (index.parent / path_part).resolve()
-    assert target.is_file(), "detail page " + repr(str(target)) + " does not exist"
-    return target.read_text(encoding="utf-8")
+    page = (Path(out_dir) / path_part).resolve()
+    if page.is_dir():
+        page = page / "index.html"
+    assert page.is_file(), "detail page for " + node_id + " not found at " + str(page)
+    return page
 
 
-def _graph():
+def test_ac_docs_008_escaping_and_null_fields(tmp_path):
+    first_id = "comp-alpha"
+    second_id = "comp-beta"
     nodes = {
-        "comp-xss": {
-            "type": "component",
-            "verification": None,
-            "provenance": None,
-            "size_status": "ok",
-            "sealed": False,
-            "pinned_overrides": [],
-            "owners": ["pipeline-team"],
-            "documents": {
-                "component.md": XSS_TEXT,
-                "requirements/R-XSS-001.md": "# R-XSS-001\n\n" + XSS_TEXT + "\n",
-            },
-        },
-        "comp-bare": {
-            "type": "component",
-            "verification": None,
-            "provenance": None,
-            "size_status": "unknown",
-            "sealed": False,
-            "pinned_overrides": [],
-            "owners": [],
-            "documents": {"component.md": "# Bare\n\nNothing else.\n"},
-        },
+        first_id: _component_node(
+            documents={"component.md": DOC_TEXT},
+            verification=None,
+            provenance=None,
+            owners=["pipeline-team"],
+        ),
+        second_id: _component_node(
+            documents={"component.md": "# Beta\n\nPlain text.\n"},
+            verification=None,
+            provenance=None,
+            owners=[],
+        ),
     }
-    edges = []
+    edges = [{"from": first_id, "to": second_id, "kind": "depends_on"}]
     aggregates = {
         "orphan_capability_rate": 0.0,
-        "orphan_component_rate": 1.0,
+        "orphan_component_rate": 0.0,
         "orphan_var_rate": 0.0,
     }
-    return FakeCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
+    graph = FakeCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
-
-def test_ac_docs_008_escapes_document_text_and_renders_null_fields(tmp_path):
     out_dir = tmp_path / "site"
-    docs_site_renderer.render_docs_site(_graph(), out_dir)
+    # Must not raise, including for the second node's null/empty fields.
+    docs_site_renderer.render_docs_site(graph, out_dir)
 
-    first = _detail_page(out_dir, "comp-xss")
-    assert "&lt;script&gt;" in first
-    assert "&amp; more" in first
-    assert RAW_SCRIPT not in first
+    index = out_dir / "index.html"
+    assert index.is_file()
+    index_text = index.read_text(encoding="utf-8")
 
-    second = _detail_page(out_dir, "comp-bare")
-    assert second.strip() != ""
-    assert RAW_SCRIPT not in second
+    first_page = _detail_page(out_dir, index_text, first_id)
+    first_text = first_page.read_text(encoding="utf-8")
+    assert "&lt;script&gt;" in first_text
+    assert "&amp; more" in first_text
+    assert RAW not in first_text
+
+    second_page = _detail_page(out_dir, index_text, second_id)
+    assert second_page != first_page
+    second_text = second_page.read_text(encoding="utf-8")
+    assert second_text.strip() != ""
+    assert second_id in second_text

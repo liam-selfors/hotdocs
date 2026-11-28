@@ -1,275 +1,256 @@
-# hotdocs-criterion: sha256:e4d6f466655ef93c225e99c872632f23f7c9ab1029ddc8f89b0685e147bc542c
+# hotdocs-criterion: sha256:99fe295c93d20bf39a37ef616e89c0dd70329a321837ee8b82a49575199eadf2
 import json
 import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 import review_packet_builder
+
+
+VERIFICATION_RESULT = {"z": 1, "a": 2}
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-VERIFICATION_REPORT = {
-    "z": 1,
-    "a": 2,
-    "component_id": "comp-foo",
-    "criteria": [
-        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-    ],
-    "requirement_results": {"R-FOO-001": "pass"},
-    "interface_drift": False,
-    "mutation_score": 0.92,
-    "mutation_error": None,
-    "assets": [
-        {
-            "kind": "python",
-            "path": ".",
-            "definition_sha256": None,
-            "adapter_sha256": "sha256:" + "0" * 64,
-            "versions": {"python": "3.12.4"},
-            "lockfile_sha256": None,
-        }
-    ],
-    "drivers": [],
-    "overall": "pass",
-}
-
-LICENSE_SCAN = {
-    "gate_version": "license_scanner@1.0.0",
-    "blocked": False,
-    "flagged": False,
-    "matches": [],
-    "cache_hit": False,
-}
-
-SECRET_SCAN = {
-    "scope": "full",
-    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": False,
-    "matches": [],
-    "allowed": [],
-    "unused_allowlist_entries": [],
-    "notified": False,
-    "notification_delivery_error": None,
-    "cache_hit": False,
-}
-
-VERIFY_REPORT = {
-    "scope": "blast-radius",
-    "ready": True,
-    "components": {
-        "comp-foo": {
-            "hit": True,
-            "reason": None,
-            "verification_report": VERIFICATION_REPORT,
-            "license_scan": LICENSE_SCAN,
-            "secret_scan": SECRET_SCAN,
-        }
-    },
-    "capabilities": {},
-    "secret_scan": None,
-    "not_ready_reasons": [],
-}
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def _git(repo, *args):
+def _git(repo_root, *args):
     subprocess.run(
-        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
          "-c", "commit.gpgsign=false"] + list(args),
-        cwd=str(repo), check=True, capture_output=True,
+        cwd=str(repo_root),
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+def _verify_report():
+    return {
+        "scope": "blast-radius",
+        "ready": True,
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "reason": None,
+                "verification_report": dict(VERIFICATION_RESULT),
+                "license_scan": {
+                    "gate_version": "license_scanner@1.0.0",
+                    "blocked": False,
+                    "matches": [],
+                },
+                "secret_scan": {
+                    "scope": "full",
+                    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+                    "flagged": False,
+                    "matches": [],
+                    "allowed": [],
+                    "unused_allowlist_entries": [],
+                    "notified": False,
+                    "notification_delivery_error": None,
+                    "cache_hit": False,
+                },
+            }
+        },
+        "capabilities": {},
+        "secret_scan": None,
+        "not_ready_reasons": [],
+    }
 
 
-def make_repo(root, raise_value_error=False):
-    repo = root / "repo"
-    repo.mkdir(parents=True)
-    log = root / "tracker_calls.log"
+def _fake_tracker_source(log_path, raise_value_error):
+    src = "from pathlib import Path\n\n"
+    src += "LOG_PATH = " + repr(str(log_path)) + "\n\n"
+    src += "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+    src += "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+    src += "        fh.write(repr(changed_ids) + '\\n')\n"
+    if raise_value_error:
+        src += "    raise ValueError(" + repr(
+            "P-ZERO-EDIT: capability needs a fresh run; pass --model") + ")\n"
+    else:
+        src += "    return " + repr(_verify_report()) + "\n"
+    src += "\n"
+    src += "def last_requirement_failures(component_id, repo_root):\n"
+    src += "    return []\n"
+    return src
+
+
+def _make_repo(tmp_path, raise_value_error=False):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "tracker_calls.log"
 
     _write(
-        repo / "specs" / "components" / "foo" / "component.md",
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** — a fixture term.\n",
+    )
+    _write(
+        repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team-foo]\n"
+        "owners: [fixture-team]\n"
         "depends_on: []\n"
         "sealed: true\n"
         "source_path: legacy/foo/\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "A fixture component.\n",
+        "---\n\n"
+        "# Foo\n\nA fixture component.\n",
     )
     _write(
-        repo / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — foo MUST do bar.\n",
+        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — foo MUST return one.\n",
     )
     _write(
-        repo / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: llm-judge\n\nfoo does bar.\n",
+        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: llm-judge\n\nfoo returns one.\n",
     )
-    _write(repo / "legacy" / "foo" / "foo.py", "def foo():\n    return 1\n")
+    _write(repo_root / "legacy" / "foo" / "foo.py", "def foo():\n    return 1\n")
+    _write(
+        repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
+        _fake_tracker_source(log_path, raise_value_error),
+    )
 
-    src = (
-        "import copy\n"
-        "REPORT = " + repr(VERIFY_REPORT) + "\n"
-        "LOG = " + repr(str(log)) + "\n"
-        "\n"
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(LOG, 'a') as fh:\n"
-        "        fh.write('check_readiness\\n')\n"
-    )
-    if raise_value_error:
-        src += (
-            "    raise ValueError(" + repr("P-FOO-CAP: capability needs a fresh run; pass --model") + ")\n"
-        )
-    else:
-        src += (
-            "    report = copy.deepcopy(REPORT)\n"
-            "    report['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
-            "    return report\n"
-        )
-    src += (
-        "\n"
-        "def last_requirement_failures(component_id, repo_root):\n"
-        "    return []\n"
-    )
-    _write(repo / "gen" / "provenance-tracker" / "provenance_tracker.py", src)
+    _git(repo_root, "init", "-q")
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "initial")
 
-    _git(repo, "init", "-q")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "initial")
-    return repo, log
+    _write(
+        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — foo MUST return exactly one.\n",
+    )
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "change R-FOO-001")
+
+    return repo_root, log_path
+
+
+@pytest.fixture
+def repo(tmp_path):
+    return _make_repo(tmp_path)
 
 
 def _run(argv, capsys):
     capsys.readouterr()
-    code = review_packet_builder.main(argv)
-    captured = capsys.readouterr()
-    return code, captured.out, captured.err
+    rc = review_packet_builder.main(argv)
+    out = capsys.readouterr()
+    return rc, out.out, out.err
 
 
-def test_build_json_renders_real_content(tmp_path, capsys):
-    repo, log = make_repo(tmp_path)
-    code, out, err = _run(
+def test_build_json_renders_real_content(repo, capsys):
+    repo_root, log_path = repo
+    rc, out, err = _run(
         ["review-packet", "build", "--changed=R-FOO-001",
-         "--repo-root=" + str(repo), "--format=json"],
+         "--repo-root=" + str(repo_root), "--format=json"],
         capsys,
     )
-    assert code == 0, err
+    assert rc == 0, err
     packet = json.loads(out)
-    assert log.is_file() and "check_readiness" in log.read_text()
 
-    vr = packet["verification_results"]
-    assert isinstance(vr, dict)
-    assert "comp-foo" in vr
-    assert vr["comp-foo"]["mutation_score"] == 0.92
-    assert vr["comp-foo"]["overall"] == "pass"
-    assert vr["comp-foo"]["z"] == 1
-    assert vr["comp-foo"]["a"] == 2
+    assert log_path.is_file(), "provenance-tracker fake was never called"
 
-    rr = packet["residual_risk"]
-    assert isinstance(rr, list)
-    assert len(rr) >= 1
-    for entry in rr:
+    verification_results = field(packet, "verification_results")
+    assert isinstance(verification_results, dict)
+    assert VERIFICATION_RESULT in list(verification_results.values())
+
+    residual_risk = field(packet, "residual_risk")
+    assert isinstance(residual_risk, list)
+    for entry in residual_risk:
         assert isinstance(entry, dict)
-        assert isinstance(entry["component_id"], str)
-        assert isinstance(entry["message"], str) and entry["message"].strip()
-    assert any(entry["component_id"] == "comp-foo" for entry in rr)
+        assert isinstance(entry["component_id"], str) and entry["component_id"]
+        assert isinstance(entry["message"], str) and entry["message"]
 
-    ex = packet["exemption_changes"]
-    assert "sealed" in ex
-    assert "pinned_overrides" in ex
-    assert isinstance(ex["sealed"], list)
-    assert isinstance(ex["pinned_overrides"], list)
+    exemption_changes = field(packet, "exemption_changes")
+    assert "sealed" in exemption_changes
+    assert "pinned_overrides" in exemption_changes
+    assert exemption_changes["sealed"] == []
+    assert exemption_changes["pinned_overrides"] == []
 
 
-def test_build_json_repeated_space_separated_changed(tmp_path, capsys):
-    repo, _ = make_repo(tmp_path)
-    code, out, err = _run(
-        ["review-packet", "build", "--changed", "R-FOO-001", "--changed", "comp-foo",
-         "--repo-root", str(repo), "--format", "json"],
+def test_repeated_changed_space_separated(repo, capsys):
+    repo_root, _ = repo
+    rc, out, err = _run(
+        ["review-packet", "build", "--changed", "R-FOO-001",
+         "--changed", "comp-foo", "--repo-root", str(repo_root),
+         "--format", "json"],
         capsys,
     )
-    assert code == 0, err
+    assert rc == 0, err
     packet = json.loads(out)
-    assert packet["changed_requirements"] == ["R-FOO-001"]
+    assert field(packet, "changed_requirements") == ["R-FOO-001"]
 
 
-def test_usage_errors_return_2(tmp_path, capsys):
-    repo, _ = make_repo(tmp_path)
-    argvs = [
-        ["review-packet", "build", "--repo-root=" + str(repo)],
+def _usage_argvs(repo_root):
+    root = str(repo_root)
+    return [
+        ["review-packet", "build", "--repo-root=" + root],
         ["review-packet", "serve", "--changed=R-FOO-001"],
         ["review-packet"],
-        ["review-packet", "build", "--repo-root=" + str(repo), "--changed"],
+        ["review-packet", "build", "--repo-root=" + root, "--changed"],
         ["review-packet", "build", "--changed=R-FOO-001", "--repo-root"],
         ["review-packet", "build", "--changed=R-FOO-001",
-         "--repo-root=" + str(repo), "--format"],
+         "--repo-root=" + root, "--format"],
     ]
-    for argv in argvs:
-        code, out, err = _run(argv, capsys)
-        assert code == 2, (argv, out, err)
 
 
-def test_bogus_format_returns_2(tmp_path, capsys):
-    repo, _ = make_repo(tmp_path)
-    code, out, err = _run(
+@pytest.mark.parametrize("index", range(6))
+def test_usage_errors_return_2(repo, capsys, index):
+    repo_root, _ = repo
+    argv = _usage_argvs(repo_root)[index]
+    rc, _, _ = _run(argv, capsys)
+    assert rc == 2
+
+
+def test_bogus_format_returns_2(repo, capsys):
+    repo_root, _ = repo
+    rc, _, _ = _run(
         ["review-packet", "build", "--changed=R-FOO-001",
-         "--repo-root=" + str(repo), "--format=bogus"],
+         "--repo-root=" + str(repo_root), "--format=bogus"],
         capsys,
     )
-    assert code == 2, (out, err)
+    assert rc == 2
 
 
 def test_check_readiness_value_error_returns_1(tmp_path, capsys):
-    repo, log = make_repo(tmp_path, raise_value_error=True)
-    code, out, err = _run(
+    repo_root, log_path = _make_repo(tmp_path, raise_value_error=True)
+    rc, _, _ = _run(
         ["review-packet", "build", "--changed=R-FOO-001",
-         "--repo-root=" + str(repo)],
+         "--repo-root=" + str(repo_root)],
         capsys,
     )
-    assert code == 1, (out, err)
+    assert rc == 1
+    assert log_path.is_file(), "provenance-tracker fake was never called"
 
 
-A_RE = re.compile(r'"a"\s*:\s*2')
-Z_RE = re.compile(r'"z"\s*:\s*1')
+def _assert_a_before_z(text):
+    a_match = re.search(r'"a"\s*:\s*2', text)
+    z_match = re.search(r'"z"\s*:\s*1', text)
+    assert a_match is not None, text
+    assert z_match is not None, text
+    assert a_match.start() < z_match.start(), text
 
 
-def test_verification_result_keys_sorted_in_json_and_markdown(tmp_path, capsys):
-    repo, _ = make_repo(tmp_path)
-
-    code, out, err = _run(
+def test_verification_result_keys_sorted_in_both_formats(repo, capsys):
+    repo_root, _ = repo
+    rc, out_json, err = _run(
         ["review-packet", "build", "--changed=R-FOO-001",
-         "--repo-root=" + str(repo), "--format=json"],
+         "--repo-root=" + str(repo_root), "--format=json"],
         capsys,
     )
-    assert code == 0, err
-    a = A_RE.search(out)
-    z = Z_RE.search(out)
-    assert a is not None and z is not None, out
-    assert a.start() < z.start()
+    assert rc == 0, err
+    _assert_a_before_z(out_json)
 
-    code, out, err = _run(
+    rc, out_md, err = _run(
         ["review-packet", "build", "--changed=R-FOO-001",
-         "--repo-root=" + str(repo)],
+         "--repo-root=" + str(repo_root)],
         capsys,
     )
-    assert code == 0, err
-    assert "## Verification Results" in out
-    start = out.index("## Verification Results")
-    rest = out[start + len("## Verification Results"):]
-    nxt = re.search(r"(?m)^## ", rest)
-    section = rest[: nxt.start()] if nxt else rest
-    a = A_RE.search(section)
-    z = Z_RE.search(section)
-    assert a is not None and z is not None, section
-    assert a.start() < z.start()
+    assert rc == 0, err
+    _assert_a_before_z(out_md)

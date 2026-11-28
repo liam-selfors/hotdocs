@@ -1,8 +1,5 @@
-# hotdocs-criterion: sha256:c0cf8b75c0bcc102733ef874da069148150053a7df145edfdf74ed80bd5cd4db
-"""AC-STYLE-002: the :root rule declares exactly R-STYLE-002's tokens, in
-order, then color-scheme: light dark."""
-
-import ui_style  # noqa: F401  (module under test)
+# hotdocs-criterion: sha256:25d5e647f50e0d7370b4deef00c70067a810822c7e7b104e95d491049eb0dd95
+import ui_style  # noqa: F401
 
 
 EXPECTED_TOKENS = [
@@ -17,6 +14,9 @@ EXPECTED_TOKENS = [
     ("--color-warn", "#9a6700"),
     ("--color-fail", "#d1242f"),
     ("--color-neutral", "#6e7781"),
+    ("--color-edge-depends-on", "#0969da"),
+    ("--color-edge-realizes", "#1a7f37"),
+    ("--color-edge-other", "#bc4c00"),
     ("--font-body", 'system-ui, -apple-system, "Segoe UI", sans-serif'),
     ("--font-mono", "ui-monospace, Menlo, Consolas, monospace"),
     ("--text-sm", "0.875rem"),
@@ -40,15 +40,12 @@ def test_ac_style_002_root_tokens_and_color_scheme(asset_runner):
 
     expected = dict(EXPECTED_TOKENS)
 
-    # tokens equals the table as a dict, keys in the table's order
+    # tokens equals the table, in the table's order
     assert dict(tokens) == expected
     assert list(dict(tokens).items()) == EXPECTED_TOKENS
-    assert list(dict(tokens).keys()) == [k for k, _ in EXPECTED_TOKENS]
 
-    # :root rule equals that dict plus color-scheme, which comes last
-    expected_root = dict(EXPECTED_TOKENS)
-    expected_root["color-scheme"] = "light dark"
-    root_dict = dict(root)
-    assert root_dict == expected_root
-    assert list(root_dict.items()) == EXPECTED_TOKENS + [("color-scheme", "light dark")]
-    assert list(root_dict.keys())[-1] == "color-scheme"
+    # :root rule equals the tokens plus color-scheme, which is last
+    expected_root = list(EXPECTED_TOKENS) + [("color-scheme", "light dark")]
+    assert dict(root) == dict(expected_root)
+    assert list(dict(root).items()) == expected_root
+    assert list(dict(root).keys())[-1] == "color-scheme"

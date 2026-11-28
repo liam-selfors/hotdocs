@@ -1,101 +1,28 @@
-# hotdocs-criterion: sha256:ee056ec5943e85310bf57d58f13ec8c11dbe8e0fcdcae96e1de469905933b9df
-"""AC-DOCS-004: given only corpus-graph.json, render_docs_site completes and
-reads no file except the component's own asset static/app.js (plus the
-tool's own code and style, which are not data sources)."""
+# hotdocs-criterion: sha256:b3a490325be0789c7f41696f0845d4c297015580e3bd1cd171fe3a5a6b8dffd6
+"""AC-DOCS-004: given only corpus-graph.json, render_docs_site completes,
+reading no data file except its own asset static/app.js (R-DOCS-004)."""
 
+import dataclasses
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 import docs_site_renderer
 
-_RECORDING = {"on": False, "events": []}
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _audit_hook(event, args):
-    if not _RECORDING["on"]:
-        return
-    if event != "open":
-        return
-    try:
-        path = args[0]
-        if isinstance(path, int) or path is None:
-            return
-        path = os.fsdecode(path)
-        _RECORDING["events"].append(os.path.abspath(path))
-    except Exception:
-        pass
+@dataclasses.dataclass
+class CorpusGraph:
+    """Stand-in with corpus-graph-builder's documented CorpusGraph shape."""
 
-
-sys.addaudithook(_audit_hook)
-
-
-def _real(p):
-    return os.path.realpath(str(p))
-
-
-def _is_under(path, root):
-    root = root.rstrip(os.sep)
-    return path == root or path.startswith(root + os.sep)
-
-
-def _corpus_graph():
-    return {
-        "nodes": {
-            "P-ZERO-EDIT": {"type": "capability"},
-            "comp-foo": {
-                "type": "component",
-                "verification": {
-                    "requirement_results": {"R-FOO-001": "passing"},
-                    "criteria": [
-                        {"id": "AC-FOO-001", "kind": "compiled", "result": "passing"}
-                    ],
-                },
-                "provenance": {"generated_at": "2026-01-01T00:00:00Z", "model": "m"},
-                "size_status": "ok",
-                "sealed": False,
-                "pinned_overrides": [],
-                "owners": ["pipeline-team"],
-                "documents": {
-                    "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\n---\n\n# Foo\n",
-                    "requirements/R-FOO-001.md": "# R-FOO-001\n\nFoo MUST work.\n",
-                },
-            },
-            "comp-bar": {
-                "type": "component",
-                "verification": None,
-                "provenance": None,
-                "size_status": "unknown",
-                "sealed": True,
-                "pinned_overrides": [],
-                "owners": [],
-                "documents": {},
-            },
-            "VAR-FOO-URL": {"type": "var"},
-        },
-        "edges": [
-            {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
-            {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
-            {"from": "comp-foo", "to": "comp-bar", "kind": "depends_on"},
-        ],
-        "aggregates": {
-            "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
-            "orphan_var_rate": 0.0,
-        },
-    }
-
-
-class _Graph(dict):
-    """CorpusGraph-shaped value: attributes nodes/edges/aggregates, to_dict(),
-    to_json_bytes(), and also readable as the plain dict it holds."""
-
-    def __init__(self, data):
-        super().__init__(data)
-        self.nodes = data["nodes"]
-        self.edges = data["edges"]
-        self.aggregates = data["aggregates"]
+    nodes: dict
+    edges: list
+    aggregates: dict
 
     def to_dict(self):
         return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
@@ -106,70 +33,136 @@ class _Graph(dict):
         ).encode("utf-8")
 
 
-def test_ac_docs_004_reads_only_corpus_graph_and_own_asset(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    (repo_root / "verification").mkdir(parents=True)
-    graph_file = repo_root / "verification" / "corpus-graph.json"
-    graph_file.write_text(
-        json.dumps(_corpus_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n",
-        encoding="utf-8",
+GRAPH_DICT = {
+    "nodes": {
+        "P-ZERO-EDIT": {"type": "capability"},
+        "comp-foo": {
+            "type": "component",
+            "verification": None,
+            "provenance": None,
+            "size_status": "ok",
+            "sealed": False,
+            "pinned_overrides": [],
+            "owners": ["pipeline-team"],
+            "documents": {
+                "component.md": "# Foo\n\nThe foo component.\n",
+                "requirements/R-FOO-001.md": "# R-FOO-001\n\nFoo MUST foo.\n",
+            },
+        },
+        "comp-bar": {
+            "type": "component",
+            "verification": None,
+            "provenance": None,
+            "size_status": "unknown",
+            "sealed": True,
+            "pinned_overrides": [],
+            "owners": [],
+            "documents": {"component.md": "# Bar\n\nThe bar component.\n"},
+        },
+        "VAR-FOO-URL": {"type": "var"},
+    },
+    "edges": [
+        {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
+        {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
+        {"from": "comp-foo", "to": "comp-bar", "kind": "depends_on"},
+    ],
+    "aggregates": {
+        "orphan_capability_rate": 0.0,
+        "orphan_component_rate": 0.0,
+        "orphan_var_rate": 0.0,
+    },
+}
+
+
+_RECORDER = {"active": False, "thread": None, "reads": []}
+
+
+def _audit(event, args):
+    if event != "open" or not _RECORDER["active"]:
+        return
+    if threading.get_ident() != _RECORDER["thread"]:
+        return
+    path, mode, flags = (list(args) + [None, None, None])[:3]
+    if path is None or isinstance(path, int):
+        return
+    try:
+        path = os.fsdecode(path)
+    except TypeError:
+        return
+    if isinstance(mode, str):
+        if any(c in mode for c in "wax+"):
+            return
+    elif isinstance(flags, int):
+        if (flags & os.O_ACCMODE) != os.O_RDONLY:
+            return
+    _RECORDER["reads"].append(os.path.realpath(path))
+
+
+sys.addaudithook(_audit)
+
+
+def _under(path, root):
+    root = os.path.realpath(str(root))
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def test_ac_docs_004_renders_from_corpus_graph_alone(tmp_path, monkeypatch):
+    # The only input: a corpus-graph.json in an otherwise empty directory.
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    graph_file = workdir / "corpus-graph.json"
+    graph_file.write_bytes(
+        (json.dumps(GRAPH_DICT, sort_keys=True, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
     )
-    graph = _Graph(json.loads(graph_file.read_text(encoding="utf-8")))
+    loaded = json.loads(graph_file.read_text(encoding="utf-8"))
+    graph = CorpusGraph(loaded["nodes"], loaded["edges"], loaded["aggregates"])
 
     out_dir = tmp_path / "out"
-    out_dir.mkdir()
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
+    monkeypatch.chdir(workdir)
 
-    gen = next(
-        p for p in Path(docs_site_renderer.__file__).resolve().parents if p.name == "gen"
-    )
-    tool_root = _real(gen.parent)
-    gen_real = _real(gen)
-    own_dir = _real(gen / "docs-site-renderer")
-    app_js_suffix = os.sep + "static" + os.sep + "app.js"
-    ui_style_dir = _real(gen / "ui-style")
-    tmp_real = _real(tmp_path)
-    out_real = _real(out_dir)
-    graph_real = _real(graph_file)
+    pkg_dir = Path(docs_site_renderer.__file__).resolve().parent
+    app_js = os.path.realpath(str(pkg_dir.parent / "static" / "app.js"))
+    gen = next(p for p in pkg_dir.parents if p.name == "gen")
+    ui_style_dir = gen / "ui-style"
 
-    _RECORDING["events"] = []
-    _RECORDING["on"] = True
+    _RECORDER["reads"] = []
+    _RECORDER["thread"] = threading.get_ident()
+    _RECORDER["active"] = True
     try:
-        docs_site_renderer.render_docs_site(graph, out_dir)
+        result = docs_site_renderer.render_docs_site(graph, out_dir)
     finally:
-        _RECORDING["on"] = False
-    events = list(_RECORDING["events"])
+        _RECORDER["active"] = False
+    reads = list(_RECORDER["reads"])
 
-    assert (out_dir / "index.html").is_file()
+    # It completes successfully.
+    assert result is None
+    index = out_dir / "index.html"
+    assert index.is_file()
 
-    violations = []
-    for raw in events:
-        path = _real(raw)
-        if _is_under(path, out_real):
-            continue
-        if _is_under(path, tmp_real):
-            if path == graph_real:
-                continue
-            violations.append(path)
-            continue
-        if _is_under(path, tool_root):
-            if _is_under(path, own_dir) and path.endswith(app_js_suffix):
-                continue
-            if _is_under(path, ui_style_dir):
-                continue
-            if _is_under(path, gen_real) and (
-                path.endswith(".py")
-                or path.endswith(".pyc")
-                or (os.sep + "__pycache__") in path
-            ):
-                continue
-            violations.append(path)
-            continue
-        # Paths outside the tool and the test's temp dir belong to the Python
-        # runtime itself (stdlib, site-packages), not data sources.
+    # It read its own asset (inlined into index.html).
+    assert app_js in reads
+    asset_text = Path(app_js).read_text(encoding="utf-8")
+    assert asset_text in index.read_text(encoding="utf-8")
 
-    assert violations == [], (
-        "read files other than corpus-graph.json and static/app.js: " + repr(violations)
-    )
+    python_roots = {sys.prefix, sys.base_prefix, sys.exec_prefix}
+    module_suffixes = (".py", ".pyc", ".pth", ".so", ".dylib", ".pyd")
+
+    unexpected = []
+    for path in reads:
+        if path == app_js:
+            continue
+        if _under(path, out_dir):
+            continue  # its own output
+        if _under(path, ui_style_dir):
+            continue  # the tool's own style, not a data source
+        if path.endswith(module_suffixes):
+            continue  # code being imported
+        if any(_under(path, root) for root in python_roots):
+            continue  # the interpreter's own files
+        unexpected.append(path)
+
+    assert unexpected == [], "read files other than its own asset: " + repr(unexpected)
+
+    # In particular, nothing in the input directory was read, not even the
+    # graph file again: the graph object is the only data source.
+    assert [p for p in reads if _under(p, workdir)] == []

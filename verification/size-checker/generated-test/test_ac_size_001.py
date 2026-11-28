@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:b21f5e238e1875a2b30aabbe123095ee23ed0267e8696cccf7b1c1bcd4acb844
+# hotdocs-criterion: sha256:2f4fa60cc158681a45b990e99309b97888c0abd1bfef72b06a98196afb8938f5
 from pathlib import Path
 
 import size_checker
@@ -13,82 +13,82 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def build_fixture(repo_root, loc):
-    comp = repo_root / "specs" / "components" / "foo"
+def build_fixture(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "big"
     write(
-        comp / "component.md",
+        comp_dir / "component.md",
         "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
+        "id: comp-big\n"
+        "title: Big\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
         "depends_on: []\n"
         "sealed: true\n"
-        "source_path: legacy/foo/\n"
+        "source_path: legacy/big/\n"
         "---\n"
         "\n"
-        "# Foo\n"
+        "# Big\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo does one small thing.\n",
+        "A small fixture component with a lot of generated code.\n",
     )
     write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
+        comp_dir / "requirements" / "R-BIG-001.md",
+        "# R-BIG-001\n"
         "\n"
-        "**R-FOO-001** — Foo MUST return one.\n",
+        "**R-BIG-001** — The component MUST do one thing.\n",
     )
     write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
+        comp_dir / "acceptance" / "AC-BIG-001.md",
+        "# AC-BIG-001\n"
         "\n"
-        "Covers: R-FOO-001\n"
+        "Covers: R-BIG-001\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given nothing\n"
-        "When foo runs\n"
-        "Then it returns one\n"
+        "Given the component\n"
+        "When it runs\n"
+        "Then it does one thing\n"
         "```\n",
     )
     write(
-        comp / "interface" / "library.md",
+        comp_dir / "interface" / "library.md",
         "# Library\n"
         "\n"
         "```\n"
-        "foo() -> int\n"
+        "do_thing() -> None\n"
         "```\n",
     )
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test component.\n",
-    )
 
-    lines = []
-    for i in range(loc):
-        lines.append("x_" + str(i) + " = " + repr(i))
+    # Generated code: 1600 counted lines, plus blank and comment lines
+    # that must not count.
+    source = "# generated module header comment\n\n"
+    for i in range(1600):
+        source = source + "value_" + str(i) + " = " + repr(i) + "\n"
         if i % 100 == 0:
-            lines.append("")
-            lines.append("# a comment line that never counts")
-    write(repo_root / "gen" / "foo" / "foo.py", "\n".join(lines) + "\n")
+            source = source + "\n    # an indented comment line\n"
+    write(repo_root / "gen" / "big" / "big.py", source)
 
 
 def test_ac_size_001_generated_code_loc_over_fail_threshold(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root, 1600)
+    build_fixture(repo_root)
 
     findings = size_checker.check(repo_root)
 
-    matches = [
+    matching = [
         f
         for f in findings
         if field(f, "rule_id") == "R-SIZE-001"
         and field(f, "severity") == "fail"
         and "generated_code_loc" in field(f, "message")
     ]
-    assert matches, "no fail R-SIZE-001 finding naming generated_code_loc: " + repr(findings)
-    message = field(matches[0], "message")
-    assert message.startswith("foo: generated_code_loc is 1600"), message
+    assert matching, (
+        "expected a fail-severity R-SIZE-001 finding naming generated_code_loc, got: "
+        + repr(findings)
+    )
+    message = field(matching[0], "message")
+    assert message.startswith("big: generated_code_loc is "), message
     assert "above the fail threshold of 1500" in message, message

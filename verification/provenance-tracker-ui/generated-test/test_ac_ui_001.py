@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:2fbeae41950e7f953e8c5aa0d5d77501c5d38ea1a51d5517b1eb269453113c49
+# hotdocs-criterion: sha256:db655b4337a15a75e054d2701250c3561b3a55e3721ebed21701c6ffeeee888f
 import dataclasses
 import json
 import re
@@ -7,31 +7,23 @@ from pathlib import Path
 import provenance_tracker_ui
 
 
-SNAPSHOT_OPEN = '<script type="application/json" id="tracker-snapshot">'
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def normalize(value):
+def to_plain(value):
     if isinstance(value, dict):
-        return {k: normalize(v) for k, v in value.items()}
+        return {k: to_plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [normalize(v) for v in value]
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return normalize(dataclasses.asdict(value))
+        return [to_plain(v) for v in value]
     if hasattr(value, "to_dict") and callable(getattr(value, "to_dict")):
-        return normalize(value.to_dict())
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    if hasattr(value, "__dict__"):
-        return normalize(vars(value))
+        return to_plain(value.to_dict())
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return to_plain(dataclasses.asdict(value))
     return value
 
 
-def snapshot_as_json(snapshot):
-    return json.loads(json.dumps(normalize(snapshot)))
+SNAPSHOT_OPEN = '<script type="application/json" id="tracker-snapshot">'
 
 
 def verification_report():
@@ -42,7 +34,7 @@ def verification_report():
         ],
         "requirement_results": {"R-FOO-001": "pass"},
         "interface_drift": False,
-        "mutation_score": 0.9,
+        "mutation_score": 0.92,
         "mutation_error": None,
         "assets": [],
         "drivers": [],
@@ -64,7 +56,7 @@ def secret_scan_result():
     }
 
 
-def make_report(ready, not_ready_reasons):
+def verify_report(ready, reasons):
     return {
         "scope": "whole-corpus",
         "ready": ready,
@@ -73,58 +65,46 @@ def make_report(ready, not_ready_reasons):
                 "hit": True,
                 "reason": None,
                 "verification_report": verification_report(),
-                "license_scan": {
-                    "gate_version": "license_scanner@1.0.0",
-                    "blocked": False,
-                    "matches": [],
-                    "cache_hit": False,
-                },
+                "license_scan": {"blocked": False},
                 "secret_scan": secret_scan_result(),
             }
         },
         "capabilities": {},
         "secret_scan": secret_scan_result(),
-        "not_ready_reasons": list(not_ready_reasons),
+        "not_ready_reasons": reasons,
     }
 
 
-def write_fixture(repo_root, report, log_path):
-    fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True, exist_ok=True)
-    source = (
+def write_fake_tracker(repo_root, report, log_path):
+    d = repo_root / "gen" / "provenance-tracker"
+    d.mkdir(parents=True, exist_ok=True)
+    src = (
         "import json\n"
-        "from pathlib import Path\n"
         "\n"
-        "REPORT_JSON = " + repr(json.dumps(report)) + "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
-        "def _log(line):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(line + '\\n')\n"
+        "REPORT = json.loads(" + repr(json.dumps(report)) + ")\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    _log('check_readiness')\n"
-        "    return json.loads(REPORT_JSON)\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write('check_readiness\\n')\n"
+        "    return json.loads(json.dumps(REPORT))\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
-        "    _log('last_requirement_failures ' + str(component_id))\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write('last_requirement_failures ' + str(component_id) + '\\n')\n"
         "    return []\n"
-        "\n"
-        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
-        "    raise RuntimeError('not used by this test')\n"
-        "\n"
-        "def main(argv=None):\n"
-        "    return 2\n"
     )
-    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
+    (d / "provenance_tracker.py").write_text(src, encoding="utf-8")
 
+
+def write_corpus_graph(repo_root):
     graph = {
         "nodes": {
             "comp-foo": {
                 "type": "component",
                 "verification": None,
                 "provenance": None,
-                "size_status": "unknown",
+                "size_status": "ok",
                 "sealed": True,
                 "pinned_overrides": [],
                 "owners": ["pipeline-team"],
@@ -134,91 +114,83 @@ def write_fixture(repo_root, report, log_path):
         "edges": [],
         "aggregates": {
             "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 1.0,
+            "orphan_component_rate": 0.0,
             "orphan_var_rate": 0.0,
         },
     }
-    verification_dir = repo_root / "verification"
-    verification_dir.mkdir(parents=True, exist_ok=True)
-    (verification_dir / "corpus-graph.json").write_text(
+    v = repo_root / "verification"
+    v.mkdir(parents=True, exist_ok=True)
+    (v / "corpus-graph.json").write_text(
         json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
 
 
-def extract_snapshot_block(html):
-    assert html.count('id="tracker-snapshot"') == 1, "tracker-snapshot must be inlined exactly once"
-    start = html.index(SNAPSHOT_OPEN) + len(SNAPSHOT_OPEN)
-    end = html.index("</script>", start)
-    return html[start:end]
-
-
-def run_render(tmp_path, report):
+def build(tmp_path, ready, reasons):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "fake_calls.log"
-    write_fixture(repo_root, report, log_path)
+    log_path = tmp_path / "calls.log"
+    write_fake_tracker(repo_root, verify_report(ready, reasons), log_path)
+    write_corpus_graph(repo_root)
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
-    assert log_path.is_file(), "the faked provenance-tracker was not called"
-    assert "check_readiness" in log_path.read_text(encoding="utf-8").splitlines()
-    return out_dir, snapshot
+    return out_dir, snapshot, log_path
 
 
-def is_external(value):
-    v = value.strip()
-    if v == "" or v.startswith("#"):
-        return False
-    if v.lower().startswith("data:"):
-        return False
-    return True
+def extract_snapshot_json(html):
+    assert html.count(SNAPSHOT_OPEN) == 1
+    start = html.index(SNAPSHOT_OPEN) + len(SNAPSHOT_OPEN)
+    end = html.index("</script>", start)
+    return json.loads(html[start:end])
+
+
+def app_js_text():
+    path = Path(provenance_tracker_ui.__file__).resolve().parent / "static" / "app.js"
+    return path.read_text(encoding="utf-8")
 
 
 def test_single_self_contained_index_html(tmp_path):
-    out_dir, snapshot = run_render(tmp_path, make_report(True, []))
+    out_dir, snapshot, log_path = build(tmp_path, True, [])
 
-    files = sorted(p.relative_to(out_dir).as_posix() for p in out_dir.rglob("*") if p.is_file())
-    assert files == ["index.html"]
-    entries = sorted(p.name for p in out_dir.iterdir())
-    assert entries == ["index.html"]
+    assert log_path.read_text(encoding="utf-8").splitlines().count("check_readiness") == 1
 
-    html = (out_dir / "index.html").read_text(encoding="utf-8")
+    assert sorted(p.name for p in out_dir.iterdir()) == ["index.html"]
+    index = out_dir / "index.html"
+    assert index.is_file()
+    html = index.read_text(encoding="utf-8")
 
-    block = extract_snapshot_block(html)
-    parsed = json.loads(block)
-    expected = snapshot_as_json(snapshot)
-    assert parsed == expected
-    assert [field(n, "id") for n in field(snapshot, "nodes")] == ["comp-foo"]
+    expected = json.loads(json.dumps(to_plain(snapshot)))
+    assert extract_snapshot_json(html) == expected
 
-    assert re.search(r'<[A-Za-z][A-Za-z0-9]*\b[^>]*\bdata-node-id="comp-foo"', html), (
-        "no node element with data-node-id=\"comp-foo\""
-    )
+    ids = [field(n, "id") for n in field(snapshot, "nodes")]
+    assert ids == ["comp-foo"]
 
-    app_js_path = Path(provenance_tracker_ui.__file__).parent / "static" / "app.js"
-    app_js = app_js_path.read_text(encoding="utf-8")
-    assert app_js in html, "static/app.js is not inlined verbatim"
-    rest = html.replace(app_js, "", 1)
+    assert 'data-node-id="comp-foo"' in html
 
-    assert "fetch(" not in rest
-    assert "XMLHttpRequest" not in rest
-    assert "WebAssembly" not in rest
+    app_text = app_js_text()
+    assert app_text in html
+    outside = html.replace(app_text, "", 1)
 
-    attr_re = re.compile(r'\b(src|href)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', re.IGNORECASE)
-    for tag in re.findall(r"<[A-Za-z][^>]*>", rest):
-        for m in attr_re.finditer(tag):
-            value = m.group(2) if m.group(2) is not None else (
-                m.group(3) if m.group(3) is not None else m.group(4)
-            )
-            assert not is_external(value), "external reference found: " + tag
+    assert "fetch(" not in outside
+    assert "XMLHttpRequest" not in outside
+    assert "WebAssembly" not in outside
+
+    attr_re = re.compile(r"""\b(src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.IGNORECASE)
+    for m in attr_re.finditer(outside):
+        value = (m.group(2) or m.group(3) or m.group(4) or "").strip()
+        assert value.startswith("#") or value.lower().startswith("data:"), (
+            "external resource reference: " + m.group(0)
+        )
 
 
-def test_snapshot_survives_script_close_in_reasons(tmp_path):
-    reason = "comp-foo: odd </script><script>alert(1)</script> reason"
-    out_dir, snapshot = run_render(tmp_path, make_report(False, [reason]))
+def test_script_close_in_reason_is_escaped(tmp_path):
+    reason = "comp-foo: odd </script><script>alert(1)</script> text"
+    out_dir, snapshot, _ = build(tmp_path, False, [reason])
+
+    assert list(field(snapshot, "not_ready_reasons")) == [reason]
 
     html = (out_dir / "index.html").read_text(encoding="utf-8")
-    block = extract_snapshot_block(html)
-    parsed = json.loads(block)
-    expected = snapshot_as_json(snapshot)
+    expected = json.loads(json.dumps(to_plain(snapshot)))
+    parsed = extract_snapshot_json(html)
     assert parsed == expected
     assert parsed["not_ready_reasons"] == [reason]

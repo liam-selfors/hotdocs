@@ -1,7 +1,7 @@
 {
-  "spec_bundle_hash": "sha256:f71a4ba9f2899bdb327afbcfb6da96fc77892b8c926eee09957ff79bc75a8c25",
+  "spec_bundle_hash": "sha256:09b4532a7bf981086f5c628c1ca9f9e43b21fa092b7b97835067b88db8619561",
   "spec_bundle_parts": {
-    "spec": "sha256:f71a4ba9f2899bdb327afbcfb6da96fc77892b8c926eee09957ff79bc75a8c25",
+    "spec": "sha256:09b4532a7bf981086f5c628c1ca9f9e43b21fa092b7b97835067b88db8619561",
     "dependency_code": "sha256:c92a94e1a5dc05f61ea3cafa3ab0d83b65ff7fc7322ac17584e5be5273d1b7b3"
   },
   "model_pin": "claude-opus-5-5",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T21:56:37Z",
+  "generated_at": "2026-11-28T18:07:52Z",
   "verification_run_id": "driver-browser-attempt-1",
   "verification_report": {
     "component_id": "comp-driver-browser",
@@ -175,6 +175,30 @@
           "prompt_version": "v1",
           "cache_hit": false
         }
+      },
+      {
+        "id": "AC-DRV-013",
+        "covers": "R-DRV-002",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-DRV-014",
+        "covers": "R-DRV-002",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -184,7 +208,7 @@
       "R-DRV-004": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8409090909090909,
+    "mutation_score": 0.8347107438016529,
     "mutation_error": null,
     "assets": [
       {
@@ -325,11 +349,35 @@
         "type": "Base64 High Entropy String"
       },
       {
+        "file": "verification/driver-browser/generated-test/test_ac_drv_010.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "type": "Hex High Entropy String"
+      },
+      {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
         "type": "Hex High Entropy String"
       },
       {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_005.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_008.py",
         "type": "Hex High Entropy String"
       },
       {
@@ -406,6 +454,14 @@
       },
       {
         "file": "verification/secret-scanner/generated-test/test_ac_secret_016.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
         "type": "AWS Access Key"
       },
       {

@@ -18,6 +18,9 @@ property outside `@media`:
 | `--color-warn` | `#9a6700` |
 | `--color-fail` | `#d1242f` |
 | `--color-neutral` | `#6e7781` |
+| `--color-edge-depends-on` | `#0969da` |
+| `--color-edge-realizes` | `#1a7f37` |
+| `--color-edge-other` | `#bc4c00` |
 | `--font-body` | `system-ui, -apple-system, "Segoe UI", sans-serif` |
 | `--font-mono` | `ui-monospace, Menlo, Consolas, monospace` |
 | `--text-sm` | `0.875rem` |

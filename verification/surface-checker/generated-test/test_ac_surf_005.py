@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:6464e422f38d0d62a5dbf244df8edf66e1df257986b4e6f8f35ccc69a30a4f15
+# hotdocs-criterion: sha256:b48601584c31faa894e375eff9724a8760cfd9e5a06ccfb9d616eec89c2a5b91
 import sys
 from pathlib import Path
 
@@ -9,16 +9,16 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
 FENCE = "`" * 3
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def build_repo(repo_root, block_lines):
-    # The planted python adapter.
+def build_repo(repo_root, interface_lines):
+    # The python adapter, planted so no criterion depends on the tool's own.
     write(
         repo_root / "gen" / "kind-python" / "kind_python.py",
         "import sys\n"
@@ -26,29 +26,26 @@ def build_repo(repo_root, block_lines):
         "\n"
         "\n"
         "def provision(repo_root):\n"
-        "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("")
-        + ", " + repr("versions") + ": {}, " + repr("lockfile_sha256") + ": None,\n"
-        "            " + repr("interpreter") + ": sys.executable}\n",
+        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,\n"
+        "            \"interpreter\": sys.executable}\n",
     )
 
-    # The planted fake kind: definition and adapter.
-    write(repo_root / "specs" / "architecture" / "asset-kind-fake.md", "# Fake kind\n\nAny text.\n")
+    # The planted kind fake.
+    write(repo_root / "specs" / "architecture" / "asset-kind-fake.md", "# Fake\n")
     write(
         repo_root / "gen" / "kind-fake" / "kind_fake.py",
         "KIND = " + repr("fake") + "\n"
         "\n"
         "\n"
         "def surface(asset_file):\n"
-        "    return {" + repr("names") + ": " + repr(["a", "b"]) + "}\n"
+        "    return {" + repr("names") + ": [" + repr("a") + ", " + repr("b") + "]}\n"
         "\n"
         "\n"
         "def provision(repo_root):\n"
-        "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("")
-        + ", " + repr("versions") + ": {}, " + repr("lockfile_sha256") + ": None, "
-        + repr("interpreter") + ": None}\n",
+        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None}\n",
     )
 
-    # The component's spec.
+    # The component spec.
     comp_dir = repo_root / "specs" / "components" / "widget"
     write(
         comp_dir / "component.md",
@@ -56,7 +53,7 @@ def build_repo(repo_root, block_lines):
         "id: comp-widget\n"
         "title: Widget\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
+        "owners: [test-team]\n"
         "depends_on: []\n"
         "assets: [fake:static/app.js]\n"
         "---\n"
@@ -69,23 +66,16 @@ def build_repo(repo_root, block_lines):
         "# app.js\n"
         "\n"
         + FENCE + "\n"
-        + "".join(line + "\n" for line in block_lines)
+        + "".join(line + "\n" for line in interface_lines)
         + FENCE + "\n",
     )
 
-    # The candidate's code and asset.
+    # The candidate code and asset.
     write(repo_root / "gen" / "widget" / "widget.py", "X = 1\n")
     write(repo_root / "gen" / "widget" / "static" / "app.js", "export function a(x) { return x; }\n")
 
 
-def findings_as_pairs(report):
-    return [
-        {"kind": field(f, "kind"), "message": field(f, "message")}
-        for f in field(report, "findings")
-    ]
-
-
-def test_missing_stated_names_are_reported_sorted_and_distinct(tmp_path):
+def test_stated_names_not_provided_are_reported_sorted(tmp_path):
     repo_root = tmp_path / "repo"
     build_repo(
         repo_root,
@@ -101,17 +91,23 @@ def test_missing_stated_names_are_reported_sorted_and_distinct(tmp_path):
     report = surface_checker.check_surface("comp-widget", repo_root)
 
     assert field(report, "ok") is False
-    assert findings_as_pairs(report) == [
-        {"kind": "asset_name_missing", "message": "static/app.js has no c, which its interface states"},
-        {"kind": "asset_name_missing", "message": "static/app.js has no zeta, which its interface states"},
+    findings = [
+        {"kind": field(f, "kind"), "message": field(f, "message")}
+        for f in field(report, "findings")
+    ]
+    assert findings == [
+        {"kind": "asset_name_missing",
+         "message": "static/app.js has no c, which its interface states"},
+        {"kind": "asset_name_missing",
+         "message": "static/app.js has no zeta, which its interface states"},
     ]
 
 
-def test_all_stated_names_provided_gives_ok(tmp_path):
+def test_all_stated_names_provided_is_ok(tmp_path):
     repo_root = tmp_path / "repo"
     build_repo(repo_root, ["export function a(x)"])
 
     report = surface_checker.check_surface("comp-widget", repo_root)
 
-    assert findings_as_pairs(report) == []
+    assert list(field(report, "findings")) == []
     assert field(report, "ok") is True

@@ -1,56 +1,105 @@
-# hotdocs-criterion: sha256:9fb7d1ab5a6397fb927221f60fe20c5a8ee1a0e8909c6c5e10bcb756f8ab83b5
+# hotdocs-criterion: sha256:839146310d1de30d815802605b40b50831bc31d059c6f455da41d695edf76668
 import dataclasses
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import review_packet_builder
 
 
-OLD_MARKER = "zqxOldGeneratedMarker7731"
-MID_MARKER = "zqxMidGeneratedMarker4482"
-NEW_MARKER = "zqxNewGeneratedMarker9054"
-ALL_MARKERS = [OLD_MARKER, MID_MARKER, NEW_MARKER]
+OLD_MARKER = "QZXOLDGENCODEMARKER"
+NEW_MARKER = "QZXNEWGENCODEMARKER"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _git(repo_root, *args):
-    env = dict(os.environ)
-    env["GIT_AUTHOR_NAME"] = "Test"
-    env["GIT_AUTHOR_EMAIL"] = "test@example.invalid"
-    env["GIT_COMMITTER_NAME"] = "Test"
-    env["GIT_COMMITTER_EMAIL"] = "test@example.invalid"
+def to_plain(value):
+    if isinstance(value, dict):
+        return {str(k): to_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [to_plain(v) for v in value]
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return to_plain(dataclasses.asdict(value))
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if hasattr(value, "__dict__"):
+        return to_plain(vars(value))
+    return str(value)
+
+
+def git(repo_root, *args):
     subprocess.run(
-        ["git", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"] + list(args),
-        cwd=str(repo_root),
-        env=env,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+         "-c", "commit.gpgsign=false", *args],
+        cwd=str(repo_root), check=True, capture_output=True, text=True,
     )
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text)
 
 
-def _generated_code(marker, n):
-    lines = ["# generated module " + marker + "\n", "\n"]
-    for i in range(n):
-        lines.append("def " + marker + "_func_" + str(i) + "(x):\n")
-        lines.append("    value_" + marker + " = x * " + str(i + 1) + "\n")
-        lines.append("    return value_" + marker + " + " + repr(marker) + ".__len__()\n")
-        lines.append("\n")
+def component_md():
+    return (
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [foo-team]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo does foo things.\n"
+    )
+
+
+def requirement_md(text):
+    return "# R-FOO-001\n\n**R-FOO-001** — " + text + "\n"
+
+
+def acceptance_md():
+    return (
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: compiled\n"
+        "\n"
+        "```gherkin\n"
+        "Given foo\n"
+        "When foo runs\n"
+        "Then foo returns a value\n"
+        "```\n"
+    )
+
+
+def old_gen_code():
+    lines = ["# " + OLD_MARKER + " module header\n"]
+    for i in range(30):
+        lines.append("def old_fn_" + str(i) + "():\n")
+        lines.append("    return " + repr(OLD_MARKER + "_" + str(i)) + "\n\n")
     return "".join(lines)
 
 
-def _verification_report():
-    return {
+def new_gen_code():
+    lines = ["# " + NEW_MARKER + " module header, fully rewritten\n"]
+    lines.append("class " + NEW_MARKER + "Engine:\n")
+    for i in range(40):
+        lines.append("    def new_method_" + str(i) + "(self, x):\n")
+        lines.append("        return (x, " + repr(NEW_MARKER + "_" + str(i)) + ")\n\n")
+    return "".join(lines)
+
+
+def verify_report():
+    verification_report = {
         "component_id": "comp-foo",
         "criteria": [
             {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
@@ -63,9 +112,23 @@ def _verification_report():
         "drivers": [],
         "overall": "pass",
     }
-
-
-def _verify_report():
+    license_scan = {
+        "blocked": False,
+        "matches": [],
+        "gate_version": "license_scanner@1.0.0",
+        "cache_hit": False,
+    }
+    secret_scan = {
+        "scope": "full",
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
     return {
         "scope": "blast-radius",
         "ready": True,
@@ -73,140 +136,85 @@ def _verify_report():
             "comp-foo": {
                 "hit": True,
                 "reason": None,
-                "verification_report": _verification_report(),
-                "license_scan": {"blocked": False, "matches": []},
-                "secret_scan": {
-                    "scope": "full",
-                    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-                    "flagged": False,
-                    "matches": [],
-                    "allowed": [],
-                    "unused_allowlist_entries": [],
-                    "notified": False,
-                    "notification_delivery_error": None,
-                    "cache_hit": False,
-                },
+                "verification_report": verification_report,
+                "license_scan": license_scan,
+                "secret_scan": secret_scan,
             }
         },
         "capabilities": {},
-        "secret_scan": None,
+        "secret_scan": secret_scan,
         "not_ready_reasons": [],
     }
 
 
-def _stand_in_source():
+def tracker_source(log_path):
     return (
-        "REPORT = " + repr(_verify_report()) + "\n"
+        "import os\n"
+        "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "_REPORT = " + repr(verify_report()) + "\n"
+        "\n"
+        "def _log(line):\n"
+        "    with open(_LOG, 'a') as fh:\n"
+        "        fh.write(line + '\\n')\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    _log('check_readiness')\n"
         "    import copy\n"
-        "    return copy.deepcopy(REPORT)\n"
+        "    return copy.deepcopy(_REPORT)\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
+        "    _log('last_requirement_failures')\n"
         "    return []\n"
     )
-
-
-def _build_fixture(repo_root):
-    _git(repo_root, "init", "-q")
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** \u2014 a fixture term.\n",
-    )
-    _write(
-        repo_root / "specs" / "components" / "foo" / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [test-team]\n"
-        "depends_on: []\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "A fixture component.\n",
-    )
-    req = repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md"
-    _write(req, "# R-FOO-001\n\n**R-FOO-001** \u2014 Foo MUST return one.\n")
-    _write(
-        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\n"
-        "```gherkin\nGiven foo\nWhen it runs\nThen it returns one\n```\n",
-    )
-    _write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", _stand_in_source())
-    code = repo_root / "gen" / "foo" / "foo.py"
-    _write(code, _generated_code(OLD_MARKER, 30))
-    _git(repo_root, "add", "-A")
-    _git(repo_root, "commit", "-q", "-m", "base")
-
-    # The PR: a spec change plus a substantial rewrite of the generated code.
-    _write(req, "# R-FOO-001\n\n**R-FOO-001** \u2014 Foo MUST return two.\n")
-    _write(code, _generated_code(MID_MARKER, 40))
-    _write(repo_root / "gen" / "foo" / "helpers.py", _generated_code(MID_MARKER + "Helper", 10))
-    _git(repo_root, "add", "-A")
-    _git(repo_root, "commit", "-q", "-m", "change")
-
-    # A further uncommitted substantial change, so any diff base sees generated-code churn.
-    _write(code, _generated_code(NEW_MARKER, 50))
-
-
-def _to_plain(value):
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {f.name: _to_plain(getattr(value, f.name)) for f in dataclasses.fields(value)}
-    if isinstance(value, dict):
-        return {str(k): _to_plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_to_plain(v) for v in value]
-    if hasattr(value, "__dict__") and not isinstance(value, (str, bytes, int, float, bool)):
-        return {k: _to_plain(v) for k, v in vars(value).items() if not k.startswith("_")}
-    return value
-
-
-def _assert_no_generated_diff(text):
-    for marker in ALL_MARKERS:
-        assert marker not in text, "generated-code content leaked into packet: " + marker
-    for header in ("a/gen/foo/", "b/gen/foo/", "diff --git a/gen/"):
-        assert header not in text, "generated-code diff header leaked into packet: " + header
 
 
 def test_packet_contains_no_generated_code_diff(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_fixture(repo_root)
+    log_path = tmp_path / "tracker.log"
 
-    packet = review_packet_builder.build_review_packet(["comp-foo", "R-FOO-001"], repo_root)
+    git(repo_root, "init")
+    git(repo_root, "symbolic-ref", "HEAD", "refs/heads/main")
 
-    spec_diff = field(packet, "spec_diff")
-    assert isinstance(spec_diff, str)
-    _assert_no_generated_diff(spec_diff)
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    write(comp_dir / "component.md", component_md())
+    write(comp_dir / "requirements" / "R-FOO-001.md",
+          requirement_md("Foo MUST return a value."))
+    write(comp_dir / "acceptance" / "AC-FOO-001.md", acceptance_md())
+    write(repo_root / "legacy" / "foo" / "README.md", "legacy foo\n")
+    write(repo_root / "gen" / "foo" / "foo.py", old_gen_code())
+    write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
+          tracker_source(log_path))
 
-    plain = _to_plain(packet)
-    _assert_no_generated_diff(json.dumps(plain, default=str))
-    _assert_no_generated_diff(repr(packet))
+    git(repo_root, "add", "-A")
+    git(repo_root, "commit", "-m", "base")
 
+    git(repo_root, "checkout", "-b", "feature")
+    write(comp_dir / "requirements" / "R-FOO-001.md",
+          requirement_md("Foo MUST return a value and MUST log each call."))
+    write(repo_root / "gen" / "foo" / "foo.py", new_gen_code())
+    git(repo_root, "add", "-A")
+    git(repo_root, "commit", "-m", "change foo spec and regenerate")
 
-def test_cli_output_contains_no_generated_code_diff(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
+    packet = review_packet_builder.build_review_packet(
+        ["comp-foo", "R-FOO-001"], repo_root
+    )
 
-    for fmt in ("json", "markdown"):
-        code = review_packet_builder.main(
-            [
-                "review-packet",
-                "build",
-                "--changed=comp-foo",
-                "--changed",
-                "R-FOO-001",
-                "--repo-root=" + str(repo_root),
-                "--format=" + fmt,
-            ]
-        )
-        captured = capsys.readouterr()
-        assert code == 0, captured.err
-        _assert_no_generated_diff(captured.out)
-        if fmt == "json":
-            json.loads(captured.out)
+    assert log_path.is_file()
+    assert "check_readiness" in log_path.read_text()
+
+    # The packet is a real packet: it carries a spec diff field.
+    field(packet, "spec_diff")
+
+    plain = to_plain(packet)
+    serialized = json.dumps(plain, default=str, ensure_ascii=False)
+    texts = [serialized, repr(packet), repr(plain)]
+
+    for text in texts:
+        assert OLD_MARKER not in text
+        assert NEW_MARKER not in text
+        assert "old_fn_" not in text
+        assert "new_method_" not in text
+        assert "a/gen/foo/foo.py" not in text
+        assert "b/gen/foo/foo.py" not in text

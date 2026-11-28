@@ -1,20 +1,12 @@
-# hotdocs-criterion: sha256:91eb9f735288ddbf469315abe39a2a558099c86a71b713ff70aeb5bb309cc4f8
+# hotdocs-criterion: sha256:72ffb27d859306e2853c6cf9c1ba4a7b9709126626859cb3eba488802dd6ad26
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
 import spec_reviewer
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
+FENCE = "```"
 
 GLOSSARY = (
     "# Glossary\n"
@@ -52,21 +44,27 @@ FOO_AC = (
     "Covers: R-FOO-001\n"
     "Kind: generated-test\n"
     "\n"
-    "```gherkin\n"
+    + FENCE + "gherkin\n"
     "Given x = 2\n"
     "When foo(x) is called\n"
     "Then it returns 4\n"
-    "```\n"
+    + FENCE + "\n"
 )
 
 FOO_LIBRARY = (
     "# Library\n"
     "\n"
-    "```\n"
+    + FENCE + "\n"
     "foo(x: int) -> int\n"
-    "```\n"
+    + FENCE + "\n"
     "\n"
     "Returns `dep_word`.\n"
+)
+
+CONSTRAINTS = (
+    "# Constraints\n"
+    "\n"
+    "None.\n"
 )
 
 BAZ_COMPONENT = (
@@ -84,18 +82,18 @@ BAZ_COMPONENT = (
     "\n"
     "## Purpose\n"
     "\n"
-    "Baz increments a number.\n"
+    "Baz names a word.\n"
 )
 
-BAZ_BOLD = "**R-BAZ-001** — `baz(x)` MUST return `x + 1`."
+BAZ_BOLD_LINE = "**R-BAZ-001** — `baz(x)` MUST return `iface_word`."
 
 BAZ_REQ = (
     "# R-BAZ-001\n"
     "\n"
-    + BAZ_BOLD + "\n"
+    + BAZ_BOLD_LINE + "\n"
 )
 
-BAZ_THEN = "Then it returns 3"
+BAZ_THEN_LINE = "Then it returns the word"
 
 BAZ_AC = (
     "# AC-BAZ-001\n"
@@ -103,28 +101,29 @@ BAZ_AC = (
     "Covers: R-BAZ-001\n"
     "Kind: generated-test\n"
     "\n"
-    "```gherkin\n"
+    + FENCE + "gherkin\n"
     "Given x = 2\n"
     "When baz(x) is called\n"
-    + BAZ_THEN + "\n"
-    "```\n"
+    + BAZ_THEN_LINE + "\n"
+    + FENCE + "\n"
 )
+
+BAZ_IFACE_LINE = "Returns `iface_word`."
 
 BAZ_LIBRARY = (
     "# Library\n"
     "\n"
-    "```\n"
-    "baz(x: int) -> int\n"
-    "```\n"
+    + FENCE + "\n"
+    "baz(x: int) -> str\n"
+    + FENCE + "\n"
     "\n"
-    "Returns `iface_word`.\n"
+    + BAZ_IFACE_LINE + "\n"
 )
 
-CONSTRAINTS = (
-    "# Constraints\n"
-    "\n"
-    "None.\n"
-)
+
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def build_corpus(repo_root):
@@ -163,43 +162,28 @@ def test_ac_review_010_prompt_holds_criterion_bundle_fields(tmp_path):
     build_corpus(repo_root)
     assert_lint_clean(repo_root)
 
-    log_path = tmp_path / "prompts.jsonl"
+    prompts = []
 
-    def stand_in(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
+    def backend(prompt, model, **params):
+        prompts.append(prompt)
         return {
-            "text": json.dumps({"writable": True, "gaps": []}),
+            "text": '{"writable": true, "gaps": []}',
             "model": model,
             "backend": "mock",
             "model_call_error": None,
         }
 
-    report = spec_reviewer.check(
-        ["comp-baz"], repo_root, model="mock", llm_backend=stand_in
-    )
+    spec_reviewer.check(["comp-baz"], repo_root, model="mock", llm_backend=backend)
 
-    assert "AC-BAZ-001" in field(report, "criteria_checked")
+    baz_prompts = [p for p in prompts if "AC-BAZ-001" in p]
+    assert len(baz_prompts) == 1, prompts
+    prompt = baz_prompts[0]
 
-    assert log_path.is_file(), "the model stand-in was never called"
-    prompts = [
-        json.loads(line)["prompt"]
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    criterion_prompts = [p for p in prompts if "AC-BAZ-001" in p]
-    assert len(criterion_prompts) == 1, criterion_prompts
-    prompt = criterion_prompts[0]
-
-    expected = [
-        "comp-baz",
-        "AC-BAZ-001",
-        "R-BAZ-001",
-        BAZ_THEN,
-        BAZ_BOLD,
-        "Returns `iface_word`.",
-        "a test term",
-        "Returns `dep_word`.",
-    ]
-    for text in expected:
-        assert text in prompt, "missing from prompt: " + repr(text)
+    assert "comp-baz" in prompt
+    assert "AC-BAZ-001" in prompt
+    assert "R-BAZ-001" in prompt
+    assert BAZ_THEN_LINE in prompt
+    assert BAZ_BOLD_LINE in prompt
+    assert BAZ_IFACE_LINE in prompt
+    assert "a test term" in prompt
+    assert "Returns `dep_word`." in prompt

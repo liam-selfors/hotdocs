@@ -1,12 +1,5 @@
-# hotdocs-criterion: sha256:5ac2f4a22e98c40855255225c68e0402fb0d0f7b17c55173f89a14870d55ce22
-"""CS-COMPLIANCE-001: licensed-code similarity above threshold blocks the merge,
-is recorded in the provenance manifest's license_scan field whatever the outcome,
-and surfaces in the review packet even after a generation retry resolved the
-attempt-level failure."""
-
-import contextlib
+# hotdocs-criterion: sha256:073b1f54386aff9ed29529a3a00539d20ea622614703c41bee545e37f1a138de
 import hashlib
-import io
 import json
 import re
 from pathlib import Path
@@ -23,59 +16,33 @@ SLUG = "widget"
 MODEL = "anthropic:claude-sonnet-5"
 
 LICENSED_CODE = (
-    "def merge_sorted_runs(left_run, right_run, comparator):\n"
-    "    merged_output = []\n"
-    "    left_index = 0\n"
-    "    right_index = 0\n"
-    "    while left_index < len(left_run) and right_index < len(right_run):\n"
-    "        if comparator(left_run[left_index], right_run[right_index]) <= 0:\n"
-    "            merged_output.append(left_run[left_index])\n"
-    "            left_index = left_index + 1\n"
-    "        else:\n"
-    "            merged_output.append(right_run[right_index])\n"
-    "            right_index = right_index + 1\n"
-    "    merged_output.extend(left_run[left_index:])\n"
-    "    merged_output.extend(right_run[right_index:])\n"
-    "    return merged_output\n"
-    "\n"
-    "\n"
-    "def galloping_search_bound(sequence_value, target_key, start_hint, step_size):\n"
-    "    probe_offset = 1\n"
-    "    while start_hint + probe_offset < len(sequence_value):\n"
-    "        if sequence_value[start_hint + probe_offset] >= target_key:\n"
-    "            return start_hint + probe_offset\n"
-    "        probe_offset = probe_offset * step_size\n"
-    "    return len(sequence_value)\n"
+    "def quantum_ledger_reconcile(alpha_entries, beta_entries, tolerance_window):\n"
+    "    merged_totals = dict()\n"
+    "    for entry_key, entry_amount in alpha_entries.items():\n"
+    "        merged_totals[entry_key] = merged_totals.get(entry_key, 0) + entry_amount\n"
+    "    for entry_key, entry_amount in beta_entries.items():\n"
+    "        merged_totals[entry_key] = merged_totals.get(entry_key, 0) - entry_amount\n"
+    "    return [entry_key for entry_key, balance in merged_totals.items()\n"
+    "            if abs(balance) > tolerance_window]\n"
 )
 
-UNRELATED_CODE = (
-    "class TotallyDifferentThing:\n"
-    "    def compute_checksum_of_payload(self, payload_bytes, seed_value):\n"
-    "        accumulator_state = seed_value\n"
-    "        for single_byte in payload_bytes:\n"
-    "            accumulator_state = accumulator_state * 31 + single_byte\n"
-    "        return accumulator_state % 4294967296\n"
+CLEAN_CODE = (
+    "def add_numbers(first, second):\n"
+    "    return first + second\n"
+    "\n"
+    "\n"
+    "def multiply_numbers(left, right):\n"
+    "    return left * right\n"
 )
+
+DRAFT_CODE = "def draft_version(value):\n    return value\n"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def as_plain(value):
-    if isinstance(value, dict):
-        return value
-    if hasattr(value, "to_dict"):
-        return value.to_dict()
-    return dict(vars(value))
-
-
 def window_hashes(text):
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
-    text = re.sub(r'""".*?"""', " ", text, flags=re.S)
-    text = re.sub(r"'''.*?'''", " ", text, flags=re.S)
-    text = re.sub(r"//[^\n]*", " ", text)
-    text = re.sub(r"#[^\n]*", " ", text)
     tokens = [t.lower() for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", text)]
     hashes = set()
     for i in range(len(tokens) - 8):
@@ -85,345 +52,359 @@ def window_hashes(text):
 
 
 def write(path, text):
-    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def build_spec_corpus(repo_root):
-    comp = repo_root / "specs" / "components" / SLUG
-    write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "---\n"
+LOG_HELPER = (
+    "def _log(line):\n"
+    "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(line + '\\n')\n"
+    "\n"
+)
+
+
+def provenance_checker_source(log_path, scenario_path):
+    return (
+        "from pathlib import Path\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "SCENARIO = " + repr(str(scenario_path)) + "\n"
+        + LOG_HELPER +
+        "def current_sealed_key(component_id, repo_root):\n"
+        "    _log('current_sealed_key ' + component_id)\n"
+        "    return None\n"
         "\n"
-        "# Widget\n"
-        "\n"
-        "A small fixture component.\n",
-    )
-    write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\nThe widget MUST merge two sorted runs.\n",
-    )
-    write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n\nCovers: R-WIDGET-001\n\n"
-        "Given two sorted runs\nWhen they are merged\nThen the output is sorted\n",
-    )
-    write(comp / "interface" / "library.md", "# Library\n\n`merge_sorted_runs(left, right, cmp)`\n")
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** - a fixture.\n")
-
-
-def write_corpus(repo_root, hashes, threshold):
-    corpus = {
-        "corpus_version": 3,
-        "block_threshold": threshold,
-        "entries": [
-            {
-                "reference_id": "ref-licensed-001",
-                "license_family": "gpl-3.0",
-                "risk_tier": "high",
-                "hashes": hashes,
-            }
-        ],
-    }
-    path = repo_root / "corpus" / "reference.json"
-    write(path, json.dumps(corpus))
-    return path
-
-
-def write_fakes(repo_root, log_path, code):
-    gen = repo_root / "gen"
-    header = "import json\nimport types\nimport dataclasses\nfrom pathlib import Path\n\nLOG = " + repr(str(log_path)) + "\n\n" + (
-        "def _log(name):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(name + '\\n')\n\n"
-    )
-
-    write(
-        gen / "provenance-checker" / "provenance_checker.py",
-        header
-        + "def current_sealed_key(component_id, repo_root):\n"
-        "    _log('current_sealed_key')\n"
-        "    return None\n\n"
         "def current_provenance_key(component_id, repo_root):\n"
-        "    _log('current_provenance_key')\n"
-        "    return types.SimpleNamespace(\n"
-        "        component_id=component_id,\n"
-        "        spec_bundle_hash='sha256:' + 'a' * 64,\n"
-        "        gate_versions={'license_scanner': 'license_scanner@4.0.3', 'secret_scanner': 'secret_scanner@3.1.0'},\n"
-        "        spec_bundle_parts={'spec': 'sha256:' + 'b' * 64, 'dependency_code': 'sha256:' + 'c' * 64},\n"
-        "    )\n\n"
+        "    scenario = Path(SCENARIO).read_text(encoding='utf-8').strip()\n"
+        "    _log('current_provenance_key ' + component_id)\n"
+        "    digit = '1' if scenario == 'licensed' else '2'\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'spec_bundle_hash': 'sha256:' + digit * 64,\n"
+        "        'gate_versions': {'license_scanner': 'license_scanner@4.0.1',\n"
+        "                          'secret_scanner': 'secret_scanner@3.1.0'},\n"
+        "        'spec_bundle_parts': {'spec': 'sha256:' + 'a' * 64,\n"
+        "                              'dependency_code': 'sha256:' + 'b' * 64},\n"
+        "    }\n"
+        "\n"
         "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root, spec_bundle_parts=None):\n"
-        "    _log('check_provenance')\n"
+        "    _log('check_provenance ' + component_id)\n"
         "    return {'hit': False, 'reason': 'no manifest', 'verification_report': None,\n"
-        "            'license_scan': None, 'secret_scan': None, 'manifest': None}\n",
+        "            'license_scan': None, 'secret_scan': None, 'manifest': None}\n"
     )
 
-    write(
-        gen / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        header
-        + "def assemble(component_id, repo_root=None, mode='cold'):\n"
-        "    _log('assemble')\n"
-        "    return {'component_id': component_id, 'mode': mode,\n"
-        "            'spec_bundle_hash': 'sha256:' + 'a' * 64, 'files': {}}\n",
+
+def spec_bundle_assembler_source(log_path):
+    return (
+        "LOG = " + repr(str(log_path)) + "\n"
+        + LOG_HELPER +
+        "def assemble(component_id, repo_root=None, mode='cold'):\n"
+        "    _log('assemble ' + component_id + ' ' + str(mode))\n"
+        "    return {'component_id': component_id, 'mode': mode, 'files': {},\n"
+        "            'spec_bundle_hash': 'sha256:' + '1' * 64}\n"
     )
 
-    write(
-        gen / "generation-loop" / "generation_loop.py",
-        header
-        + "CODE = " + repr(code) + "\n\n"
+
+def generation_loop_source(log_path, scenario_path):
+    return (
+        "import inspect\n"
+        "from pathlib import Path\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "SCENARIO = " + repr(str(scenario_path)) + "\n"
+        "LICENSED_CODE = " + repr(LICENSED_CODE) + "\n"
+        "CLEAN_CODE = " + repr(CLEAN_CODE) + "\n"
+        "DRAFT_CODE = " + repr(DRAFT_CODE) + "\n"
+        + LOG_HELPER +
         "def make_closures(model, seed, repo_root, llm_backend):\n"
         "    _log('make_closures')\n"
         "    def test_author(bundle):\n"
         "        return {'model_call_error': None, 'file': None}\n"
         "    def judge(bundle):\n"
-        "        return {'result': 'pass', 'rationale': ''}\n"
-        "    return test_author, judge\n\n"
+        "        return {'result': 'pass', 'rationale': 'stand-in'}\n"
+        "    return test_author, judge\n"
+        "\n"
+        "def _report(component_id, overall, run_id):\n"
+        "    result = 'pass' if overall == 'pass' else 'fail'\n"
+        "    return {'component_id': component_id, 'overall': overall, 'run_id': run_id,\n"
+        "            'criteria': [{'criterion_id': 'AC-WIDGET-001', 'kind': 'generated-test',\n"
+        "                          'covers': ['R-WIDGET-001'], 'result': result}],\n"
+        "            'mutation_score': 1.0, 'assets': [], 'drivers': [], 'screenshots': []}\n"
+        "\n"
+        "def _generation(component_id, model, mode, retry_feedback, code, bundle):\n"
+        "    if isinstance(bundle, dict):\n"
+        "        bundle_hash = bundle.get('spec_bundle_hash')\n"
+        "    else:\n"
+        "        bundle_hash = getattr(bundle, 'spec_bundle_hash', None)\n"
+        "    return {'component_id': component_id, 'files': {'gen/widget/widget.py': code},\n"
+        "            'spec_bundle_hash': bundle_hash, 'model': model, 'prompt_version': 'v1',\n"
+        "            'retry_feedback': retry_feedback, 'mode': mode,\n"
+        "            'generator_version': 'generator@3.0.0+v11', 'transcript_sha256': None,\n"
+        "            'turns': 1, 'tool_calls': 0, 'isolation': None,\n"
+        "            'model_call_error': None, 'refused': False}\n"
+        "\n"
+        "def _notify(on_attempt, entry, generation_result, verification_report):\n"
+        "    if on_attempt is None:\n"
+        "        return\n"
+        "    try:\n"
+        "        params = inspect.signature(on_attempt).parameters\n"
+        "    except (TypeError, ValueError):\n"
+        "        params = {}\n"
+        "    kinds = (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)\n"
+        "    named = [n for n, p in params.items() if p.kind in kinds]\n"
+        "    if 'generation_result' in named and 'verification_report' in named:\n"
+        "        kwargs = {}\n"
+        "        for n in named:\n"
+        "            if n == 'generation_result':\n"
+        "                kwargs[n] = generation_result\n"
+        "            elif n == 'verification_report':\n"
+        "                kwargs[n] = verification_report\n"
+        "            elif params[n].default is inspect.Parameter.empty:\n"
+        "                kwargs[n] = entry['number'] if 'number' in n else entry\n"
+        "        on_attempt(**kwargs)\n"
+        "    else:\n"
+        "        on_attempt(generation_result, verification_report)\n"
+        "\n"
         "def run_attempts(component_id, bundle, repo_root, model, mode='single', max_attempts=3,\n"
         "                 retry_feedback=None, seed=0, llm_backend=None,\n"
         "                 allow_unisolated_exec=False, on_attempt=None):\n"
-        "    _log('run_attempts')\n"
-        "    slug = component_id[len('comp-'):]\n"
-        "    target = Path(repo_root) / 'gen' / slug / (slug.replace('-', '_') + '.py')\n"
+        "    scenario = Path(SCENARIO).read_text(encoding='utf-8').strip()\n"
+        "    _log('run_attempts ' + component_id + ' ' + scenario)\n"
+        "    target = Path(repo_root) / 'gen' / 'widget' / 'widget.py'\n"
         "    target.parent.mkdir(parents=True, exist_ok=True)\n"
-        "    target.write_text(CODE, encoding='utf-8')\n"
-        "    generation_result = {\n"
-        "        'component_id': component_id,\n"
-        "        'files': {'gen/' + slug + '/' + slug.replace('-', '_') + '.py': CODE},\n"
-        "        'spec_bundle_hash': 'sha256:' + 'a' * 64,\n"
-        "        'model': model,\n"
-        "        'prompt_version': 'v1',\n"
-        "        'retry_feedback': ['R-WIDGET-001'],\n"
-        "        'generation': {'mode': mode, 'generator_version': 'generator@3.0.0+v11',\n"
-        "                       'transcript_sha256': None, 'turns': 1, 'tool_calls': 0, 'isolation': None},\n"
-        "        'model_call_error': None,\n"
-        "        'refused': False,\n"
-        "    }\n"
-        "    verification_report = {\n"
-        "        'component_id': component_id,\n"
-        "        'overall': 'pass',\n"
-        "        'run_id': 'run-2',\n"
-        "        'verification_run_id': 'run-2',\n"
-        "        'criteria': [{'criterion_id': 'AC-WIDGET-001', 'covers': ['R-WIDGET-001'],\n"
-        "                      'kind': 'generated-test', 'result': 'pass'}],\n"
-        "        'mutation_score': None,\n"
-        "        'assets': [],\n"
-        "        'drivers': [],\n"
-        "    }\n"
-        "    attempts = [\n"
-        "        {'number': 1, 'outcome': 'verification_failed', 'retry_feedback': [],\n"
-        "         'error_category': None, 'failed_requirements': ['R-WIDGET-001'], 'transcript_sha256': None},\n"
-        "        {'number': 2, 'outcome': 'passed', 'retry_feedback': ['R-WIDGET-001'],\n"
-        "         'error_category': None, 'failed_requirements': [], 'transcript_sha256': None},\n"
-        "    ]\n"
-        "    return {'passed': True, 'stop_reason': 'passed', 'generation_result': generation_result,\n"
-        "            'verification_report': verification_report, 'surface_report': None,\n"
-        "            'attempts': attempts}\n",
+        "    if scenario == 'licensed':\n"
+        "        plan = [('verification_failed', DRAFT_CODE, 'fail'), ('passed', LICENSED_CODE, 'pass')]\n"
+        "    else:\n"
+        "        plan = [('passed', CLEAN_CODE, 'pass')]\n"
+        "    attempts = []\n"
+        "    feedback = sorted(retry_feedback or [])\n"
+        "    gr = None\n"
+        "    vr = None\n"
+        "    for index, (outcome, code, overall) in enumerate(plan, start=1):\n"
+        "        target.write_text(code, encoding='utf-8')\n"
+        "        gr = _generation(component_id, model, mode, list(feedback), code, bundle)\n"
+        "        vr = _report(component_id, overall, scenario + '-run-' + str(index))\n"
+        "        entry = {'number': index, 'outcome': outcome, 'retry_feedback': list(feedback),\n"
+        "                 'error_category': None,\n"
+        "                 'failed_requirements': ['R-WIDGET-001'] if overall == 'fail' else [],\n"
+        "                 'transcript_sha256': None}\n"
+        "        attempts.append(entry)\n"
+        "        _notify(on_attempt, entry, gr, vr)\n"
+        "        if overall == 'fail':\n"
+        "            feedback = sorted(set(feedback) | set(['R-WIDGET-001']))\n"
+        "    return {'passed': True, 'stop_reason': 'passed', 'generation_result': gr,\n"
+        "            'verification_report': vr,\n"
+        "            'surface_report': {'ok': True, 'missing': [], 'extra': []},\n"
+        "            'attempts': attempts}\n"
     )
 
-    write(
-        gen / "provenance-tracker" / "provenance_tracker.py",
-        header
-        + "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
-        "    _log('write_attempt_record')\n"
-        "    d = Path(repo_root) / '.hotdocs' / 'attempts' / component_id\n"
-        "    d.mkdir(parents=True, exist_ok=True)\n"
-        "    n = len(list(d.iterdir())) + 1\n"
-        "    (d / (str(n) + '.json')).write_text('{}', encoding='utf-8')\n\n"
-        "def _repo_root(args, kwargs):\n"
-        "    if 'repo_root' in kwargs:\n"
-        "        return Path(kwargs['repo_root'])\n"
-        "    for a in args:\n"
-        "        if isinstance(a, Path) or (isinstance(a, str) and Path(a).is_dir()):\n"
-        "            return Path(a)\n"
-        "    return Path('.')\n\n"
+
+def provenance_tracker_source(log_path, repo_root):
+    return (
+        "import json\n"
+        "from pathlib import Path\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "REPO = " + repr(str(repo_root)) + "\n"
+        + LOG_HELPER +
+        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
+        "    directory = Path(repo_root) / '.hotdocs' / 'attempts' / component_id\n"
+        "    directory.mkdir(parents=True, exist_ok=True)\n"
+        "    number = len(list(directory.iterdir())) + 1\n"
+        "    if isinstance(verification_report, dict):\n"
+        "        overall = verification_report.get('overall')\n"
+        "    else:\n"
+        "        overall = getattr(verification_report, 'overall', None)\n"
+        "    record = {'component_id': component_id, 'number': number,\n"
+        "              'spec_bundle_hash': spec_bundle_hash, 'overall': overall}\n"
+        "    (directory / ('attempt-' + str(number) + '.json')).write_text(json.dumps(record), encoding='utf-8')\n"
+        "    _log('write_attempt_record ' + component_id + ' ' + str(overall))\n"
+        "\n"
         "def check_readiness(*args, **kwargs):\n"
-        "    _log('check_readiness')\n"
-        "    root = _repo_root(args, kwargs)\n"
-        "    components = {}\n"
-        "    gen_dir = root / 'gen'\n"
-        "    for slug_dir in sorted(gen_dir.iterdir()) if gen_dir.is_dir() else []:\n"
-        "        mpath = slug_dir / '.provenance.json'\n"
-        "        if not mpath.is_file():\n"
-        "            continue\n"
-        "        manifest = json.loads(mpath.read_text(encoding='utf-8'))\n"
-        "        cid = 'comp-' + slug_dir.name\n"
-        "        lic = manifest.get('license_scan')\n"
-        "        sec = manifest.get('secret_scan')\n"
-        "        components[cid] = {\n"
-        "            'component_id': cid,\n"
-        "            'ready': not (lic or {}).get('blocked', False),\n"
-        "            'provenance_hit': manifest.get('provenance_hit', False),\n"
-        "            'verification_report': manifest.get('verification_report'),\n"
-        "            'license_scan': lic,\n"
-        "            'secret_scan': sec,\n"
-        "            'manifest': manifest,\n"
-        "        }\n"
-        "    capabilities = {\n"
-        "        'P-COMPLIANCE-GATE': {'P-COMPLIANCE-GATE': {'overall': 'pass', 'scenarios': []}},\n"
-        "    }\n"
-        "    ready = all(c['ready'] for c in components.values())\n"
-        "    return {'ready': ready, 'overall': 'pass' if ready else 'fail',\n"
-        "            'components': components, 'capabilities': capabilities}\n",
+        "    manifest_path = Path(REPO) / 'gen' / 'widget' / '.provenance.json'\n"
+        "    manifest = {}\n"
+        "    if manifest_path.is_file():\n"
+        "        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))\n"
+        "    license_scan = manifest.get('license_scan')\n"
+        "    blocked = bool(license_scan.get('blocked')) if isinstance(license_scan, dict) else False\n"
+        "    _log('check_readiness blocked=' + str(blocked))\n"
+        "    entry = {'component_id': 'comp-widget', 'ready': not blocked,\n"
+        "             'status': 'blocked' if blocked else 'ready', 'reasons': [],\n"
+        "             'verification_report': manifest.get('verification_report'),\n"
+        "             'license_scan': license_scan,\n"
+        "             'secret_scan': manifest.get('secret_scan'),\n"
+        "             'provenance_hit': manifest.get('provenance_hit', False)}\n"
+        "    return {'ready': not blocked, 'overall': 'fail' if blocked else 'pass',\n"
+        "            'components': {'comp-widget': entry}, 'capabilities': {}}\n"
     )
 
-    write(
-        gen / "secret-scanner" / "secret_scanner.py",
-        header
-        + "class AllowlistInvalidError(Exception):\n"
-        "    pass\n\n"
-        "@dataclasses.dataclass\n"
-        "class SecretScanResult:\n"
-        "    scope: str = 'full'\n"
-        "    gate_version: str = 'secret_scanner@3.1.0+detect-secrets.1.5.0'\n"
-        "    flagged: bool = False\n"
-        "    matches: list = dataclasses.field(default_factory=list)\n"
-        "    allowed: list = dataclasses.field(default_factory=list)\n"
-        "    unused_allowlist_entries: list = dataclasses.field(default_factory=list)\n"
-        "    notified: bool = False\n"
-        "    notification_delivery_error: object = None\n"
-        "    cache_hit: bool = False\n"
-        "    def to_dict(self):\n"
-        "        return dataclasses.asdict(self)\n\n"
-        "def scan(repo_root):\n"
-        "    _log('secret_scan')\n"
-        "    return SecretScanResult()\n\n"
-        "def scan_files(paths, repo_root=None):\n"
-        "    _log('secret_scan_files')\n"
-        "    return SecretScanResult(scope='precommit')\n\n"
-        "def gate_version(repo_root):\n"
-        "    return 'secret_scanner@3.1.0+detect-secrets.1.5.0'\n\n"
-        "def propose(repo_root):\n"
-        "    return {'allowlist': {'version': 1, 'entries': []}, 'ineligible': []}\n",
-    )
 
-    write(
-        gen / "cache-manager" / "cache_manager.py",
-        header
-        + "@dataclasses.dataclass(frozen=True)\n"
+def cache_manager_source(log_path):
+    return (
+        "LOG = " + repr(str(log_path)) + "\n"
+        + LOG_HELPER +
         "class CacheKey:\n"
-        "    spec_bundle_hash: str\n"
-        "    gate_inputs_hash: str\n"
-        "    gate_version: str\n"
-        "    model_pin: object = None\n\n"
-        "@dataclasses.dataclass\n"
+        "    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None, gate_version=None, model_pin=None):\n"
+        "        self.spec_bundle_hash = spec_bundle_hash\n"
+        "        self.gate_inputs_hash = gate_inputs_hash\n"
+        "        self.gate_version = gate_version\n"
+        "        self.model_pin = model_pin\n"
+        "\n"
         "class CachedResult:\n"
-        "    gate_type: str\n"
-        "    payload: dict\n"
-        "    stored_at: str\n\n"
-        "@dataclasses.dataclass\n"
+        "    def __init__(self, gate_type=None, payload=None, stored_at=None):\n"
+        "        self.gate_type = gate_type\n"
+        "        self.payload = payload\n"
+        "        self.stored_at = stored_at\n"
+        "\n"
         "class Miss:\n"
-        "    reason: str = 'not-found'\n"
-        "    payload: object = None\n\n"
+        "    def __init__(self, reason):\n"
+        "        self.reason = reason\n"
+        "        self.payload = None\n"
+        "\n"
         "def get(cache_key, repo_root=None):\n"
         "    _log('cache_get')\n"
-        "    return Miss()\n\n"
+        "    return Miss('stand-in never hits')\n"
+        "\n"
         "def put(cache_key, cached_result, repo_root=None):\n"
         "    _log('cache_put')\n"
-        "    return None\n",
     )
 
 
-def setup_repo(tmp_path, monkeypatch, code, corpus_hashes, threshold):
+def build_spec_fixture(repo_root):
+    base = repo_root / "specs" / "components" / SLUG
+    write(base / "component.md",
+          "---\n"
+          "id: comp-widget\n"
+          "title: Widget\n"
+          "status: draft\n"
+          "owners: [pipeline-team]\n"
+          "sealed: true\n"
+          "source_path: legacy/widget/\n"
+          "depends_on: []\n"
+          "---\n"
+          "\n"
+          "# Widget\n"
+          "\n"
+          "A small fixture component.\n")
+    write(base / "requirements" / "R-WIDGET-001.md",
+          "# R-WIDGET-001\n\nThe widget reconciles two ledgers.\n")
+    write(base / "acceptance" / "AC-WIDGET-001.md",
+          "# AC-WIDGET-001\n\nCovers: R-WIDGET-001\n\nGiven two ledgers, when reconciled, then imbalances are listed.\n")
+    write(base / "constraints.md", "# Constraints\n\nNone.\n")
+
+
+def read_log(log_path):
+    if not log_path.is_file():
+        return []
+    return [line for line in log_path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def widget_flags(packet):
+    flags = field(packet, "compliance_flags")
+    entries = field(flags, "license_scan")
+    return [e for e in entries if field(e, "component_id") == COMPONENT_ID]
+
+
+def test_cs_compliance_001_license_flag_blocks_records_and_surfaces(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
-    build_spec_corpus(repo_root)
-    write_fakes(repo_root, log_path, code)
-    corpus_path = write_corpus(repo_root, corpus_hashes, threshold)
+    control = tmp_path / "control"
+    control.mkdir()
+    log_path = control / "calls.log"
+    scenario_path = control / "scenario.txt"
+
+    corpus_path = control / "corpus.json"
+    corpus = {
+        "corpus_version": 1,
+        "block_threshold": 0.5,
+        "entries": [
+            {"reference_id": "ref-ledger", "license_family": "GPL", "risk_tier": "medium",
+             "hashes": window_hashes(LICENSED_CODE)},
+        ],
+    }
+    assert corpus["entries"][0]["hashes"]
+    assert not set(window_hashes(CLEAN_CODE)) & set(corpus["entries"][0]["hashes"])
+    write(corpus_path, json.dumps(corpus))
+
     monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    return repo_root, log_path
 
+    build_spec_fixture(repo_root)
+    gen = repo_root / "gen"
+    write(gen / "provenance-checker" / "provenance_checker.py",
+          provenance_checker_source(log_path, scenario_path))
+    write(gen / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+          spec_bundle_assembler_source(log_path))
+    write(gen / "generation-loop" / "generation_loop.py",
+          generation_loop_source(log_path, scenario_path))
+    write(gen / "provenance-tracker" / "provenance_tracker.py",
+          provenance_tracker_source(log_path, repo_root))
+    write(gen / "cache-manager" / "cache_manager.py",
+          cache_manager_source(log_path))
 
-def read_manifests(repo_root):
-    out = []
-    for base in ("gen", "verification"):
-        path = repo_root / base / SLUG / ".provenance.json"
-        assert path.is_file(), "missing provenance manifest at " + str(path)
-        out.append(json.loads(path.read_text(encoding="utf-8")))
-    return out
+    manifest_path = repo_root / "gen" / SLUG / ".provenance.json"
 
-
-def run_cli_exit(argv):
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        try:
-            rc = license_scanner.main(argv)
-        except SystemExit as exc:
-            rc = exc.code
-    return rc, buf.getvalue()
-
-
-def test_licensed_code_blocks_merge_is_recorded_and_surfaces_after_retry(tmp_path, monkeypatch):
-    repo_root, log_path = setup_repo(
-        tmp_path, monkeypatch, LICENSED_CODE, window_hashes(LICENSED_CODE), 0.5
-    )
-
+    # ---- Run 1: a retried generation whose final candidate matches licensed code ----
+    write(scenario_path, "licensed\n")
     result = component_gate_runner.run_component_gates(COMPONENT_ID, repo_root, MODEL)
 
-    calls = log_path.read_text(encoding="utf-8").splitlines()
-    assert "run_attempts" in calls
-    assert "secret_scan" in calls
+    log = read_log(log_path)
+    assert any(line.startswith("run_attempts " + COMPONENT_ID + " licensed") for line in log)
+    attempt_records = [line for line in log if line.startswith("write_attempt_record")]
+    assert len(attempt_records) == 2
+    assert attempt_records[0].endswith(" fail")
 
-    # A retry happened in generation and resolved the attempt-level failure.
     attempts = field(result, "attempts")
-    assert [field(a, "outcome") for a in attempts] == ["verification_failed", "passed"]
-    assert field(result, "provenance_hit") is False
+    assert len(attempts) == 2
+    assert field(attempts[0], "outcome") == "verification_failed"
 
-    # The license scan flagged the licensed code: the merge is blocked.
-    lic = field(result, "license_scan")
-    assert field(lic, "evaluated") is True
-    assert field(lic, "blocked") is True
-    assert field(lic, "similarity_score") >= field(lic, "block_threshold")
-    assert any(field(m, "reference_id") == "ref-licensed-001" for m in field(lic, "matches"))
+    scan1 = field(result, "license_scan")
+    assert field(scan1, "evaluated") is True
+    assert field(scan1, "blocked") is True
+    assert field(scan1, "similarity_score") >= field(scan1, "block_threshold")
 
-    rc, out = run_cli_exit([COMPONENT_ID, "--repo-root=" + str(repo_root), "--format=json"])
-    assert rc == 1, out
+    assert manifest_path.is_file()
+    manifest1 = json.loads(manifest_path.read_text(encoding="utf-8"))
+    recorded1 = manifest1["license_scan"]
+    assert recorded1["blocked"] is True
+    assert recorded1["evaluated"] is True
+    assert recorded1["similarity_score"] == field(scan1, "similarity_score")
+    assert recorded1["gate_version"] == field(scan1, "gate_version")
 
-    # Written into both provenance manifests' license_scan field.
-    for manifest in read_manifests(repo_root):
-        assert "license_scan" in manifest
-        recorded = manifest["license_scan"]
-        assert recorded["component_id"] == COMPONENT_ID
-        assert recorded["evaluated"] is True
-        assert recorded["blocked"] is True
-        assert any(m["reference_id"] == "ref-licensed-001" for m in recorded["matches"])
-        assert [a["outcome"] for a in manifest["attempt_history"]] == ["verification_failed", "passed"]
+    readiness_before = len([l for l in read_log(log_path) if l.startswith("check_readiness")])
+    packet1 = review_packet_builder.build_review_packet([COMPONENT_ID], repo_root)
+    readiness_calls = [l for l in read_log(log_path) if l.startswith("check_readiness")]
+    assert len(readiness_calls) > readiness_before
+    assert readiness_calls[-1] == "check_readiness blocked=True"
 
-    # The finding appears in the review packet despite the retry having passed.
-    packet = review_packet_builder.build_review_packet([COMPONENT_ID], repo_root)
-    compliance = field(packet, "compliance_flags")
-    license_flags = field(compliance, "license_scan")
-    assert isinstance(field(compliance, "secret_scan"), list)
-    entries = [e for e in license_flags if field(e, "component_id") == COMPONENT_ID]
-    assert entries, "license finding missing from review packet: " + repr(license_flags)
-    flagged = as_plain(field(entries[0], "result"))
-    assert flagged["blocked"] is True
+    flags1 = widget_flags(packet1)
+    assert flags1, "the license finding must appear in the review packet"
+    blocked_entries = [e for e in flags1 if field(field(e, "result"), "blocked") is True]
+    assert blocked_entries
+    assert field(field(blocked_entries[0], "result"), "similarity_score") == recorded1["similarity_score"]
 
+    # ---- Run 2: a later, separate run whose scan is clean ----
+    write(scenario_path, "clean\n")
+    result2 = component_gate_runner.run_component_gates(COMPONENT_ID, repo_root, MODEL)
 
-def test_clean_license_scan_is_still_written_to_manifest(tmp_path, monkeypatch):
-    repo_root, log_path = setup_repo(
-        tmp_path, monkeypatch, LICENSED_CODE, window_hashes(UNRELATED_CODE), 0.5
-    )
+    assert any(line.startswith("run_attempts " + COMPONENT_ID + " clean") for line in read_log(log_path))
+    scan2 = field(result2, "license_scan")
+    assert field(scan2, "evaluated") is True
+    assert field(scan2, "blocked") is False
+    assert field(scan2, "similarity_score") < field(scan2, "block_threshold")
 
-    result = component_gate_runner.run_component_gates(COMPONENT_ID, repo_root, MODEL)
+    manifest2 = json.loads(manifest_path.read_text(encoding="utf-8"))
+    recorded2 = manifest2["license_scan"]
+    assert recorded2["blocked"] is False
+    assert recorded2["evaluated"] is True
+    assert recorded2["similarity_score"] == field(scan2, "similarity_score")
+    assert recorded2["similarity_score"] != recorded1["similarity_score"]
 
-    lic = field(result, "license_scan")
-    assert field(lic, "evaluated") is True
-    assert field(lic, "blocked") is False
+    readiness_before = len([l for l in read_log(log_path) if l.startswith("check_readiness")])
+    packet2 = review_packet_builder.build_review_packet([COMPONENT_ID], repo_root)
+    readiness_calls = [l for l in read_log(log_path) if l.startswith("check_readiness")]
+    assert len(readiness_calls) > readiness_before
+    assert readiness_calls[-1] == "check_readiness blocked=False"
 
-    for manifest in read_manifests(repo_root):
-        assert "license_scan" in manifest
-        recorded = manifest["license_scan"]
-        assert recorded is not None
-        assert recorded["component_id"] == COMPONENT_ID
-        assert recorded["evaluated"] is True
-        assert recorded["blocked"] is False
+    for entry in widget_flags(packet2):
+        entry_result = field(entry, "result")
+        assert field(entry_result, "blocked") is False
+        assert field(entry_result, "similarity_score") == recorded2["similarity_score"]

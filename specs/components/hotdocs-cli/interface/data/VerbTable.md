@@ -14,7 +14,7 @@ packages' submodules.
 | `impact` | `gen/impact-analyzer` | `impact_analyzer` | 1 | no | blast radius of a change |
 | `assemble` | `gen/spec-bundle-assembler` | `spec_bundle_assembler` | 1 | no | build a component's spec bundle |
 | `compile-criteria` | `pipeline/criterion-compiler` | `criterion_compiler` | 1 | no | compile the compiled criteria |
-| `author-test` | `gen/test-author` | `test_author` | 0 | required | write one criterion's test |
+| `author-test` | `gen/test-author` | `test_author` | 1 | required | write one criterion's test |
 | `verify-component` | `gen/verifier-orchestrator` | `verifier_orchestrator` | 1 | no | verify one component |
 | `generate` | `gen/component-gate-runner` | `component_gate_runner` | 0 | required | generate and verify a component |
 | `verify` | `gen/provenance-tracker` | `provenance_tracker` | 0 | optional | is everything ready |

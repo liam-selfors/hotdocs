@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:418f461b3aab85b0d83a23d8f476f764295b04c4861ed6f6f4a3d5bdf3594484
+# hotdocs-criterion: sha256:f7a7dca463a324403e060aca0eaf4d55149f44c2fff6745eb570b2fe9df6fdf0
 import json
 from html.parser import HTMLParser
 from pathlib import Path
@@ -6,6 +6,10 @@ from pathlib import Path
 import pytest
 
 import provenance_tracker_ui
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 NODES = [
@@ -16,27 +20,22 @@ NODES = [
     {"id": "e", "status": "passing"},
 ]
 
-EXPECTED = [
-    ("all", {"a": False, "b": False, "c": False, "d": False, "e": False}),
-    ("passing", {"a": False, "b": True, "c": True, "d": True, "e": False}),
-    ("failing", {"a": True, "b": False, "c": True, "d": True, "e": True}),
-    ("missing", {"a": True, "b": True, "c": False, "d": True, "e": True}),
-    ("not-attempted", {"a": True, "b": True, "c": True, "d": False, "e": True}),
-    ("Passing", {"a": True, "b": True, "c": True, "d": True, "e": True}),
-    ("bogus", {"a": True, "b": True, "c": True, "d": True, "e": True}),
-]
 
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-@pytest.mark.parametrize("filt,expected", EXPECTED)
-def test_hidden_by_status_table(asset_runner, filt, expected):
+@pytest.mark.parametrize(
+    "flt, expected",
+    [
+        ("all", {"a": False, "b": False, "c": False, "d": False, "e": False}),
+        ("passing", {"a": False, "b": True, "c": True, "d": True, "e": False}),
+        ("failing", {"a": True, "b": False, "c": True, "d": True, "e": True}),
+        ("missing", {"a": True, "b": True, "c": False, "d": True, "e": True}),
+        ("not-attempted", {"a": True, "b": True, "c": True, "d": False, "e": True}),
+        ("Passing", {"a": True, "b": True, "c": True, "d": True, "e": True}),
+        ("bogus", {"a": True, "b": True, "c": True, "d": True, "e": True}),
+    ],
+)
+def test_hidden_by_status_table(asset_runner, flt, expected):
     run = asset_runner("static/app.js")
-    nodes = [dict(n) for n in NODES]
-    result = run("hiddenByStatus", [nodes, filt])
-    assert result == expected
+    assert run("hiddenByStatus", [NODES, flt]) == expected
 
 
 def test_hidden_by_status_empty_nodes(asset_runner):
@@ -45,113 +44,124 @@ def test_hidden_by_status_empty_nodes(asset_runner):
     assert run("hiddenByStatus", [[], "passing"]) == {}
 
 
-# ---------------------------------------------------------------------------
-# Rendered page: filter buttons and initial node visibility
-# ---------------------------------------------------------------------------
+VERIFICATION_PASS = {
+    "component_id": "comp-a",
+    "criteria": [
+        {"id": "AC-A-001", "covers": "R-A-001", "kind": "compiled", "result": "pass"}
+    ],
+    "requirement_results": {"R-A-001": "pass"},
+    "interface_drift": False,
+    "mutation_score": None,
+    "mutation_error": None,
+    "assets": [],
+    "drivers": [],
+    "overall": "pass",
+}
+
+VERIFICATION_FAIL = {
+    "component_id": "comp-b",
+    "criteria": [
+        {
+            "id": "AC-B-001",
+            "covers": "R-B-001",
+            "kind": "compiled",
+            "result": "fail",
+            "failure_detail": {"message": "x failed", "expected": 1, "actual": 2},
+            "failure_origin": "implementation",
+        }
+    ],
+    "requirement_results": {"R-B-001": "fail"},
+    "interface_drift": False,
+    "mutation_score": None,
+    "mutation_error": None,
+    "assets": [],
+    "drivers": [],
+    "overall": "fail",
+}
+
+LICENSE_OK = {"blocked": False}
+
+SECRET_OK = {
+    "scope": "full",
+    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "flagged": False,
+    "matches": [],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
 
 
-def _verification_report(component_id, overall):
-    result = "pass" if overall == "pass" else "fail"
-    r_id = "R-" + component_id.upper().replace("COMP-", "") + "-001"
-    ac_id = "AC-" + component_id.upper().replace("COMP-", "") + "-001"
-    criterion = {
-        "id": ac_id,
-        "covers": r_id,
-        "kind": "compiled",
-        "result": result,
-    }
-    if result == "fail":
-        criterion["failure_detail"] = {"message": "failed", "expected": 1, "actual": 0}
-        criterion["failure_origin"] = "implementation"
-    return {
-        "component_id": component_id,
-        "criteria": [criterion],
-        "requirement_results": {r_id: result},
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "mutation_error": None,
-        "assets": [],
-        "drivers": [],
-        "overall": overall,
-    }
-
-
-def _secret_scan():
-    return {
-        "scope": "full",
-        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-        "flagged": False,
-        "matches": [],
-        "allowed": [],
-        "unused_allowlist_entries": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-
-
-def _hit(component_id, overall):
+def hit(report):
     return {
         "hit": True,
         "reason": None,
-        "verification_report": _verification_report(component_id, overall),
-        "license_scan": {"blocked": False},
-        "secret_scan": _secret_scan(),
+        "verification_report": report,
+        "license_scan": LICENSE_OK,
+        "secret_scan": SECRET_OK,
     }
 
 
-def _miss():
+def miss(reason):
     return {
         "hit": False,
-        "reason": "no manifest",
+        "reason": reason,
         "verification_report": None,
         "license_scan": None,
         "secret_scan": None,
     }
 
 
-def _build_repo(repo_root):
-    components = {
-        "comp-a": _hit("comp-a", "pass"),
-        "comp-b": _hit("comp-b", "fail"),
-        "comp-c": _miss(),
-        "comp-d": _miss(),
-    }
-    report = {
-        "scope": "whole-corpus",
-        "ready": False,
-        "components": components,
-        "capabilities": {},
-        "secret_scan": _secret_scan(),
-        "not_ready_reasons": [
-            "comp-b: verification failed",
-            "comp-c: no provenance for current spec state — run hotdocs generate comp-c",
-            "comp-d: no provenance for current spec state — run hotdocs generate comp-d",
-        ],
-    }
+VERIFY_REPORT = {
+    "scope": "whole-corpus",
+    "ready": False,
+    "components": {
+        "comp-a": hit(VERIFICATION_PASS),
+        "comp-b": hit(VERIFICATION_FAIL),
+        "comp-c": miss("no manifest"),
+        "comp-d": miss("no manifest"),
+    },
+    "capabilities": {},
+    "secret_scan": SECRET_OK,
+    "not_ready_reasons": [
+        "comp-b: verification failed",
+        "comp-c: no provenance for current spec state — run hotdocs generate comp-c",
+        "comp-d: no provenance for current spec state — run hotdocs generate comp-d",
+    ],
+}
 
+
+def build_repo(repo_root):
     fake_dir = repo_root / "gen" / "provenance-tracker"
     fake_dir.mkdir(parents=True)
     src = (
-        "REPORT = " + repr(report) + "\n"
+        "import copy\n"
+        "REPORT = " + repr(VERIFY_REPORT) + "\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    import copy\n"
         "    return copy.deepcopy(REPORT)\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    return []\n"
-        "\n"
-        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
-        "    raise NotImplementedError('not used')\n"
-        "\n"
-        "def main(argv=None):\n"
-        "    return 0\n"
     )
     (fake_dir / "provenance_tracker.py").write_text(src, encoding="utf-8")
 
     graph = {
-        "nodes": {},
+        "nodes": {
+            cid: {
+                "type": "component",
+                "verification": None,
+                "provenance": None,
+                "size_status": "ok",
+                "sealed": True,
+                "pinned_overrides": [],
+                "owners": ["pipeline-team"],
+                "documents": {},
+            }
+            for cid in ["comp-a", "comp-b", "comp-c", "comp-d"]
+        },
         "edges": [],
         "aggregates": {
             "orphan_capability_rate": 0.0,
@@ -159,38 +169,26 @@ def _build_repo(repo_root):
             "orphan_var_rate": 0.0,
         },
     }
-    for cid in ["comp-a", "comp-b", "comp-c", "comp-d"]:
-        graph["nodes"][cid] = {
-            "type": "component",
-            "verification": None,
-            "provenance": None,
-            "size_status": "ok",
-            "sealed": False,
-            "pinned_overrides": [],
-            "owners": ["pipeline-team"],
-            "documents": {},
-        }
     (repo_root / "verification").mkdir(parents=True)
     (repo_root / "verification" / "corpus-graph.json").write_text(
-        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        json.dumps(graph, indent=2), encoding="utf-8"
     )
 
-    attempt_dir = repo_root / ".hotdocs" / "attempts" / "comp-c"
-    attempt_dir.mkdir(parents=True)
-    attempt_id = "2026-10-25T14:32:01Z-a1b2c3"
+    attempts = repo_root / ".hotdocs" / "attempts" / "comp-c"
+    attempts.mkdir(parents=True)
     record = {
-        "attempt_id": attempt_id,
+        "attempt_id": "2026-10-25T14:32:01Z-a1b2c3",
         "component_id": "comp-c",
         "timestamp": "2026-10-25T14:32:01Z",
-        "spec_bundle_hash": "sha256:" + "0" * 64,
+        "spec_bundle_hash": "sha256:abc",
         "generation": {
             "component_id": "comp-c",
-            "spec_bundle_hash": "sha256:" + "0" * 64,
+            "spec_bundle_hash": "sha256:abc",
             "model": "claude-sonnet-5",
             "prompt_version": "v12",
             "cache_hit": False,
-            "files": {"c.py": "x = 1\n"},
-            "model_call_error": None,
+            "files": {},
+            "model_call_error": {"category": "network", "message": "boom"},
             "refused": None,
             "retry_feedback": None,
             "mode": "single",
@@ -199,60 +197,51 @@ def _build_repo(repo_root):
             "tool_calls": 0,
             "isolation": None,
         },
-        "verification": _verification_report("comp-c", "fail"),
+        "verification": None,
     }
-    (attempt_dir / (attempt_id + ".json")).write_text(
-        json.dumps(record, indent=2) + "\n", encoding="utf-8"
+    (attempts / "2026-10-25T14-32-01Z-a1b2c3.json").write_text(
+        json.dumps(record), encoding="utf-8"
     )
 
 
-class _PageParser(HTMLParser):
+class _Collector(HTMLParser):
     def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.filter_buttons = []
+        super().__init__()
+        self.filters = []
         self.node_elements = []
 
     def handle_starttag(self, tag, attrs):
-        attr_map = {}
-        for k, v in attrs:
-            attr_map[k] = v
-        if tag == "button" and "data-filter" in attr_map:
-            self.filter_buttons.append(attr_map)
-        classes = (attr_map.get("class") or "").split()
-        if tag == "li" and "node" in classes:
-            self.node_elements.append(attr_map)
+        d = dict(attrs)
+        if tag == "button" and "data-filter" in d:
+            self.filters.append(d["data-filter"])
+        classes = (d.get("class") or "").split()
+        if "node" in classes or "data-node-id" in d:
+            self.node_elements.append((tag, d))
 
-    def handle_startendtag(self, tag, attrs):
-        self.handle_starttag(tag, attrs)
+    handle_startendtag = handle_starttag
 
 
-def test_rendered_page_has_five_filter_buttons_in_order_and_no_hidden_nodes(tmp_path):
+def test_rendered_page_filter_buttons_and_nothing_hidden(tmp_path, browser):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_repo(repo_root)
+    build_repo(repo_root)
     out_dir = tmp_path / "out"
-    out_dir.mkdir()
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
-
-    nodes = field(snapshot, "nodes")
-    statuses = sorted(field(n, "status") for n in nodes)
+    statuses = sorted(field(n, "status") for n in field(snapshot, "nodes"))
     assert statuses == sorted(["passing", "failing", "missing", "not-attempted"])
 
-    html_text = (out_dir / "index.html").read_text(encoding="utf-8")
-    parser = _PageParser()
-    parser.feed(html_text)
-    parser.close()
+    index = out_dir / "index.html"
+    html = index.read_text(encoding="utf-8")
+    collector = _Collector()
+    collector.feed(html)
+    assert collector.filters == ["all", "passing", "failing", "missing", "not-attempted"]
+    assert collector.node_elements, "expected node elements on the page"
+    for tag, attrs in collector.node_elements:
+        assert "hidden" not in attrs, (tag, attrs)
 
-    assert len(parser.filter_buttons) == 5
-    assert [b["data-filter"] for b in parser.filter_buttons] == [
-        "all",
-        "passing",
-        "failing",
-        "missing",
-        "not-attempted",
-    ]
-
-    assert len(parser.node_elements) == 4
-    for el in parser.node_elements:
-        assert "hidden" not in el
+    page = browser.open(index)
+    assert page.find(css="button[data-filter]").count() == 5
+    assert page.find(css="li.node").count() == 4
+    assert page.find(css="li.node[hidden]").count() == 0
+    assert page.console_errors() == []

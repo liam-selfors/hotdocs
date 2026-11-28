@@ -1,5 +1,4 @@
-# hotdocs-criterion: sha256:0f9b1f489fc85b2d5a33aa8047161aa0baa129614fceb8d9cd86d9f60c6e1c91
-import time
+# hotdocs-criterion: sha256:a4652125c94207c3f51bf9caf0ea8029f441451730b52aa1455b32b8bc71b908
 from pathlib import Path
 
 import pytest
@@ -7,8 +6,7 @@ import pytest
 import driver_browser
 
 
-REPO_ROOT = Path.home() / ".cache" / "hotdocs-test"
-
+ENV_ROOT = Path.home() / ".cache" / "hotdocs-test"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -18,19 +16,17 @@ def field(value, name):
 
 @pytest.fixture(scope="session")
 def provisioned():
-    result = driver_browser.provision(REPO_ROOT)
+    ENV_ROOT.mkdir(parents=True, exist_ok=True)
+    result = driver_browser.provision(ENV_ROOT)
     if not field(result, "ok"):
         pytest.fail("provision failed: " + str(field(result, "reason")))
-    return result
+    return ENV_ROOT
 
 
-PAGE_HTML = (
+PAGE = (
     "<!DOCTYPE html>\n"
     "<html lang=\"en\">\n"
-    "<head>\n"
-    "<meta charset=\"utf-8\">\n"
-    "<title>AC-DRV-003</title>\n"
-    "</head>\n"
+    "<head><meta charset=\"utf-8\"><title>AC-DRV-003</title></head>\n"
     "<body>\n"
     "<button type=\"button\" id=\"warn\">Warn</button>\n"
     "<button type=\"button\" id=\"export\">Export</button>\n"
@@ -39,7 +35,7 @@ PAGE_HTML = (
     "  alert('hi');\n"
     "});\n"
     "document.getElementById('export').addEventListener('click', function () {\n"
-    "  var svg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"></svg>';\n"
+    "  var svg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"></svg>';\n"
     "  var blob = new Blob([svg], {type: 'image/svg+xml'});\n"
     "  var a = document.createElement('a');\n"
     "  a.href = URL.createObjectURL(blob);\n"
@@ -48,54 +44,44 @@ PAGE_HTML = (
     "  a.click();\n"
     "  a.remove();\n"
     "});\n"
-    "window.addEventListener('load', function () {\n"
-    "  throw new Error('boom');\n"
-    "});\n"
+    "</script>\n"
+    "<script>\n"
+    "throw new Error('boom');\n"
     "</script>\n"
     "</body>\n"
     "</html>\n"
 )
 
 
-def _wait_for(read, predicate, timeout=5.0):
-    deadline = time.monotonic() + timeout
-    value = read()
-    while not predicate(value) and time.monotonic() < deadline:
-        time.sleep(0.1)
-        value = read()
-    return value
-
-
 def test_ac_drv_003(provisioned, tmp_path):
     page_path = tmp_path / "index.html"
-    page_path.write_text(PAGE_HTML, encoding="utf-8")
+    page_path.write_text(PAGE, encoding="utf-8")
 
-    session = driver_browser.open_session(REPO_ROOT, tmp_path)
+    session = driver_browser.open_session(provisioned, tmp_path)
     try:
         page = session.open(page_path)
-
         page.find(role="button", name="Warn").click()
         page.find(role="button", name="Export").click()
 
-        errors = _wait_for(page.console_errors, lambda v: len(v) >= 1)
-        assert errors == ["Error: boom"]
+        assert page.console_errors() == ["Error: boom"]
+        assert page.dialogs() == ["hi"]
 
-        dialogs = _wait_for(page.dialogs, lambda v: len(v) >= 1)
-        assert dialogs == ["hi"]
-
-        downloads = _wait_for(page.downloads, lambda v: len(v) >= 1)
+        downloads = page.downloads()
+        assert isinstance(downloads, list)
         assert len(downloads) == 1
         download = Path(downloads[0])
         assert download.name == "out.svg"
-        assert download.resolve().parent == (tmp_path / "downloads").resolve()
+        downloads_dir = (tmp_path / "downloads").resolve()
+        assert download.resolve().parent == downloads_dir
+        assert download.resolve().is_file()
 
-        shot = session_shot = page.screenshot("home")
-        shot_path = Path(session_shot)
-        assert shot_path.resolve() == (tmp_path / "screenshots" / "home.png").resolve()
-        assert shot_path.is_file()
-        with open(shot_path, "rb") as fh:
+        shot = page.screenshot("home")
+        assert isinstance(shot, Path)
+        expected = tmp_path / "screenshots" / "home.png"
+        assert shot.resolve() == expected.resolve()
+        assert expected.is_file()
+        with open(expected, "rb") as fh:
             assert fh.read(len(PNG_SIGNATURE)) == PNG_SIGNATURE
-        del shot
 
         with pytest.raises(driver_browser.BrowserError) as excinfo:
             session.open("https://example.com/")

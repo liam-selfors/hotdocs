@@ -21,7 +21,7 @@ The stylesheet declares these custom properties in its top-level
 
 | Group | Tokens |
 | --- | --- |
-| Colour | `--color-bg`, `--color-surface`, `--color-text`, `--color-text-muted`, `--color-border`, `--color-accent`, `--color-focus`, `--color-ok`, `--color-warn`, `--color-fail`, `--color-neutral` |
+| Colour | `--color-bg`, `--color-surface`, `--color-text`, `--color-text-muted`, `--color-border`, `--color-accent`, `--color-focus`, `--color-ok`, `--color-warn`, `--color-fail`, `--color-neutral`, `--color-edge-depends-on`, `--color-edge-realizes`, `--color-edge-other` |
 | Type | `--font-body`, `--font-mono`, `--text-sm`, `--text-base`, `--text-lg`, `--text-xl` |
 | Space | `--space-1`, `--space-2`, `--space-3`, `--space-4`, `--space-5`, `--radius` |
 
@@ -42,7 +42,8 @@ In both the light and the dark values:
 - text pairs are at least 4.5: `--color-text`, `--color-text-muted` and
   `--color-accent`, each on `--color-bg` and on `--color-surface`;
 - non-text pairs are at least 3: `--color-focus`, `--color-ok`,
-  `--color-warn`, `--color-fail` and `--color-neutral`, each on
+  `--color-warn`, `--color-fail`, `--color-neutral` and the three
+  `--color-edge-` tokens, each on
   `--color-bg` and on `--color-surface`.
 
 ## Tones
@@ -59,6 +60,13 @@ A status a page shows is one of four tones, each a class:
 A tone class sets `border-left: 4px solid var(<its token>)` and nothing
 else, so two tones differ in colour alone, and never by colour alone
 in meaning: the element also shows the status as text.
+
+## Edges
+
+A drawn graph edge carries one class by its kind: `edge-depends-on` for
+`depends_on`, `edge-realizes` for `realizes`, `edge-other` for any other
+kind. Each sets `stroke: var(<its --color-edge- token>)` and nothing
+else; a script sets the class, never a colour.
 
 ## Pages
 
@@ -89,6 +97,4 @@ no page. Pixels and screenshots are for people (`D373`).
 
 ## Open questions
 
-- `docs-site-renderer`'s DAG edges take their colours from its script
-  (`R-DOCS-008`); moving them to tokens changes that script's pinned
-  output, so it waits for a change to that component.
+None.

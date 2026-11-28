@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c65642ea6c65e3b87fe8d5068755680e12f56d964649c4a9603f70defe10f1eb
+# hotdocs-criterion: sha256:18cd7bc162cdc15f53d7db3f94da446deaa0100b3d5cacda49083bfcfa0ad47c
 import json
 from pathlib import Path
 
@@ -9,24 +9,23 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _call(value):
-    return value() if callable(value) else value
-
-
-def _verification_report(component_id, overall, req_id, req_result):
+def _verification_report(component_id, overall):
+    result = "pass" if overall == "pass" else "fail"
+    criterion = {
+        "id": "AC-X-001",
+        "covers": "R-X-001",
+        "kind": "compiled",
+        "result": result,
+    }
+    if result == "fail":
+        criterion["failure_detail"] = {"message": "x failed", "expected": 1, "actual": 2}
+        criterion["failure_origin"] = "implementation"
     return {
         "component_id": component_id,
-        "criteria": [
-            {
-                "id": "AC-" + req_id[2:],
-                "covers": req_id,
-                "kind": "compiled",
-                "result": req_result,
-            }
-        ],
-        "requirement_results": {req_id: req_result},
+        "criteria": [criterion],
+        "requirement_results": {"R-X-001": result},
         "interface_drift": False,
-        "mutation_score": None,
+        "mutation_score": 0.9,
         "mutation_error": None,
         "assets": [],
         "drivers": [],
@@ -48,18 +47,12 @@ def _secret_scan():
     }
 
 
-def _license_scan():
-    return {"blocked": False, "findings": []}
-
-
-def _check_result(component_id, overall, req_id, req_result):
+def _provenance_hit(component_id, overall):
     return {
         "hit": True,
         "reason": None,
-        "verification_report": _verification_report(
-            component_id, overall, req_id, req_result
-        ),
-        "license_scan": _license_scan(),
+        "verification_report": _verification_report(component_id, overall),
+        "license_scan": {"blocked": False, "flagged": False, "matches": []},
         "secret_scan": _secret_scan(),
     }
 
@@ -69,8 +62,8 @@ def _write_fake_tracker(repo_root, log_path):
         "scope": "whole-corpus",
         "ready": False,
         "components": {
-            "comp-foo": _check_result("comp-foo", "pass", "R-FOO-001", "pass"),
-            "comp-bar": _check_result("comp-bar", "fail", "R-BAR-001", "fail"),
+            "comp-bar": _provenance_hit("comp-bar", "fail"),
+            "comp-foo": _provenance_hit("comp-foo", "pass"),
         },
         "capabilities": {},
         "secret_scan": _secret_scan(),
@@ -82,21 +75,21 @@ def _write_fake_tracker(repo_root, log_path):
         "_LOG = " + repr(str(log_path)) + "\n"
         "_REPORT = " + repr(report) + "\n"
         "\n"
+        "\n"
         "def _log(line):\n"
         "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
         "        fh.write(line + '\\n')\n"
         "\n"
+        "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
         "    _log('check_readiness')\n"
         "    report = copy.deepcopy(_REPORT)\n"
-        "    if changed_ids is not None:\n"
-        "        report['scope'] = 'blast-radius'\n"
+        "    report['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
         "    return report\n"
+        "\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    _log('last_requirement_failures ' + str(component_id))\n"
-        "    if component_id == 'comp-bar':\n"
-        "        return ['R-BAR-001']\n"
         "    return []\n"
     )
     d = repo_root / "gen" / "provenance-tracker"
@@ -126,38 +119,38 @@ def _write_corpus_graph(repo_root):
         "edges": [],
         "aggregates": {
             "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
+            "orphan_component_rate": 1.0,
             "orphan_var_rate": 0.0,
         },
     }
-    v = repo_root / "verification"
-    v.mkdir(parents=True, exist_ok=True)
-    (v / "corpus-graph.json").write_text(
+    d = repo_root / "verification"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "corpus-graph.json").write_text(
         json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
 
 
-def _visible_node_texts(page):
-    return list(_call(page.find(css="li.node:not([hidden])").texts))
-
-
-def _node_visible(page, node_id):
-    el = page.find(css='li.node[data-node-id="' + node_id + '"]')
-    return bool(_call(el.visible))
+def _visible_node_texts(page, ids):
+    visible = []
+    for node_id in ids:
+        el = page.find(css='li.node[data-node-id="' + node_id + '"]')
+        if el.visible():
+            visible.append(el.text())
+    return visible
 
 
 def test_ac_ui_012_failing_filter_then_all(tmp_path, browser):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     out_dir = tmp_path / "out"
-    log_path = tmp_path / "fake_tracker.log"
+    log_path = tmp_path / "tracker_calls.log"
 
     _write_fake_tracker(repo_root, log_path)
     _write_corpus_graph(repo_root)
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    assert log_path.is_file()
+    # The fake ran exactly once for check_readiness.
     calls = log_path.read_text(encoding="utf-8").splitlines()
     assert calls.count("check_readiness") == 1
 
@@ -168,24 +161,28 @@ def test_ac_ui_012_failing_filter_then_all(tmp_path, browser):
     assert index.is_file()
 
     page = browser.open(index)
+    ids = ["comp-foo", "comp-bar"]
+
+    assert page.find(css="li.node").count() == 2
+
+    # On load every node is shown.
+    assert len(_visible_node_texts(page, ids)) == 2
 
     page.find(role="button", name="failing").click()
 
-    visible = _visible_node_texts(page)
+    visible = _visible_node_texts(page, ids)
     assert len(visible) == 1
     assert "comp-bar" in visible[0]
     assert "comp-foo" not in visible[0]
-    assert _node_visible(page, "comp-bar") is True
-    assert _node_visible(page, "comp-foo") is False
+    assert page.find(css='li.node[data-node-id="comp-foo"]').visible() is False
+    assert page.find(css='li.node[data-node-id="comp-bar"]').visible() is True
 
     page.find(role="button", name="all").click()
 
-    visible = _visible_node_texts(page)
+    visible = _visible_node_texts(page, ids)
     assert len(visible) == 2
-    assert any("comp-bar" in t for t in visible)
     assert any("comp-foo" in t for t in visible)
-    assert _node_visible(page, "comp-bar") is True
-    assert _node_visible(page, "comp-foo") is True
+    assert any("comp-bar" in t for t in visible)
 
-    assert list(page.console_errors()) == []
-    assert list(page.blocked_requests()) == []
+    assert page.console_errors() == []
+    assert page.blocked_requests() == []

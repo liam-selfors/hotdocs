@@ -48,7 +48,9 @@ given, and every value crossing it is plain Python (`str`, `int`,
   `tmp_path`) opened as a `file://` URL, or an `http://` URL whose host
   is `127.0.0.1`, `localhost` or `[::1]`. Anything else raises
   `only file paths and loopback URLs can be opened: <target>`; a missing
-  file raises `no such file: <path>`, `<path>` its absolute path. It returns once the page's `load`
+  file raises `no such file: <path>`, `<path>` its absolute path. Each
+  `open` returns a new page; pages opened earlier stay open, each with
+  its own reads, until `close()`. It returns once the page's `load`
   event has fired and two animation frames have passed.
 
 **Page**
@@ -77,6 +79,13 @@ given, and every value crossing it is plain Python (`str`, `int`,
   `<tmp_path>/screenshots/<name>.png`. Its pixels are for people
   reading a failure; no criterion asserts on them (`D373`).
 
+**Closing.** The session's `close()`, before it stops the browser, saves
+a full-page PNG of each page still open, in the order they were opened,
+as `<tmp_path>/screenshots/final-<n>.png`, `<n>` counting from `1`, so a
+reviewer sees what every browser criterion left on screen (`D390`). A
+page that cannot be captured is skipped, never an error; a second
+`close()` saves nothing and does nothing.
+
 **Element**
 
 - Actions: `click(*, modifiers=())` (each of `"Shift"`, `"Alt"`,
@@ -101,8 +110,11 @@ given, and every value crossing it is plain Python (`str`, `int`,
   match).
 
 An action, and a read that needs one element, waits up to 5 seconds
-for exactly one match that is visible (and enabled, for an action),
-else raises `no element matches <selector>` or
+for exactly one match that is visible (and enabled, for an action);
+`attribute` and `style` wait instead for exactly one match attached to
+the page, visible or not, since an element with an empty box, such as a
+vertical or horizontal SVG line, is never visible (`D393`). Otherwise
+each raises `no element matches <selector>` or
 `<n> elements match <selector>`, `<selector>` being the call as
 written: `<kind>=<value>` with the value bare, then for a role with a
 name ` name="<name>"` quoted, such as `css=li`, `label=Query` or

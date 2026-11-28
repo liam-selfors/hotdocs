@@ -10,6 +10,9 @@
   --color-warn: #9a6700;
   --color-fail: #d1242f;
   --color-neutral: #6e7781;
+  --color-edge-depends-on: #0969da;
+  --color-edge-realizes: #1a7f37;
+  --color-edge-other: #bc4c00;
   --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, Menlo, Consolas, monospace;
   --text-sm: 0.875rem;
@@ -38,6 +41,9 @@
     --color-warn: #d29922;
     --color-fail: #f85149;
     --color-neutral: #8b949e;
+    --color-edge-depends-on: #4493f8;
+    --color-edge-realizes: #3fb950;
+    --color-edge-other: #db6d28;
   }
 }
 
@@ -91,6 +97,18 @@ h2 {
 
 .tone-neutral {
   border-left: 4px solid var(--color-neutral);
+}
+
+.edge-depends-on {
+  stroke: var(--color-edge-depends-on);
+}
+
+.edge-realizes {
+  stroke: var(--color-edge-realizes);
+}
+
+.edge-other {
+  stroke: var(--color-edge-other);
 }
 
 .muted {

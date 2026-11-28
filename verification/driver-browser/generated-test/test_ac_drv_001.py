@@ -1,8 +1,6 @@
-# hotdocs-criterion: sha256:614223445512dab35de76268dc9a9aed28aa67bb780b92a9a6b71d39448351c1
+# hotdocs-criterion: sha256:7a33cb13c1e374cc89132f221b6d479f37c4e87ea04f11415e9c6dbf093ae6c6
 import time
 from pathlib import Path
-
-import pytest
 
 import driver_browser
 
@@ -14,21 +12,17 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def test_ac_drv_001_provision_twice_is_idempotent_and_reports_versions():
+def test_ac_drv_001_provision_twice_is_idempotent_and_fast():
     SHARED_ROOT.mkdir(parents=True, exist_ok=True)
 
     first = driver_browser.provision(SHARED_ROOT)
-    if field(first, "ok") is not True:
-        pytest.fail("first provision failed: " + repr(field(first, "reason")))
+    assert field(first, "ok") is True, field(first, "reason")
 
-    started = time.monotonic()
+    start = time.monotonic()
     second = driver_browser.provision(SHARED_ROOT)
-    elapsed = time.monotonic() - started
-    if field(second, "ok") is not True:
-        pytest.fail("second provision failed: " + repr(field(second, "reason")))
+    elapsed = time.monotonic() - start
 
-    assert field(first, "ok") is True
-    assert field(second, "ok") is True
+    assert field(second, "ok") is True, field(second, "reason")
 
     assert field(first, "lockfile_sha256") is None
     assert field(second, "lockfile_sha256") is None

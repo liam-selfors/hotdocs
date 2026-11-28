@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:23db89ca011b60fc2bf1350689efe6745ed69de7c1be2e0fe5ed7bd162c91c52
+# hotdocs-criterion: sha256:5f9178397d8a65834777e6a7a6c32cf8b265a40edfed37144f968006b8198216
 import re
 
 import test_author
@@ -26,8 +26,12 @@ def _write_probe_stand_in(repo_root, log_path):
         "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
-        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
         "\n"
         "\n"
         "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
@@ -38,20 +42,13 @@ def _write_probe_stand_in(repo_root, log_path):
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def test_prompt_contains_block_r_author_013_realizes_line(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-
-    probe_log = tmp_path / "probe_calls.log"
-    _write_probe_stand_in(repo_root, probe_log)
-
-    prompts = []
+def _make_mock_backend(prompts):
     test_file = "def test_placeholder():\n    assert True\n"
 
-    def mock_backend(prompt, model, **params):
+    def backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        nonce = nonces[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
             + test_file
@@ -64,21 +61,37 @@ def test_prompt_contains_block_r_author_013_realizes_line(tmp_path, monkeypatch)
             "model_call_error": None,
         }
 
+    return backend
+
+
+def test_prompt_holds_r_author_013_realizes_line(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+
+    log_path = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, log_path)
+
     bundle = {
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 The maker MUST make a widget.",
+        "criterion_text": "Given a widget\nWhen made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make a widget.",
         "interface": "make_widget() -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
 
+    prompts = []
+    backend = _make_mock_backend(prompts)
+
     result = test_author.author_test(
-        bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
+        bundle, "mock", repo_root=repo_root, llm_backend=backend
     )
 
     assert field(result, "model_call_error") is None
     assert len(prompts) >= 1
-    assert EXPECTED_LINE in prompts[0].splitlines()
+
+    first_prompt = prompts[0]
+    assert EXPECTED_LINE in first_prompt.splitlines()

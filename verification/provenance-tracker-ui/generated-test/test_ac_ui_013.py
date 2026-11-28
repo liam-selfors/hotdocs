@@ -1,6 +1,7 @@
-# hotdocs-criterion: sha256:0b74ac12dfa2178df2aaad8f44fc3fb48fb8539667604d8466d01845afd036ad
+# hotdocs-criterion: sha256:82a3fe0cdae917e4bfe92509c4e5feaae2bb4a72b0efe3559704e77d91b6f5c9
 import json
 import re
+from pathlib import Path
 
 import provenance_tracker_ui
 
@@ -12,18 +13,18 @@ def field(value, name):
 def _verification_report(component_id, overall):
     req = "R-" + component_id.upper().replace("COMP-", "") + "-001"
     result = "pass" if overall == "pass" else "fail"
-    crit = {
+    criterion = {
         "id": "AC-" + component_id.upper().replace("COMP-", "") + "-001",
         "covers": req,
         "kind": "compiled",
         "result": result,
     }
     if result == "fail":
-        crit["failure_detail"] = {"message": "x failed", "expected": 1, "actual": 2}
-        crit["failure_origin"] = "implementation"
+        criterion["failure_detail"] = {"message": "x failed", "expected": 1, "actual": 2}
+        criterion["failure_origin"] = "implementation"
     return {
         "component_id": component_id,
-        "criteria": [crit],
+        "criteria": [criterion],
         "requirement_results": {req: result},
         "interface_drift": False,
         "mutation_score": 0.9,
@@ -48,16 +49,12 @@ def _secret_scan():
     }
 
 
-def _license_scan():
-    return {"blocked": False, "matches": [], "gate_version": "license_scanner@1.0.0"}
-
-
-def _provenance_hit(component_id, overall):
+def _check_result(component_id, overall):
     return {
         "hit": True,
         "reason": None,
         "verification_report": _verification_report(component_id, overall),
-        "license_scan": _license_scan(),
+        "license_scan": {"blocked": False, "matches": []},
         "secret_scan": _secret_scan(),
     }
 
@@ -67,8 +64,8 @@ def _write_fake_tracker(repo_root, log_path):
         "scope": "whole-corpus",
         "ready": False,
         "components": {
-            "comp-bar": _provenance_hit("comp-bar", "fail"),
-            "comp-foo": _provenance_hit("comp-foo", "pass"),
+            "comp-foo": _check_result("comp-foo", "pass"),
+            "comp-bar": _check_result("comp-bar", "fail"),
         },
         "capabilities": {},
         "secret_scan": _secret_scan(),
@@ -76,22 +73,19 @@ def _write_fake_tracker(repo_root, log_path):
     }
     src = (
         "import copy\n"
-        "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "REPORT = " + repr(report) + "\n"
         "\n"
-        "def _log(line):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(line + '\\n')\n"
-        "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    _log('check_readiness')\n"
-        "    report = copy.deepcopy(REPORT)\n"
-        "    report['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
-        "    return report\n"
+        "    with open(LOG, 'a') as fh:\n"
+        "        fh.write('check_readiness\\n')\n"
+        "    result = copy.deepcopy(REPORT)\n"
+        "    result['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
+        "    return result\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
-        "    _log('last_requirement_failures ' + str(component_id))\n"
+        "    with open(LOG, 'a') as fh:\n"
+        "        fh.write('last_requirement_failures ' + str(component_id) + '\\n')\n"
         "    return []\n"
     )
     d = repo_root / "gen" / "provenance-tracker"
@@ -121,7 +115,7 @@ def _write_corpus_graph(repo_root):
         "edges": [],
         "aggregates": {
             "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
+            "orphan_component_rate": 1.0,
             "orphan_var_rate": 0.0,
         },
     }
@@ -132,22 +126,19 @@ def _write_corpus_graph(repo_root):
     )
 
 
-_RGB_RE = re.compile(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)")
-
-
 def _parse_rgb(value):
-    m = _RGB_RE.match(value.strip())
-    assert m, "not an rgb() colour: " + repr(value)
-    return tuple(int(x) for x in m.groups())
+    nums = re.findall(r"[-+]?\d*\.?\d+", value)
+    assert len(nums) >= 3, "not an rgb() colour: " + repr(value)
+    return tuple(int(round(float(n))) for n in nums[:3])
+
+
+def _channel(v):
+    c = v / 255
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
 def _luminance(rgb):
-    chans = []
-    for v in rgb:
-        c = v / 255
-        c = c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-        chans.append(c)
-    r, g, b = chans
+    r, g, b = (_channel(v) for v in rgb)
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
@@ -160,31 +151,33 @@ def _contrast(a, b):
 def _check_opening(page):
     foo = page.find(css='li.node[data-node-id="comp-foo"]')
     bar = page.find(css='li.node[data-node-id="comp-bar"]')
+    assert foo.count() == 1
+    assert bar.count() == 1
 
     foo_classes = (foo.attribute("class") or "").split()
     bar_classes = (bar.attribute("class") or "").split()
     assert "node" in foo_classes
     assert "node" in bar_classes
-    assert "tone-ok" in foo_classes, foo_classes
-    assert "tone-fail" in bar_classes, bar_classes
+    assert "tone-ok" in foo_classes
+    assert "tone-fail" in bar_classes
 
     assert foo.style("border-left-width") == "4px"
     assert bar.style("border-left-width") == "4px"
 
-    foo_color = _parse_rgb(foo.style("border-left-color"))
-    bar_color = _parse_rgb(bar.style("border-left-color"))
+    foo_color = foo.style("border-left-color")
+    bar_color = bar.style("border-left-color")
     assert foo_color != bar_color
 
-    bg_raw = page.find(css="body").style("background-color")
-    bg = _parse_rgb(bg_raw)
-    assert _contrast(foo_color, bg) >= 3, (foo_color, bg)
-    assert _contrast(bar_color, bg) >= 3, (bar_color, bg)
+    bg = page.find(css="body").style("background-color")
+    bg_rgb = _parse_rgb(bg)
+    assert _contrast(_parse_rgb(foo_color), bg_rgb) >= 3, (foo_color, bg)
+    assert _contrast(_parse_rgb(bar_color), bg_rgb) >= 3, (bar_color, bg)
 
     assert page.console_errors() == []
     return bg
 
 
-def test_ac_ui_013_tone_classes_and_contrast_light_and_dark(tmp_path, browser):
+def test_ac_ui_013_tone_borders_contrast_in_light_and_dark(tmp_path, browser):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     log_path = tmp_path / "fake_calls.log"
@@ -194,8 +187,8 @@ def test_ac_ui_013_tone_classes_and_contrast_light_and_dark(tmp_path, browser):
     out_dir = tmp_path / "out"
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert lines.count("check_readiness") == 1
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    assert calls.count("check_readiness") == 1
 
     statuses = {field(n, "id"): field(n, "status") for n in field(snapshot, "nodes")}
     assert statuses == {"comp-bar": "failing", "comp-foo": "passing"}

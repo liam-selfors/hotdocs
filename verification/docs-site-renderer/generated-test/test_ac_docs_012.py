@@ -1,102 +1,94 @@
-# hotdocs-criterion: sha256:34698f4b3e8914b4b263d1893c8449f6ce4f9d8cf474201c23b1e724ecabd066
-"""AC-DOCS-012 (covers R-DOCS-009): the DAG view's search field filters nodes."""
+# hotdocs-criterion: sha256:bef49ba74c5cfdac7084c5ad35056a4e2d337b7f75c2ee7062431a8636b9d720
+"""AC-DOCS-012: typing in the DAG view's search field hides non-matching nodes;
+clearing it shows every node again (R-DOCS-009)."""
 
-import dataclasses
+from dataclasses import dataclass, field as dc_field
 import json
-from pathlib import Path
 
 import docs_site_renderer
 
 
-@dataclasses.dataclass
+@dataclass
 class CorpusGraph:
-    """Stand-in matching corpus-graph-builder's documented CorpusGraph shape."""
+    """Stand-in with the documented CorpusGraph shape (interface/data/CorpusGraph.md)."""
 
-    nodes: dict
-    edges: list
-    aggregates: dict
+    nodes: dict = dc_field(default_factory=dict)
+    edges: list = dc_field(default_factory=list)
+    aggregates: dict = dc_field(default_factory=dict)
 
     def to_dict(self):
-        return {
-            "nodes": self.nodes,
-            "edges": self.edges,
-            "aggregates": self.aggregates,
-        }
+        return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
 
     def to_json_bytes(self):
-        text = json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True)
-        return (text + "\n").encode("utf-8")
+        return (
+            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+        ).encode("utf-8")
 
 
-def _component_node(component_id):
+def _component_node(slug):
     return {
         "type": "component",
         "verification": None,
         "provenance": None,
-        "size_status": "ok",
+        "size_status": "unknown",
         "sealed": False,
         "pinned_overrides": [],
-        "owners": ["pipeline-team"],
-        "documents": {
-            "component.md": "# " + component_id + "\n\nA test component.\n",
+        "owners": [],
+        "documents": {"component.md": "# " + slug + "\n"},
+    }
+
+
+def _graph():
+    return CorpusGraph(
+        nodes={
+            "P-ALPHA": {"type": "capability"},
+            "comp-alpha": _component_node("comp-alpha"),
+            "comp-beta": _component_node("comp-beta"),
         },
-    }
-
-
-def _build_graph():
-    nodes = {
-        "P-ALPHA": {"type": "capability"},
-        "comp-alpha": _component_node("comp-alpha"),
-        "comp-beta": _component_node("comp-beta"),
-    }
-    edges = sorted(
-        [
-            {"from": "comp-alpha", "to": "comp-beta", "kind": "depends_on"},
+        edges=[
             {"from": "comp-alpha", "to": "P-ALPHA", "kind": "realizes"},
+            {"from": "comp-alpha", "to": "comp-beta", "kind": "depends_on"},
         ],
-        key=lambda e: (e["from"], e["to"], e["kind"]),
+        aggregates={
+            "orphan_capability_rate": 0.0,
+            "orphan_component_rate": 0.0,
+            "orphan_var_rate": 0.0,
+        },
     )
-    aggregates = {
-        "orphan_capability_rate": 0.0,
-        "orphan_component_rate": 0.5,
-        "orphan_var_rate": 0.0,
-    }
-    return CorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
-def _value(obj, name):
-    attr = getattr(obj, name)
-    return attr() if callable(attr) else attr
+def _read(value):
+    return value() if callable(value) else value
 
 
-def _node_item(page, node_id):
-    return page.find(css='li.node[data-id="' + node_id + '"]')
+def _visible(page, node_id):
+    el = page.find(css='li.node[data-id="' + node_id + '"]')
+    return bool(_read(el.visible))
 
 
-NODE_IDS = ["comp-alpha", "comp-beta", "P-ALPHA"]
+IDS = ["comp-alpha", "comp-beta", "P-ALPHA"]
 
 
 def test_ac_docs_012_search_filters_nodes(browser, tmp_path):
-    out_dir = tmp_path
-    docs_site_renderer.render_docs_site(_build_graph(), out_dir)
+    docs_site_renderer.render_docs_site(_graph(), tmp_path)
 
-    index = Path(out_dir) / "index.html"
-    assert index.is_file()
-
-    page = browser.open(index)
-
-    assert _value(page.find(css="li.node"), "count") == 3
+    page = browser.open(tmp_path / "index.html")
+    assert _read(page.find(css="li.node").count) == 3
 
     search = page.find(css="#search")
     search.fill("beta")
-
-    visible = {node_id: bool(_value(_node_item(page, node_id), "visible")) for node_id in NODE_IDS}
-    assert visible == {"comp-alpha": False, "comp-beta": True, "P-ALPHA": False}
+    assert {i: _visible(page, i) for i in IDS} == {
+        "comp-alpha": False,
+        "comp-beta": True,
+        "P-ALPHA": False,
+    }
 
     search.fill("")
-
-    visible = {node_id: bool(_value(_node_item(page, node_id), "visible")) for node_id in NODE_IDS}
-    assert visible == {"comp-alpha": True, "comp-beta": True, "P-ALPHA": True}
+    assert {i: _visible(page, i) for i in IDS} == {
+        "comp-alpha": True,
+        "comp-beta": True,
+        "P-ALPHA": True,
+    }
 
     assert page.console_errors() == []
     assert page.blocked_requests() == []

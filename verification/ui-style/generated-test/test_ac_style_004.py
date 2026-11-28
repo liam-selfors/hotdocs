@@ -1,10 +1,12 @@
-# hotdocs-criterion: sha256:ba7ac82d4537a6e51627e2adaed1003f5621460fd2840f577aca0db6647dad11
+# hotdocs-criterion: sha256:6823d56dc57ed1a9c7f36af0428329efdc1b5ae3d99ceef12bf647e998606d99
+"""AC-STYLE-004: each rule of R-STYLE-004's table has exactly its declarations, in order."""
+
 import pytest
 
-import ui_style
+import ui_style  # noqa: F401  (module under test; the asset is read through asset_runner)
 
 
-ROWS = [
+RULES = [
     (
         "body",
         [
@@ -17,12 +19,7 @@ ROWS = [
             ("line-height", "1.5"),
         ],
     ),
-    (
-        "a",
-        [
-            ("color", "var(--color-accent)"),
-        ],
-    ),
+    ("a", [("color", "var(--color-accent)")]),
     (
         "code, pre",
         [
@@ -53,36 +50,14 @@ ROWS = [
             ("background", "var(--color-surface)"),
         ],
     ),
-    (
-        ".tone-ok",
-        [
-            ("border-left", "4px solid var(--color-ok)"),
-        ],
-    ),
-    (
-        ".tone-warn",
-        [
-            ("border-left", "4px solid var(--color-warn)"),
-        ],
-    ),
-    (
-        ".tone-fail",
-        [
-            ("border-left", "4px solid var(--color-fail)"),
-        ],
-    ),
-    (
-        ".tone-neutral",
-        [
-            ("border-left", "4px solid var(--color-neutral)"),
-        ],
-    ),
-    (
-        ".muted",
-        [
-            ("color", "var(--color-text-muted)"),
-        ],
-    ),
+    (".tone-ok", [("border-left", "4px solid var(--color-ok)")]),
+    (".tone-warn", [("border-left", "4px solid var(--color-warn)")]),
+    (".tone-fail", [("border-left", "4px solid var(--color-fail)")]),
+    (".tone-neutral", [("border-left", "4px solid var(--color-neutral)")]),
+    (".edge-depends-on", [("stroke", "var(--color-edge-depends-on)")]),
+    (".edge-realizes", [("stroke", "var(--color-edge-realizes)")]),
+    (".edge-other", [("stroke", "var(--color-edge-other)")]),
+    (".muted", [("color", "var(--color-text-muted)")]),
     (
         ":focus-visible",
         [
@@ -93,12 +68,15 @@ ROWS = [
 ]
 
 
-@pytest.mark.parametrize("selector,declarations", ROWS, ids=[r[0] for r in ROWS])
-def test_ac_style_004_rule_declarations(asset_runner, selector, declarations):
+@pytest.mark.parametrize(
+    "selector,declarations", RULES, ids=[selector for selector, _ in RULES]
+)
+def test_rule_declarations_match_table_in_order(asset_runner, selector, declarations):
     run = asset_runner("static/style.css")
     result = run("rule", [selector])
+
     expected = dict(declarations)
+
     assert isinstance(result, dict)
     assert result == expected
     assert list(result.keys()) == [prop for prop, _ in declarations]
-    assert list(result.items()) == declarations

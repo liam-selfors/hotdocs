@@ -1,5 +1,3 @@
-"""The one stylesheet every page hotdocs writes inlines."""
-
 from pathlib import Path
 
 

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:36574fecbf61f5b36b26eff69996b85a77784922d64a1762571200f0248bc743
+# hotdocs-criterion: sha256:b6b1ad2a785c773411dacd0a37aad0954c410805549fdf341eafebb7376c234c
 from pathlib import Path
 
 import ui_style
@@ -12,27 +12,30 @@ def _asset_text():
     return _asset_path().read_bytes().decode("utf-8")
 
 
-def test_declared_asset_exists():
-    assert _asset_path().is_file()
+def test_ac_style_001_stylesheet_and_style_element():
+    asset = _asset_path()
+    assert asset.is_file()
 
-
-def test_stylesheet_equals_asset_text_read_as_utf8():
     expected = _asset_text()
-    result = ui_style.stylesheet()
-    assert isinstance(result, str)
-    assert result == expected
-    # Read at each call, unchanged: a second call returns the same text.
-    assert ui_style.stylesheet() == expected
 
-
-def test_style_element_wraps_stylesheet_exactly():
     sheet = ui_style.stylesheet()
+    assert isinstance(sheet, str)
+    assert sheet == expected
+
     element = ui_style.style_element()
     assert isinstance(element, str)
-    assert element == "<style>\n" + sheet + "</style>"
-    assert element == "<style>\n" + _asset_text() + "</style>"
+    assert element == "<style>\n" + ui_style.stylesheet() + "</style>"
+    assert element == "<style>\n" + expected + "</style>"
+
+    assert "</style" not in sheet
+    assert "</style" not in expected
 
 
-def test_stylesheet_contains_no_closing_style_tag():
-    assert "</style" not in ui_style.stylesheet()
-    assert "</style" not in _asset_text()
+def test_ac_style_001_repeated_calls_are_stable():
+    expected = _asset_text()
+    first = ui_style.stylesheet()
+    second = ui_style.stylesheet()
+    assert first == expected
+    assert second == expected
+    assert ui_style.style_element() == ui_style.style_element()
+    assert ui_style.style_element() == "<style>\n" + expected + "</style>"

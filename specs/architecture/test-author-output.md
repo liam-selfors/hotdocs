@@ -62,7 +62,12 @@ replace it), and prints exactly one line to stdout: with `json`,
 `json.dumps(dataclasses.asdict(result))`; with `text`,
 `<criterion_id>: wrote <file path>` when `model_call_error` is `None`,
 else `<criterion_id>: model_call_error <category>: <message>`. It
-returns `0` when `model_call_error` is `None`, else `1`.
+returns `0` when `model_call_error` is `None`, else `1`. When
+`assemble_criterion` raises, as for an unknown component or criterion
+id, `main` prints nothing to stdout, prints the one line
+`<criterion_id>: cannot build its bundle: <the exception's message>` to
+stderr, calls no model, writes nothing and returns `1`, never letting
+the exception escape (`D389`).
 
 A CLI test plants a `spec-bundle-assembler` stand-in at
 `<repo_root>/gen/spec-bundle-assembler/spec_bundle_assembler.py` whose

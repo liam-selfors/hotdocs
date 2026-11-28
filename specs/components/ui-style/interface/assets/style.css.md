@@ -7,6 +7,9 @@ token and class a page may rely on:
 --color-accent
 --color-bg
 --color-border
+--color-edge-depends-on
+--color-edge-other
+--color-edge-realizes
 --color-fail
 --color-focus
 --color-neutral
@@ -27,6 +30,9 @@ token and class a page may rely on:
 --text-lg
 --text-sm
 --text-xl
+.edge-depends-on
+.edge-other
+.edge-realizes
 .muted
 .node
 .tone-fail
