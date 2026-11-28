@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:7f14120c29ec51f4d32d8839910948e4272c9b957464a1e2b5c3da480b74abc1
+# hotdocs-criterion: sha256:6889625087b3bb779a92d23f9645d56b8b86918b10bb682dff6738e9c2395538
 import os
 import subprocess
 from pathlib import Path
@@ -10,81 +10,14 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-KIND_FAKE_SRC = (
-    "from pathlib import Path\n"
-    "\n"
-    "KIND = 'fake'\n"
-    "\n"
-    "\n"
-    "def asset_runner(asset_file):\n"
-    "    asset_file = Path(asset_file)\n"
-    "\n"
-    "    def run(entry, args):\n"
-    "        for line in asset_file.read_text().splitlines():\n"
-    "            if line.startswith(entry + '='):\n"
-    "                return int(line[len(entry) + 1:])\n"
-    "        raise KeyError(entry)\n"
-    "\n"
-    "    return run\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {'ok': True, 'reason': '', 'versions': {'fake': '1.0'}, 'lockfile_sha256': None}\n"
-)
-
-DRIVER_FAKE_SRC = (
-    "from pathlib import Path\n"
-    "\n"
-    "NAME = 'fake'\n"
-    "FIXTURE = 'fake_session'\n"
-    "\n"
-    "\n"
-    "def guidance():\n"
-    "    return {'test_author': 'Fake driver text.'}\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {'ok': True, 'reason': '', 'versions': {'fakedrv': '2.0'}, 'lockfile_sha256': None}\n"
-    "\n"
-    "\n"
-    "class _Session:\n"
-    "    def __init__(self, repo_root):\n"
-    "        self.value = 'open'\n"
-    "        self._log = Path(repo_root) / 'closed.log'\n"
-    "\n"
-    "    def close(self):\n"
-    "        with open(self._log, 'a') as f:\n"
-    "            f.write('closed\\n')\n"
-    "\n"
-    "\n"
-    "def open_session(repo_root, work_dir):\n"
-    "    return _Session(repo_root)\n"
-)
-
-EXPECTED_MESSAGE = (
-    "asset_runner: 'other.txt' is not a declared asset (declared: data/table.txt)"
-)
-
-INNER_TEST_SRC = (
-    "import pytest\n"
-    "\n"
-    "\n"
-    "def test_runs_asset_and_driver(asset_runner, fake_session):\n"
-    "    assert asset_runner('data/table.txt')('b', []) == 2\n"
-    "    assert fake_session.value == 'open'\n"
-    "\n"
-    "\n"
-    "def test_undeclared_asset(asset_runner):\n"
-    "    with pytest.raises(KeyError) as info:\n"
-    "        asset_runner('other.txt')\n"
-    "    assert info.value.args[0] == " + repr(EXPECTED_MESSAGE) + "\n"
-)
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
 
 
 def build_corpus(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "component.md").write_text(
+    write(
+        repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -96,66 +29,165 @@ def build_corpus(repo_root):
         "drivers: [fake]\n"
         "---\n"
         "\n"
-        "# Foo\n"
+        "# Foo\n",
     )
+    write(repo_root / "gen" / "foo" / "data" / "table.txt", "a=1\nb=2\n")
 
-    arch = repo_root / "specs" / "architecture"
-    arch.mkdir(parents=True)
-    (arch / "asset-kind-fake.md").write_text("# Fake kind\n\nAny text.\n")
+    write(
+        repo_root / "specs" / "architecture" / "asset-kind-fake.md",
+        "# Fake asset kind\n\nA fake kind for testing.\n",
+    )
+    kind_src = (
+        "from pathlib import Path\n"
+        "\n"
+        "KIND = " + repr("fake") + "\n"
+        "\n"
+        "\n"
+        "class AssetError(Exception):\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "def layout_errors(asset_file):\n"
+        "    return []\n"
+        "\n"
+        "\n"
+        "def surface(asset_file):\n"
+        "    return dict(names=[])\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return dict(ok=True, reason=" + repr("") + ", versions=dict(fake="
+        + repr("1.0") + "), lockfile_sha256=None, interpreter=None)\n"
+        "\n"
+        "\n"
+        "def guidance():\n"
+        "    return dict(generator=" + repr("Fake generator text.")
+        + ", test_author=" + repr("Fake kind text.") + ")\n"
+        "\n"
+        "\n"
+        "def asset_runner(asset_file):\n"
+        "    asset_file = Path(asset_file)\n"
+        "\n"
+        "    def run(entry, args):\n"
+        "        for line in asset_file.read_text().splitlines():\n"
+        "            prefix = entry + " + repr("=") + "\n"
+        "            if line.startswith(prefix):\n"
+        "                return int(line[len(prefix):])\n"
+        "        raise AssetError(" + repr("no such entry") + ")\n"
+        "\n"
+        "    return run\n"
+        "\n"
+        "\n"
+        "def strength_sites(asset_file):\n"
+        "    return []\n"
+        "\n"
+        "\n"
+        "def apply_site(asset_file, site):\n"
+        "    return None\n"
+    )
+    write(repo_root / "gen" / "kind-fake" / "kind_fake.py", kind_src)
 
-    kind_dir = repo_root / "gen" / "kind-fake"
-    kind_dir.mkdir(parents=True)
-    (kind_dir / "kind_fake.py").write_text(KIND_FAKE_SRC)
+    log_path = repo_root / "closed.log"
+    driver_src = (
+        "from pathlib import Path\n"
+        "\n"
+        "NAME = " + repr("fake") + "\n"
+        "FIXTURE = " + repr("fake_session") + "\n"
+        "\n"
+        "\n"
+        "def guidance():\n"
+        "    return dict(test_author=" + repr("Fake driver text.") + ")\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return dict(ok=True, reason=" + repr("") + ", versions=dict(fakedrv="
+        + repr("2.0") + "), lockfile_sha256=None)\n"
+        "\n"
+        "\n"
+        "class _Session:\n"
+        "    def __init__(self, repo_root):\n"
+        "        self.value = " + repr("open") + "\n"
+        "        self._repo_root = Path(repo_root)\n"
+        "\n"
+        "    def close(self):\n"
+        "        with open(self._repo_root / " + repr("closed.log") + ", "
+        + repr("a") + ") as handle:\n"
+        "            handle.write(" + repr("closed\n") + ")\n"
+        "\n"
+        "\n"
+        "def open_session(repo_root, work_dir):\n"
+        "    return _Session(repo_root)\n"
+    )
+    write(repo_root / "gen" / "driver-fake" / "driver_fake.py", driver_src)
+    return log_path
 
-    drv_dir = repo_root / "gen" / "driver-fake"
-    drv_dir.mkdir(parents=True)
-    (drv_dir / "driver_fake.py").write_text(DRIVER_FAKE_SRC)
 
-    data_dir = repo_root / "gen" / "foo" / "data"
-    data_dir.mkdir(parents=True)
-    (data_dir / "table.txt").write_text("a=1\nb=2\n")
+def build_test_file(repo_root):
+    expected = (
+        "asset_runner: 'other.txt' is not a declared asset "
+        "(declared: data/table.txt)"
+    )
+    src = (
+        "import pytest\n"
+        "\n"
+        "\n"
+        "def test_uses_asset_and_driver(asset_runner, fake_session):\n"
+        "    assert asset_runner(" + repr("data/table.txt") + ")("
+        + repr("b") + ", []) == 2\n"
+        "    assert fake_session.value == " + repr("open") + "\n"
+        "\n"
+        "\n"
+        "def test_undeclared_asset(asset_runner):\n"
+        "    with pytest.raises(KeyError) as info:\n"
+        "        asset_runner(" + repr("other.txt") + ")\n"
+        "    assert info.value.args[0] == " + repr(expected) + "\n"
+    )
+    path = repo_root / "usage_tests" / "test_usage.py"
+    write(path, src)
+    return path
 
 
 def test_ac_runenv_004(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_corpus(repo_root)
-
-    inner = repo_root / "test_inner.py"
-    inner.write_text(INNER_TEST_SRC)
+    log_path = build_corpus(repo_root)
+    test_file = build_test_file(repo_root)
 
     env_obj = run_environment.prepare("comp-foo", repo_root)
+    closed = False
     try:
         assert field(env_obj, "ok") is True, field(env_obj, "failure_message")
         plugin_dir = field(env_obj, "plugin_dir")
-        interpreter = field(env_obj, "interpreter")
         assert plugin_dir is not None
-        assert interpreter is not None
+        assert Path(plugin_dir).is_dir()
+        interpreter = field(env_obj, "interpreter")
+        assert interpreter
 
-        env = dict(os.environ)
-        env.pop("PYTEST_ADDOPTS", None)
-        env.pop("PYTEST_PLUGINS", None)
-        env["PYTHONPATH"] = str(plugin_dir)
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        env.update(env_obj.env_for(repo_root / "gen" / "foo"))
+        run_env = dict(os.environ)
+        run_env.pop("PYTEST_ADDOPTS", None)
+        run_env["PYTHONPATH"] = str(plugin_dir)
+        run_env["PYTHONDONTWRITEBYTECODE"] = "1"
+        run_env.update(env_obj.env_for(repo_root / "gen" / "foo"))
 
-        cmd = [str(interpreter), "-m", "pytest"]
+        cmd = [str(interpreter), "-m", "pytest", "-q"]
         cmd += list(env_obj.pytest_args())
-        cmd += ["-p", "no:cacheprovider", str(inner)]
+        cmd += [str(test_file)]
         proc = subprocess.run(
             cmd,
             cwd=str(repo_root),
-            env=env,
+            env=run_env,
             capture_output=True,
             text=True,
             timeout=300,
         )
         assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
 
-        log = repo_root / "closed.log"
-        assert log.is_file()
-        assert log.read_text().splitlines() == ["closed"]
-    finally:
-        env_obj.close()
+        assert log_path.is_file()
+        assert log_path.read_text().splitlines() == ["closed"]
 
-    assert not Path(plugin_dir).exists()
+        env_obj.close()
+        closed = True
+        assert not Path(plugin_dir).exists()
+    finally:
+        if not closed:
+            env_obj.close()
