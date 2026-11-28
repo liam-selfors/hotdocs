@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:10d2df85cf858cf3a1306778d2186083544e2feb244cad0ff8e86038b3eafc6f",
+  "spec_bundle_hash": "sha256:be7df964d86c0e807f7d351e889b6296a9ff1eddc25f6ea5ed4492c9e6e5d4e5",
   "spec_bundle_parts": {
-    "spec": "sha256:63cb4125040cb6e4aaafdc191fd7f06f52b174ba40712e7c5e81544ea695a4ce",
-    "dependency_code": "sha256:1a57dddb2c4f7e43aaea6e43e5fe3493ac3e6cbb22a6985fe4a5d638d17cd375"
+    "spec": "sha256:c124c27731ec36b2decef7c4f2a35ef9ac754c41534496299525b803ac2c1046",
+    "dependency_code": "sha256:88d9908181b0f96758a9658f38057211840e00130fdc90978a1b1314fd3fb0c7"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-28T17:03:51Z",
+  "generated_at": "2026-11-28T21:27:01Z",
   "verification_run_id": "component-gate-runner-attempt-1",
   "verification_report": {
     "component_id": "comp-component-gate-runner",
@@ -36,7 +36,13 @@
         "id": "AC-GATE-001",
         "covers": "R-GATE-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-GATE-002a",
@@ -121,6 +127,12 @@
         "covers": "R-GATE-012",
         "kind": "generated-test",
         "result": "pass"
+      },
+      {
+        "id": "AC-GATE-013",
+        "covers": "R-GATE-011",
+        "kind": "generated-test",
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -138,7 +150,7 @@
       "R-GATE-012": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8333333333333334,
+    "mutation_score": 0.8245614035087719,
     "mutation_error": null,
     "assets": [
       {
