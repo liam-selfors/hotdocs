@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:4f0d64d023519e1dc8df62351844ff97715064ad00ba58bde13dd61345104abe
+# hotdocs-criterion: sha256:6561f774dda03494648589f527a03f898a51f177e8c04170ea4970f4e79e7a92
 import re
 from pathlib import Path
 
@@ -9,27 +9,20 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-MESSAGE_RE = re.compile(
-    r"^big: (\w+) is (\d+), above the (warn|fail) threshold of (\d+) "
-    r"\(specs/architecture/size-caps\.md\)$"
-)
-
-
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root):
+def build_fixture(repo_root):
     specs = repo_root / "specs"
-    comp = specs / "components" / "big"
-
-    _write(
+    write(
         specs / "glossary.md",
-        "# Glossary\n\n- **Widget** — a small thing.\n",
+        "# Glossary\n\n- **Widget** — a small thing used in tests.\n",
     )
 
-    _write(
+    comp = specs / "components" / "big"
+    write(
         comp / "component.md",
         "---\n"
         "id: comp-big\n"
@@ -45,18 +38,18 @@ def _build_fixture(repo_root):
         "\n"
         "## Purpose\n"
         "\n"
-        "A big component used for size checking.\n",
+        "A deliberately large component used to exercise size caps.\n",
     )
 
     for i in range(1, 22):
         rid = "R-BIG-" + str(i).zfill(3)
-        _write(
+        write(
             comp / "requirements" / (rid + ".md"),
             "# " + rid + "\n\n**" + rid + "** — The component MUST do thing "
             + str(i) + ".\n",
         )
 
-    _write(
+    write(
         comp / "acceptance" / "AC-BIG-001.md",
         "# AC-BIG-001\n"
         "\n"
@@ -66,58 +59,75 @@ def _build_fixture(repo_root):
         "```gherkin\n"
         "Given a thing\n"
         "When it runs\n"
-        "Then it works\n"
+        "Then it does thing 1\n"
         "```\n",
     )
 
-    words = []
-    for i in range(8100):
-        words.append("prose" + str(i % 50))
-    lines = []
-    for start in range(0, len(words), 10):
-        lines.append(" ".join(words[start:start + 10]))
-    _write(
+    # 8100 words of prose, no fenced block
+    prose_lines = []
+    for _ in range(810):
+        prose_lines.append(" ".join(["lorem"] * 10))
+    write(
         comp / "interface" / "library.md",
-        "# Library\n\n" + "\n".join(lines) + "\n",
+        "# Library\n\n" + "\n".join(prose_lines) + "\n",
     )
 
+    # 801 code lines, 40 comment lines (after leading spaces), 40 blank lines
     code_lines = []
     for i in range(801):
-        code_lines.append("x_" + str(i) + " = " + str(i))
+        code_lines.append("v" + str(i) + " = " + str(i))
     for i in range(40):
         code_lines.append("    # comment " + str(i))
-    for i in range(40):
+    for _ in range(40):
         code_lines.append("")
-    _write(repo_root / "gen" / "big" / "big.py", "\n".join(code_lines) + "\n")
+    write(repo_root / "gen" / "big" / "big.py", "\n".join(code_lines) + "\n")
 
 
-def test_ac_size_008_big_component_warns_on_four_dimensions(tmp_path):
+def test_ac_size_008(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_fixture(repo_root)
+    build_fixture(repo_root)
 
     findings = size_checker.check(repo_root)
 
-    size_001 = [f for f in findings if field(f, "rule_id") == "R-SIZE-001"]
-    big_findings = [
-        f for f in size_001 if str(field(f, "message")).startswith("big: ")
-    ]
+    size001 = [f for f in findings if field(f, "rule_id") == "R-SIZE-001"]
+    big = [f for f in size001 if str(field(f, "message")).startswith("big: ")]
 
-    fails = [f for f in big_findings if field(f, "severity") == "fail"]
-    assert fails == [], "unexpected fail R-SIZE-001 findings: " + repr(fails)
+    fails = [f for f in big if field(f, "severity") == "fail"]
+    assert fails == [], fails
 
-    values = {}
-    for f in big_findings:
-        assert field(f, "severity") == "warn"
-        match = MESSAGE_RE.match(field(f, "message"))
-        assert match is not None, "unexpected message: " + repr(field(f, "message"))
-        dimension, value, severity, _limit = match.groups()
-        assert severity == "warn"
-        values[dimension] = int(value)
+    warns = [f for f in big if field(f, "severity") == "warn"]
+    messages = [field(f, "message") for f in warns]
 
-    assert values.get("requirement_count") == 21, repr(values)
-    assert values.get("generated_code_loc") == 801, repr(values)
-    assert "generator_words" in values, repr(values)
-    assert values["generator_words"] > 8000
-    assert "criterion_words_max" in values, repr(values)
-    assert values["criterion_words_max"] > 6000
+    assert (
+        "big: requirement_count is 21, above the warn threshold of 20 "
+        "(specs/architecture/size-caps.md)"
+    ) in messages, messages
+    assert (
+        "big: generated_code_loc is 801, above the warn threshold of 800 "
+        "(specs/architecture/size-caps.md)"
+    ) in messages, messages
+
+    def value_for(dimension, limit):
+        pattern = re.compile(
+            r"^big: " + re.escape(dimension)
+            + r" is (\d+), above the warn threshold of "
+            + re.escape(str(limit))
+            + r" \(specs/architecture/size-caps\.md\)$"
+        )
+        for m in messages:
+            match = pattern.match(m)
+            if match:
+                return int(match.group(1))
+        return None
+
+    gw = value_for("generator_words", 8000)
+    assert gw is not None, messages
+    assert gw > 8000
+
+    cw = value_for("criterion_words_max", 6000)
+    assert cw is not None, messages
+    assert cw > 6000
+
+    for f in warns:
+        assert isinstance(field(f, "line"), int)
