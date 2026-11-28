@@ -182,6 +182,17 @@ def _provided(module_name: str, code_dir: Path, names) -> set[str] | None:
     return set(__import__("json").loads(proc.stdout.strip().splitlines()[-1]))
 
 
+def _documented_interface(dep: str) -> str | None:
+    """The text a dependency documents as its interface: every .md file under
+    its own interface/, never the Implements: documents, whose names are
+    conventions each implementer carries itself; None when it has no
+    interface files (R-SURF-002)."""
+    files = sorted((REAL_REPO / "specs" / "components" / dep / "interface").rglob("*.md"))
+    if not files:
+        return None
+    return "\n".join(f.read_text(encoding="utf-8") for f in files)
+
+
 def _dependency_surface_ok(component_id: str, code_dir: Path) -> bool:
     """The reverse of _consumer_surface_ok: every `<dep>.<name>` the
     candidate uses must exist in that dependency's real code (D288)."""
@@ -197,9 +208,16 @@ def _dependency_surface_ok(component_id: str, code_dir: Path) -> bool:
         have = _provided(dep.replace("-", "_"), dep_dir, used)
         if have is None:
             continue
+        documented = _documented_interface(dep)
         for name in used:
             if name not in have:
                 print(f"dependency surface: {dep} has no {name}, which the candidate uses")
+                ok = False
+            elif documented is not None and not re.search(r"\b%s\b" % re.escape(name), documented):
+                # R-SURF-002's dependency_undocumented (D393): a helper seen in
+                # the dependency's code is not its interface, and a stand-in
+                # built from that interface will not have it.
+                print(f"dependency surface: {dep} does not document {name}, which the candidate uses")
                 ok = False
     if ok:
         print("dependency surface: ok")
