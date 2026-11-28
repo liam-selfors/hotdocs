@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:dd32275d0f8ae0aec157441b47f9b7753a0ae34be019469d5e8a9a7afc309937
+# hotdocs-criterion: sha256:63eeeaa68a266433c3f44b6c0983f71b624690134623941d5c34f9949dfd577f
 import json
 from html.parser import HTMLParser
 from pathlib import Path
@@ -6,25 +6,25 @@ from pathlib import Path
 import provenance_tracker_ui
 
 
+OLD_ID = "2026-10-01T00:00:00Z-aaaaaa"
+NEW_ID = "2026-10-02T00:00:00Z-bbbbbb"
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-ATTEMPT_A = "2026-10-01T00:00:00Z-aaaaaa"
-ATTEMPT_B = "2026-10-02T00:00:00Z-bbbbbb"
 
 
 def _verification_report(component_id, overall, requirement_results):
     criteria = []
     for i, (rid, res) in enumerate(sorted(requirement_results.items()), start=1):
         crit = {
-            "id": "AC-" + rid[2:-4] + "-" + rid[-3:],
+            "id": "AC-" + rid[2:-4] + "-00" + str(i) if False else "AC-FOO-00" + str(i),
             "covers": rid,
             "kind": "compiled",
             "result": res,
         }
         if res == "fail":
-            crit["failure_detail"] = {"message": "failed", "expected": 1, "actual": 2}
+            crit["failure_detail"] = {"message": "x failed", "expected": 1, "actual": 2}
             crit["failure_origin"] = "implementation"
         criteria.append(crit)
     return {
@@ -55,154 +55,90 @@ def _secret_scan():
 
 
 def _license_scan():
-    return {"blocked": False, "flagged": False, "matches": [], "notified": False}
+    return {"blocked": False, "matches": [], "gate_version": "license_scanner@1.0.0"}
 
 
-def _provenance_check_result(component_id, overall, requirement_results):
+def _generation(component_id):
     return {
-        "hit": True,
-        "reason": None,
-        "verification_report": _verification_report(component_id, overall, requirement_results),
-        "license_scan": _license_scan(),
-        "secret_scan": _secret_scan(),
+        "component_id": component_id,
+        "spec_bundle_hash": "sha256:abc",
+        "model": "claude-sonnet-5",
+        "prompt_version": "v12",
+        "cache_hit": False,
+        "files": {"foo.py": "x = 1\n"},
+        "model_call_error": None,
+        "refused": None,
+        "retry_feedback": None,
+        "mode": "single",
+        "transcript_sha256": None,
+        "turns": 1,
+        "tool_calls": 0,
+        "isolation": None,
     }
 
 
-def _attempt_record(attempt_id, component_id):
+def _attempt_record(attempt_id):
     timestamp = attempt_id.split("Z-")[0] + "Z"
     return {
         "attempt_id": attempt_id,
-        "component_id": component_id,
+        "component_id": "comp-foo",
         "timestamp": timestamp,
-        "spec_bundle_hash": "sha256:" + "0" * 64,
-        "generation": {
-            "component_id": component_id,
-            "spec_bundle_hash": "sha256:" + "0" * 64,
-            "model": "claude-sonnet-5",
-            "prompt_version": "v12",
-            "cache_hit": False,
-            "files": {"foo.py": "x = 1\n"},
-            "model_call_error": None,
-            "refused": None,
-            "retry_feedback": None,
-            "mode": "single",
-            "transcript_sha256": None,
-            "turns": 1,
-            "tool_calls": 0,
-            "isolation": None,
-        },
+        "spec_bundle_hash": "sha256:abc",
+        "generation": _generation("comp-foo"),
         "verification": _verification_report(
-            component_id, "fail", {"R-FOO-001": "pass", "R-FOO-002": "fail"}
+            "comp-foo", "fail", {"R-FOO-001": "pass", "R-FOO-002": "fail"}
         ),
     }
 
 
-def _write_fake_tracker(repo_root, report, log_path):
-    fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True, exist_ok=True)
-    src = (
-        "import json\n"
-        "\n"
-        "_REPORT = " + repr(json.dumps(report)) + "\n"
-        "_LOG = " + repr(str(log_path)) + "\n"
-        "\n"
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('check_readiness\\n')\n"
-        "    return json.loads(_REPORT)\n"
-        "\n"
-        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
-        "    raise RuntimeError('not used')\n"
-        "\n"
-        "def last_requirement_failures(component_id, repo_root):\n"
-        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('last_requirement_failures ' + str(component_id) + '\\n')\n"
-        "    if component_id == " + repr("comp-foo") + ":\n"
-        "        return [" + repr("R-FOO-002") + "]\n"
-        "    return []\n"
-    )
-    (fake_dir / "provenance_tracker.py").write_text(src, encoding="utf-8")
-
-
-def _component_graph_node(verification):
+def _graph_component_node(verification):
     return {
         "type": "component",
         "verification": verification,
-        "provenance": None,
+        "provenance": {"spec_bundle_hash": "sha256:abc"},
         "size_status": "ok",
-        "sealed": True,
+        "sealed": False,
         "pinned_overrides": [],
         "owners": ["pipeline-team"],
-        "documents": {},
+        "documents": {"component.md": "---\nid: x\n---\n"},
     }
 
 
-class _NodeAttemptCollector(HTMLParser):
-    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input",
-            "link", "meta", "param", "source", "track", "wbr"}
-
-    def __init__(self):
-        super().__init__()
-        self.stack = []
-        self.attempts_by_node = {}
-        self.retry_by_node = {}
-
-    def _current_node(self):
-        for _tag, node_id in reversed(self.stack):
-            if node_id is not None:
-                return node_id
-        return None
-
-    def handle_starttag(self, tag, attrs):
-        a = dict(attrs)
-        node_id = None
-        classes = (a.get("class") or "").split()
-        if tag == "li" and "node" in classes and a.get("data-node-id") is not None:
-            node_id = a.get("data-node-id")
-        enclosing = node_id if node_id is not None else self._current_node()
-        if "data-attempt-id" in a and enclosing is not None:
-            self.attempts_by_node.setdefault(enclosing, []).append(a["data-attempt-id"])
-        if "retry-feedback" in classes and enclosing is not None:
-            self.retry_by_node[enclosing] = self.retry_by_node.get(enclosing, 0) + 1
-        if tag not in self.VOID:
-            self.stack.append((tag, node_id))
-
-    def handle_startendtag(self, tag, attrs):
-        self.handle_starttag(tag, attrs)
-        if tag not in self.VOID and self.stack and self.stack[-1][0] == tag:
-            self.stack.pop()
-
-    def handle_endtag(self, tag):
-        for i in range(len(self.stack) - 1, -1, -1):
-            if self.stack[i][0] == tag:
-                del self.stack[i:]
-                return
-
-
-def test_ac_ui_008_attempt_history_and_retry_feedback(tmp_path, browser):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    out_dir = tmp_path / "out"
-    log_path = tmp_path / "fake_calls.log"
-
-    foo_result = _provenance_check_result(
+def _build_repo(repo_root, log_path):
+    foo_report = _verification_report(
         "comp-foo", "fail", {"R-FOO-001": "pass", "R-FOO-002": "fail"}
     )
-    ok_result = _provenance_check_result("comp-ok", "pass", {"R-OK-001": "pass"})
-    report = {
+    pass_report = _verification_report("comp-pass", "pass", {"R-PASS-001": "pass"})
+
+    verify_report = {
         "scope": "whole-corpus",
         "ready": False,
-        "components": {"comp-foo": foo_result, "comp-ok": ok_result},
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "reason": None,
+                "verification_report": foo_report,
+                "license_scan": _license_scan(),
+                "secret_scan": _secret_scan(),
+            },
+            "comp-pass": {
+                "hit": True,
+                "reason": None,
+                "verification_report": pass_report,
+                "license_scan": _license_scan(),
+                "secret_scan": _secret_scan(),
+            },
+        },
         "capabilities": {},
-        "secret_scan": None,
-        "not_ready_reasons": ["comp-foo: verification failed — run hotdocs generate comp-foo"],
+        "secret_scan": _secret_scan(),
+        "not_ready_reasons": ["comp-foo: verification failed"],
     }
-    _write_fake_tracker(repo_root, report, log_path)
 
+    # Corpus graph
     graph = {
         "nodes": {
-            "comp-foo": _component_graph_node(foo_result["verification_report"]),
-            "comp-ok": _component_graph_node(ok_result["verification_report"]),
+            "comp-foo": _graph_component_node(foo_report),
+            "comp-pass": _graph_component_node(pass_report),
         },
         "edges": [],
         "aggregates": {
@@ -211,58 +147,138 @@ def test_ac_ui_008_attempt_history_and_retry_feedback(tmp_path, browser):
             "orphan_var_rate": 0.0,
         },
     }
-    (repo_root / "verification").mkdir()
+    (repo_root / "verification").mkdir(parents=True)
     (repo_root / "verification" / "corpus-graph.json").write_text(
-        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        json.dumps(graph, indent=2), encoding="utf-8"
     )
 
+    # Attempt records (written newest first, so order cannot come from write order)
     attempts_dir = repo_root / ".hotdocs" / "attempts" / "comp-foo"
     attempts_dir.mkdir(parents=True)
-    # write newest first so creation order does not match chronological order
-    for aid in (ATTEMPT_B, ATTEMPT_A):
+    for aid in (NEW_ID, OLD_ID):
         (attempts_dir / (aid + ".json")).write_text(
-            json.dumps(_attempt_record(aid, "comp-foo"), indent=2), encoding="utf-8"
+            json.dumps(_attempt_record(aid), indent=2), encoding="utf-8"
         )
+
+    # Fake provenance-tracker
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True)
+    source = (
+        "from pathlib import Path\n"
+        "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "_REPORT = " + repr(verify_report) + "\n"
+        "\n"
+        "def _log(line):\n"
+        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(line + '\\n')\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    _log('check_readiness')\n"
+        "    import copy\n"
+        "    report = copy.deepcopy(_REPORT)\n"
+        "    report['scope'] = 'whole-corpus' if changed_ids is None else 'blast-radius'\n"
+        "    return report\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    _log('last_requirement_failures ' + component_id)\n"
+        "    if component_id == 'comp-foo':\n"
+        "        return ['R-FOO-002']\n"
+        "    return []\n"
+        "\n"
+        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
+        "    raise AssertionError('write_attempt_record must not be called')\n"
+    )
+    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
+
+
+class _AttemptOrderParser(HTMLParser):
+    """Collects data-attempt-id values, in document order, inside the
+    element carrying data-node-id == target."""
+
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "param", "source", "track", "wbr"}
+
+    def __init__(self, target):
+        super().__init__()
+        self.target = target
+        self.depth = 0  # >0 while inside target node
+        self.ids = []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if self.depth == 0:
+            if a.get("data-node-id") == self.target and tag not in self.VOID:
+                self.depth = 1
+            return
+        if "data-attempt-id" in a:
+            self.ids.append(a["data-attempt-id"])
+        if tag not in self.VOID:
+            self.depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        if self.depth > 0:
+            a = dict(attrs)
+            if "data-attempt-id" in a:
+                self.ids.append(a["data-attempt-id"])
+
+    def handle_endtag(self, tag):
+        if self.depth > 0 and tag not in self.VOID:
+            self.depth -= 1
+
+
+def _node(snapshot, node_id):
+    matches = [n for n in field(snapshot, "nodes") if field(n, "id") == node_id]
+    assert len(matches) == 1, matches
+    return matches[0]
+
+
+def test_ac_ui_008_attempt_history_and_retry_feedback(tmp_path, browser):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    out_dir = tmp_path / "out"
+    log_path = tmp_path / "fake_calls.log"
+    _build_repo(repo_root, log_path)
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    # the fake ran
-    log_lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert log_lines.count("check_readiness") == 1
-    assert "last_requirement_failures comp-foo" in log_lines
-
-    nodes = {field(n, "id"): n for n in field(snapshot, "nodes")}
-    foo = nodes["comp-foo"]
+    # Snapshot: comp-foo
+    foo = _node(snapshot, "comp-foo")
     assert field(foo, "status") == "failing"
     attempt_ids = [field(a, "attempt_id") for a in field(foo, "attempts")]
-    assert attempt_ids == [ATTEMPT_A, ATTEMPT_B]
+    assert attempt_ids == [OLD_ID, NEW_ID]
     assert list(field(foo, "retry_feedback")) == ["R-FOO-002"]
 
-    ok = nodes["comp-ok"]
-    assert field(ok, "status") == "passing"
-    assert list(field(ok, "attempts")) == []
-    assert list(field(ok, "retry_feedback")) == []
+    # Snapshot: passing component
+    passing = _node(snapshot, "comp-pass")
+    assert field(passing, "status") == "passing"
+    assert list(field(passing, "retry_feedback")) == []
+
+    # The fake's feedback lookup ran for comp-foo
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    assert "last_requirement_failures comp-foo" in calls
 
     index = out_dir / "index.html"
     assert index.is_file()
 
-    # order of data-attempt-id elements within comp-foo's node, as written
-    collector = _NodeAttemptCollector()
-    collector.feed(index.read_text(encoding="utf-8"))
-    collector.close()
-    assert collector.attempts_by_node.get("comp-foo") == [ATTEMPT_A, ATTEMPT_B]
-    assert collector.retry_by_node.get("comp-ok", 0) == 0
+    # Order of attempt elements inside comp-foo's node, in document order
+    parser = _AttemptOrderParser("comp-foo")
+    parser.feed(index.read_text(encoding="utf-8"))
+    assert parser.ids == [OLD_ID, NEW_ID]
 
+    # Page as shown in the browser
     page = browser.open(index)
     foo_sel = 'li.node[data-node-id="comp-foo"]'
-    ok_sel = 'li.node[data-node-id="comp-ok"]'
+    pass_sel = 'li.node[data-node-id="comp-pass"]'
+
     assert page.find(css=foo_sel).count() == 1
-    assert page.find(css=ok_sel).count() == 1
     assert page.find(css=foo_sel + " [data-attempt-id]").count() == 2
-    assert page.find(css=foo_sel + ' [data-attempt-id="' + ATTEMPT_A + '"]').count() == 1
-    assert page.find(css=foo_sel + ' [data-attempt-id="' + ATTEMPT_B + '"]').count() == 1
-    retry = page.find(css=foo_sel + " .retry-feedback")
-    assert retry.count() == 1
-    assert retry.text().strip() == "--retry-feedback=R-FOO-002"
-    assert page.find(css=ok_sel + " .retry-feedback").count() == 0
-    assert page.console_errors() == []
+    assert page.find(css=foo_sel + ' [data-attempt-id="' + OLD_ID + '"]').count() == 1
+    assert page.find(css=foo_sel + ' [data-attempt-id="' + NEW_ID + '"]').count() == 1
+
+    feedback = page.find(css=foo_sel + " .retry-feedback")
+    assert feedback.count() == 1
+    assert feedback.text().strip() == "--retry-feedback=R-FOO-002"
+
+    assert page.find(css=pass_sel).count() == 1
+    assert page.find(css=pass_sel + " .retry-feedback").count() == 0

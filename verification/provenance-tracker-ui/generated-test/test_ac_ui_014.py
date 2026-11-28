@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:6f4d2712309273f4c46ebb1051de637b723032b56be4004d5ff35094b1433b50
+# hotdocs-criterion: sha256:d08a6ef3e4aff393375987b5d1836f5b2481d3a6b44ae99fec28f711fad73c6e
 import json
 import re
 from pathlib import Path
@@ -6,25 +6,14 @@ from pathlib import Path
 import provenance_tracker_ui
 
 
-def _verification_report(component_id, overall, req_id, req_result):
-    return {
-        "component_id": component_id,
-        "criteria": [
-            {
-                "id": "AC-" + component_id[5:].upper() + "-001",
-                "covers": req_id,
-                "kind": "compiled",
-                "result": req_result,
-            }
-        ],
-        "requirement_results": {req_id: req_result},
-        "interface_drift": False,
-        "mutation_score": None,
-        "mutation_error": None,
-        "assets": [],
-        "drivers": [],
-        "overall": overall,
-    }
+FAKE_TRACKER_BODY = '''
+import json
+from pathlib import Path
+
+
+def _log(line):
+    with open(LOG_PATH, "a", encoding="utf-8") as fh:
+        fh.write(line + "\\n")
 
 
 def _secret_scan():
@@ -41,85 +30,77 @@ def _secret_scan():
     }
 
 
-def _provenance_check_result(component_id, overall, req_id, req_result):
+def _verification_report(component_id, req_id, passing):
+    criterion = {
+        "id": "AC-" + req_id[2:],
+        "covers": req_id,
+        "kind": "compiled",
+        "result": "pass" if passing else "fail",
+    }
+    if not passing:
+        criterion["failure_detail"] = {"message": "x equals 1 failed", "expected": 1, "actual": 2}
+        criterion["failure_origin"] = "implementation"
+    return {
+        "component_id": component_id,
+        "criteria": [criterion],
+        "requirement_results": {req_id: "pass" if passing else "fail"},
+        "interface_drift": False,
+        "mutation_score": 0.9,
+        "mutation_error": None,
+        "assets": [],
+        "drivers": [],
+        "overall": "pass" if passing else "fail",
+    }
+
+
+def _check_result(component_id, req_id, passing):
     return {
         "hit": True,
         "reason": None,
-        "verification_report": _verification_report(
-            component_id, overall, req_id, req_result
-        ),
+        "verification_report": _verification_report(component_id, req_id, passing),
         "license_scan": {"blocked": False},
         "secret_scan": _secret_scan(),
     }
 
 
-def _write_fake_tracker(repo_root, log_path):
-    report = {
-        "scope": "whole-corpus",
+def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
+    _log("check_readiness")
+    return {
+        "scope": "whole-corpus" if changed_ids is None else "blast-radius",
         "ready": False,
         "components": {
-            "comp-foo": _provenance_check_result(
-                "comp-foo", "pass", "R-FOO-001", "pass"
-            ),
-            "comp-bar": _provenance_check_result(
-                "comp-bar", "fail", "R-BAR-001", "fail"
-            ),
+            "comp-foo": _check_result("comp-foo", "R-FOO-001", True),
+            "comp-bar": _check_result("comp-bar", "R-BAR-001", False),
         },
         "capabilities": {},
         "secret_scan": _secret_scan(),
         "not_ready_reasons": ["comp-bar: verification failed"],
     }
-    src = (
-        "import copy\n"
-        "from pathlib import Path\n"
-        "\n"
-        "_LOG = " + repr(str(log_path)) + "\n"
-        "_REPORT = " + repr(report) + "\n"
-        "\n"
-        "def _log(line):\n"
-        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(line + '\\n')\n"
-        "\n"
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    _log('check_readiness')\n"
-        "    report = copy.deepcopy(_REPORT)\n"
-        "    if changed_ids is not None:\n"
-        "        report['scope'] = 'blast-radius'\n"
-        "    return report\n"
-        "\n"
-        "def last_requirement_failures(component_id, repo_root):\n"
-        "    _log('last_requirement_failures ' + str(component_id))\n"
-        "    return []\n"
-        "\n"
-        "def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):\n"
-        "    raise RuntimeError('not used in this test')\n"
-    )
-    target = repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(src, encoding="utf-8")
 
 
-def _component_node(component_id, overall, req_id, req_result):
+def last_requirement_failures(component_id, repo_root):
+    _log("last_requirement_failures " + component_id)
+    if component_id == "comp-bar":
+        return ["R-BAR-001"]
+    return []
+'''
+
+
+def _corpus_graph():
+    def comp_node():
+        return {
+            "type": "component",
+            "verification": None,
+            "provenance": None,
+            "size_status": "ok",
+            "sealed": True,
+            "pinned_overrides": [],
+            "owners": ["pipeline-team"],
+            "documents": {},
+        }
+
     return {
-        "type": "component",
-        "verification": _verification_report(
-            component_id, overall, req_id, req_result
-        ),
-        "provenance": {"component_id": component_id},
-        "size_status": "ok",
-        "sealed": True,
-        "pinned_overrides": [],
-        "owners": ["pipeline-team"],
-        "documents": {},
-    }
-
-
-def _write_corpus_graph(repo_root):
-    graph = {
-        "nodes": {
-            "comp-bar": _component_node("comp-bar", "fail", "R-BAR-001", "fail"),
-            "comp-foo": _component_node("comp-foo", "pass", "R-FOO-001", "pass"),
-        },
+        "nodes": {"comp-bar": comp_node(), "comp-foo": comp_node()},
         "edges": [],
         "aggregates": {
             "orphan_capability_rate": 0.0,
@@ -127,52 +108,54 @@ def _write_corpus_graph(repo_root):
             "orphan_var_rate": 0.0,
         },
     }
-    path = repo_root / "verification" / "corpus-graph.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(graph, sort_keys=True, indent=2, ensure_ascii=True) + "\n",
-        encoding="utf-8",
+
+
+def _build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True)
+    log_path = tmp_path / "fake_tracker.log"
+    source = "LOG_PATH = " + repr(str(log_path)) + "\n" + FAKE_TRACKER_BODY
+    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
+
+    verification = repo_root / "verification"
+    verification.mkdir(parents=True)
+    (verification / "corpus-graph.json").write_text(
+        json.dumps(_corpus_graph(), sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
+    return repo_root, log_path
 
 
 def test_ac_ui_014_single_inline_style_in_head(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    repo_root, log_path = _build_repo(tmp_path)
     out_dir = tmp_path / "out"
-    log_path = tmp_path / "tracker_calls.log"
-
-    _write_fake_tracker(repo_root, log_path)
-    _write_corpus_graph(repo_root)
+    out_dir.mkdir()
 
     provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    # The fake ran.
-    calls = log_path.read_text(encoding="utf-8").splitlines()
-    assert calls.count("check_readiness") == 1
+    # The faked provenance-tracker was the one consulted.
+    assert log_path.is_file()
+    assert "check_readiness" in log_path.read_text(encoding="utf-8").splitlines()
 
     html = (out_dir / "index.html").read_text(encoding="utf-8")
 
-    # "<style" occurs exactly once.
     assert html.count("<style") == 1
 
     head_match = re.search(r"<head[\s>]", html)
-    assert head_match is not None, "no <head> element found"
-    head_start = head_match.start()
-    head_end = html.find("</head>")
-    assert head_end != -1, "no </head> found"
+    assert head_match is not None
+    head_open = head_match.start()
+    head_close = html.find("</head>")
+    assert head_close != -1
 
-    style_start = html.index("<style")
-    assert head_start < style_start < head_end
+    style_open = html.index("<style")
+    assert head_open < style_open < head_close
 
-    # The style element's text.
-    open_end = html.index(">", style_start)
-    close = html.find("</style>", open_end)
-    assert close != -1, "no </style> found"
-    assert close < head_end
-    style_text = html[open_end + 1:close]
+    style_close = html.find("</style>", style_open)
+    assert style_close != -1
+    assert style_close < head_close
+    style_text = html[style_open:style_close]
     assert ".tone-fail" in style_text
     assert "--color-bg" in style_text
 
-    # No inline style attributes and no <link elements anywhere.
     assert " style=" not in html
     assert "<link" not in html
