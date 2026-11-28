@@ -10,3 +10,7 @@
   `load_corpus`'s `graph` connection, `SELECT component_id,
   generator_words, criterion_words_max FROM bundle_size`, `component_id`
   being the bare slug, never recomputed independently, so one definition serves every reader.
+  A component whose `root` is `None` (its directory has no
+  `component.md`, which `R-LINT-037` reports) is skipped by every
+  `R-SIZE-` rule: no dimension is computed for it and no finding
+  names it, and `check` never raises on it.

@@ -20,5 +20,5 @@ summary line `<n> criteria checked, <f> findings, <g> gaps`.
 | Code | Meaning |
 | --- | --- |
 | `0` | The check ran. Findings and gaps are advisory and do not change the code unless `--strict` is given. |
-| `1` | A lint finding of `fail` severity in a named component, so criteria could not be checked; or, with `--strict`, any finding or gap. |
+| `1` | A lint finding of `fail` severity in a named component, or a `bundle_unavailable` finding (`R-REVIEW-009`), so criteria could not be checked; or, with `--strict`, any finding or gap. |
 | `2` | Usage error, including an unknown target id, per `specs/architecture/cli-conventions.md`. |
