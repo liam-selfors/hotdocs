@@ -1,4 +1,7 @@
-# hotdocs-criterion: sha256:3888aa6232055c60654ad5d5eb1036e108979b79545fc8157c6163a430822850
+# hotdocs-criterion: sha256:388f1a87ce641c0af330c0f01e07fc1da6451eb5b55379eb3ccbe9930c01ae86
+"""AC-SURF-002: dependency names are read from the syntax tree and checked
+against the dependency's real module."""
+
 from pathlib import Path
 
 import surface_checker
@@ -8,68 +11,70 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PYTHON_ADAPTER = (
-    "import sys\n"
-    "from pathlib import Path\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,\n"
-    "            \"interpreter\": sys.executable}\n"
-)
+PYTHON_ADAPTER = "\n".join([
+    "import sys",
+    "from pathlib import Path",
+    "",
+    "",
+    "def provision(repo_root):",
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,",
+    "            \"interpreter\": sys.executable}",
+    "",
+])
 
-BAR_ONE = (
-    "def fetch_one(x):\n"
-    "    return x\n"
-)
+BAR_ONE = "\n".join([
+    "def fetch_one(x):",
+    "    return {\"id\": x}",
+    "",
+])
 
-BAR_BOTH = (
-    "def fetch_one(x):\n"
-    "    return x\n"
-    "\n"
-    "\n"
-    "def fetch_all():\n"
-    "    return []\n"
-)
+BAR_BOTH = "\n".join([
+    "def fetch_one(x):",
+    "    return {\"id\": x}",
+    "",
+    "",
+    "def fetch_all():",
+    "    return []",
+    "",
+])
 
-WIDGET_LOADER = (
-    "import importlib.util\n"
-    "from pathlib import Path\n"
-    "\n"
-    "\n"
-    "def _load_dep(repo_root, slug):\n"
-    "    path = Path(repo_root) / \"gen\" / slug / (slug + \".py\")\n"
-    "    spec = importlib.util.spec_from_file_location(slug, str(path))\n"
-    "    module = importlib.util.module_from_spec(spec)\n"
-    "    spec.loader.exec_module(module)\n"
-    "    return module\n"
-    "\n"
-    "\n"
-    "def run(repo_root):\n"
-    "    bar_mod = _load_dep(repo_root, 'bar')\n"
-    "    first = bar_mod.fetch_one(1)\n"
-    "    rest = bar_mod.fetch_all()\n"
-    "    return first, rest, bar_mod.__name__\n"
-)
+WIDGET_LOAD_DEP = "\n".join([
+    "import importlib.util",
+    "from pathlib import Path",
+    "",
+    "",
+    "def _load_dep(repo_root, slug):",
+    "    path = Path(repo_root) / \"gen\" / slug / (slug + \".py\")",
+    "    spec = importlib.util.spec_from_file_location(slug, str(path))",
+    "    module = importlib.util.module_from_spec(spec)",
+    "    spec.loader.exec_module(module)",
+    "    return module",
+    "",
+    "",
+    "def run(repo_root):",
+    "    bar_mod = _load_dep(repo_root, 'bar')",
+    "    one = bar_mod.fetch_one(1)",
+    "    every = bar_mod.fetch_all()",
+    "    return one, every, bar_mod.__name__",
+    "",
+])
 
 
 def widget_direct(last_line):
-    return (
-        "\"\"\"Widget module.\n"
-        "\n"
-        "uses bar.gone_a()\n"
-        "\"\"\"\n"
-        "import importlib.util\n"
-        "\n"
-        "# bar.gone_b is not called\n"
-        "\n"
-        "\n"
-        "def load(directory):\n"
-        "    spec = importlib.util.spec_from_file_location('bar', str(directory / 'bar.py'))\n"
-        "    bar = importlib.util.module_from_spec(spec)\n"
-        "    spec.loader.exec_module(bar)\n"
-        "    " + last_line + "\n"
-    )
+    return "\n".join([
+        "\"\"\"Widget module: uses bar.gone_a() somewhere.\"\"\"",
+        "import importlib.util",
+        "",
+        "# bar.gone_b is not called",
+        "",
+        "",
+        "def load(directory):",
+        "    spec = importlib.util.spec_from_file_location('bar', str(directory / 'bar.py'))",
+        "    bar = importlib.util.module_from_spec(spec)",
+        "    spec.loader.exec_module(bar)",
+        "    " + last_line,
+        "",
+    ])
 
 
 def write(path, text):
@@ -77,45 +82,55 @@ def write(path, text):
     path.write_text(text)
 
 
-def component_md(cid, depends_on, extra_lines=()):
-    lines = [
-        "---",
-        "id: " + cid,
-        "title: " + cid,
-        "status: draft",
-        "owners: [pipeline-team]",
-        "depends_on: [" + ", ".join(depends_on) + "]",
-    ]
-    lines.extend(extra_lines)
-    lines.append("---")
-    lines.append("")
-    lines.append("# " + cid)
-    lines.append("")
-    return "\n".join(lines)
-
-
-def build_repo(root, widget_source, bar_sealed=False):
+def build_repo(root, widget_src, bar_src, bar_sealed=False):
     write(root / "gen" / "kind-python" / "kind_python.py", PYTHON_ADAPTER)
+
     write(
         root / "specs" / "components" / "widget" / "component.md",
-        component_md("comp-widget", ["comp-bar"]),
+        "\n".join([
+            "---",
+            "id: comp-widget",
+            "title: Widget",
+            "status: draft",
+            "owners: [test-team]",
+            "depends_on: [comp-bar]",
+            "---",
+            "",
+            "# Widget",
+            "",
+        ]),
     )
     write(root / "specs" / "components" / "widget" / "interface" / "library.md", "# Library\n")
-    write(root / "gen" / "widget" / "widget.py", widget_source)
+    write(root / "gen" / "widget" / "widget.py", widget_src)
+
+    bar_lines = [
+        "---",
+        "id: comp-bar",
+        "title: Bar",
+        "status: draft",
+        "owners: [test-team]",
+        "depends_on: []",
+    ]
     if bar_sealed:
-        write(
-            root / "specs" / "components" / "bar" / "component.md",
-            component_md("comp-bar", [], ["sealed: true", "source_path: legacy/bar/"]),
-        )
-        write(root / "legacy" / "bar" / "bar.py", BAR_BOTH)
+        bar_lines += ["sealed: true", "source_path: legacy/bar/"]
+    bar_lines += ["---", "", "# Bar", ""]
+    write(root / "specs" / "components" / "bar" / "component.md", "\n".join(bar_lines))
+    write(
+        root / "specs" / "components" / "bar" / "interface" / "library.md",
+        "\n".join([
+            "# Library",
+            "",
+            "```",
+            "fetch_one(x)",
+            "fetch_all()",
+            "```",
+            "",
+        ]),
+    )
+    if bar_sealed:
+        write(root / "legacy" / "bar" / "bar.py", bar_src)
     else:
-        write(
-            root / "specs" / "components" / "bar" / "component.md",
-            component_md("comp-bar", []),
-        )
-        write(root / "gen" / "bar" / "bar.py", BAR_ONE)
-    write(root / "specs" / "components" / "bar" / "interface" / "library.md", "# Library\n")
-    return root
+        write(root / "gen" / "bar" / "bar.py", bar_src)
 
 
 def findings_of(report):
@@ -127,31 +142,33 @@ def findings_of(report):
 EXPECTED = [("dependency_name", "bar has no fetch_all, which the candidate uses")]
 
 
-def test_loader_alias_missing_name(tmp_path):
-    root = build_repo(tmp_path / "r1", WIDGET_LOADER)
+def test_alias_from_load_dep_call_finds_missing_name(tmp_path):
+    root = tmp_path / "repo"
+    build_repo(root, WIDGET_LOAD_DEP, BAR_ONE)
     report = surface_checker.check_surface("comp-widget", root)
     assert findings_of(report) == EXPECTED
     assert field(report, "ok") is False
 
 
-def test_docstring_and_comment_ignored_direct_alias_ok(tmp_path):
-    root = build_repo(tmp_path / "r2", widget_direct("return bar.fetch_one(1)"))
+def test_names_in_strings_comments_docstrings_are_ignored(tmp_path):
+    root = tmp_path / "repo"
+    build_repo(root, widget_direct("return bar.fetch_one(1)"), BAR_ONE)
     report = surface_checker.check_surface("comp-widget", root)
-    assert findings_of(report) == []
     assert field(report, "ok") is True
+    assert findings_of(report) == []
 
 
-def test_direct_alias_missing_name(tmp_path):
-    root = build_repo(tmp_path / "r3", widget_direct("return bar.fetch_all()"))
+def test_module_name_use_of_missing_name_is_found(tmp_path):
+    root = tmp_path / "repo"
+    build_repo(root, widget_direct("return bar.fetch_all()"), BAR_ONE)
     report = surface_checker.check_surface("comp-widget", root)
     assert findings_of(report) == EXPECTED
     assert field(report, "ok") is False
 
 
 def test_sealed_dependency_checked_at_source_path(tmp_path):
-    root = build_repo(
-        tmp_path / "r4", widget_direct("return bar.fetch_all()"), bar_sealed=True
-    )
+    root = tmp_path / "repo"
+    build_repo(root, widget_direct("return bar.fetch_all()"), BAR_BOTH, bar_sealed=True)
     assert not (root / "gen" / "bar").exists()
     report = surface_checker.check_surface("comp-widget", root)
     assert findings_of(report) == []

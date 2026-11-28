@@ -1,4 +1,4 @@
-"""Surface checker: rejects a candidate cheaply before the long verification."""
+"""Surface checker: cheap rejection of a candidate that cannot work in place."""
 
 from __future__ import annotations
 
@@ -13,43 +13,41 @@ from pathlib import Path
 
 GATE_VERSION = "surface-checker@1.2.0"
 
-_CHECK_TIMEOUT = 60
+_TIMEOUT = 60
 _PROVISION_TIMEOUT = 600
-_CLI_CONVENTIONS = "specs/architecture/cli-conventions.md"
-_IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 
-_ADAPTER_SCRIPT = r"""
-import sys, json, importlib.util
+_LOADER_RE = re.compile(r"importlib\.import_module\(|module_from_spec\(|exec_module\(|\b_load\w*\(")
+_IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+
+_ADAPTER_SCRIPT = """
+import importlib.util, json, sys
 from pathlib import Path
-name, path, func, arg = sys.argv[1:5]
+path, func, arg = sys.argv[1], sys.argv[2], sys.argv[3]
+name = Path(path).stem
 spec = importlib.util.spec_from_file_location(name, path)
 mod = importlib.util.module_from_spec(spec)
 sys.modules[name] = mod
 spec.loader.exec_module(mod)
 r = getattr(mod, func)(Path(arg))
-def g(o, k):
-    return o.get(k) if isinstance(o, dict) else getattr(o, k, None)
+def get(k):
+    return r.get(k) if isinstance(r, dict) else getattr(r, k, None)
 if func == "surface":
-    out = g(r, "names")
+    out = list(get("names"))
 else:
-    out = {k: g(r, k) for k in ("ok", "reason", "versions", "lockfile_sha256", "interpreter")}
+    out = {"ok": get("ok"), "reason": get("reason"), "interpreter": get("interpreter")}
 print(json.dumps(out))
 """
 
-_DEP_SCRIPT = r"""
-import sys, json, importlib
-mod_name = sys.argv[1]
-names = json.loads(sys.argv[2])
-try:
-    m = importlib.import_module(mod_name)
-except BaseException:
-    sys.exit(3)
+_DEP_SCRIPT = """
+import importlib, json, sys
+name = sys.argv[1]
+mod = importlib.import_module(name)
 missing = []
-for n in names:
-    if hasattr(m, n):
+for n in json.loads(sys.argv[2]):
+    if hasattr(mod, n):
         continue
     try:
-        importlib.import_module(mod_name + "." + n)
+        importlib.import_module(name + "." + n)
     except BaseException:
         missing.append(n)
 print(json.dumps(missing))
@@ -65,57 +63,41 @@ class SurfaceReport:
         return {"ok": self.ok, "findings": [dict(f) for f in self.findings]}
 
 
-def _finding(kind: str, message: str) -> dict:
-    return {"kind": kind, "message": message}
+def _tool_root() -> Path | None:
+    for parent in Path(__file__).resolve().parents:
+        if parent.name == "gen":
+            return parent.parent
+    return None
 
 
-def _last_line(text: str) -> str:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return lines[-1] if lines else ""
+def _slug(component_id: str) -> str:
+    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
 
 
-def _run(cmd: list, pythonpath: Path, timeout: int):
-    """Run cmd; return CompletedProcess, or None on timeout."""
+def _run(cmd: list, pythonpath, timeout: int):
     env = dict(os.environ)
     env["PYTHONPATH"] = str(pythonpath)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         return subprocess.run(
-            cmd, env=env, capture_output=True, text=True, timeout=timeout
+            [str(c) for c in cmd],
+            env=env,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return None
 
 
-def _tool_root() -> Path:
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen":
-            return parent.parent
-    return here.parent
+def _last_line(text: str) -> str:
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    return lines[-1] if lines else ""
 
 
-def _find_adapter(kind: str, repo_root: Path):
-    rel = Path("gen") / f"kind-{kind}" / f"kind_{kind.replace('-', '_')}.py"
-    for root in (repo_root, _tool_root()):
-        candidate = root / rel
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _call_adapter(adapter: Path, func: str, arg: Path, timeout: int):
-    """Return (value, error); error is "timeout" or the last stderr line."""
-    name = adapter.stem
-    proc = _run(
-        [sys.executable, "-c", _ADAPTER_SCRIPT, name, str(adapter), func, str(arg)],
-        adapter.parent,
-        timeout,
-    )
-    if proc is None:
-        return None, "timeout"
-    if proc.returncode != 0:
-        return None, _last_line(proc.stderr)
-    return json.loads(_last_line(proc.stdout)), None
+def _stdout_json(proc):
+    return json.loads(_last_line(proc.stdout))
 
 
 def _frontmatter(path: Path) -> list:
@@ -132,230 +114,311 @@ def _frontmatter(path: Path) -> list:
     return out
 
 
-def _inline_list(lines: list, key: str) -> list:
-    for line in lines:
-        if line.startswith(f"{key}:"):
-            start = line.find("[")
-            end = line.find("]", start + 1)
-            if start < 0 or end < 0:
-                return []
-            items = [i.strip().strip("'\"") for i in line[start + 1:end].split(",")]
-            return [i for i in items if i]
+def _unquote(text: str) -> str:
+    return text.strip().strip("'\"").strip()
+
+
+def _inline_items(rest: str) -> list:
+    inside = rest[rest.find("[") + 1:rest.rfind("]")]
+    return [item.strip() for item in inside.split(",") if item.strip()]
+
+
+def _depends_on(fm: list) -> list:
+    for i, line in enumerate(fm):
+        if line.startswith("depends_on:"):
+            rest = line[len("depends_on:"):].strip()
+            if rest.startswith("["):
+                return [_unquote(item) for item in _inline_items(rest)]
+            items = []
+            for nxt in fm[i + 1:]:
+                stripped = nxt.strip()
+                if not stripped.startswith("-"):
+                    break
+                items.append(_unquote(stripped[1:]))
+            return [item for item in items if item]
     return []
 
 
-def _scalar(lines: list, key: str):
-    for line in lines:
-        if line.startswith(f"{key}:"):
-            return line.split(":", 1)[1].strip().strip("'\"")
+def _scalar(fm: list, key: str) -> str | None:
+    for line in fm:
+        if line.startswith(key + ":"):
+            return _unquote(line[len(key) + 1:])
     return None
 
 
-def _slug(component_id: str) -> str:
-    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+def _assets(fm: list) -> list:
+    for line in fm:
+        if line.startswith("assets:"):
+            out = []
+            for item in _inline_items(line):
+                kind, _, path = item.partition(":")
+                out.append((kind.strip(), path.strip()))
+            return out
+    return []
 
 
-def _call_name(func) -> tuple:
-    if isinstance(func, ast.Attribute):
-        owner = func.value.id if isinstance(func.value, ast.Name) else None
-        return owner, func.attr
-    if isinstance(func, ast.Name):
-        return None, func.id
-    return None, None
+def _adapter_path(kind: str, repo_root: Path) -> Path | None:
+    rel = Path("gen") / f"kind-{kind}" / f"kind_{kind.replace('-', '_')}.py"
+    candidate = repo_root / rel
+    if candidate.is_file():
+        return candidate
+    tool = _tool_root()
+    if tool is not None and (tool / rel).is_file():
+        return tool / rel
+    return None
 
 
-def _is_loader_call(node: ast.Call) -> bool:
-    owner, name = _call_name(node.func)
-    if name is None:
-        return False
-    if name == "import_module" and owner == "importlib":
-        return True
-    return name in ("module_from_spec", "exec_module") or name.startswith("_load")
+def _call_adapter(adapter: Path, func: str, arg, timeout: int):
+    """Returns (result, error); error is the last stderr line or 'timeout'."""
+    proc = _run(
+        [sys.executable, "-c", _ADAPTER_SCRIPT, adapter, func, arg],
+        adapter.parent,
+        timeout,
+    )
+    if proc is None:
+        return None, "timeout"
+    if proc.returncode != 0:
+        return None, _last_line(proc.stderr)
+    return _stdout_json(proc), None
 
 
-def _aliases(tree: ast.AST, dep_slug: str, dep_module: str) -> set:
-    aliases = {dep_module}
-    wanted = {dep_slug, dep_module}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            targets, value = node.targets, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        else:
-            continue
-        sub = list(ast.walk(value))
-        calls = any(isinstance(n, ast.Call) and _is_loader_call(n) for n in sub)
-        quoted = any(isinstance(n, ast.Constant) and n.value in wanted for n in sub)
-        if calls and quoted:
-            aliases.update(t.id for t in targets if isinstance(t, ast.Name))
-    return aliases
+def _environment(repo_root: Path):
+    adapter = _adapter_path("python", repo_root)
+    if adapter is None:
+        return None, "unknown asset kind: python"
+    result, error = _call_adapter(adapter, "provision", repo_root, _PROVISION_TIMEOUT)
+    if error == "timeout":
+        return None, "python environment: timed out"
+    if error is not None:
+        return None, f"python environment: {error}"
+    if not result.get("ok"):
+        return None, result.get("reason")
+    return str(result.get("interpreter")), None
 
 
-def _uses(code_dir: Path, dep_slug: str, dep_module: str) -> list:
-    names = set()
+def _collect_uses(tree: ast.AST, src: str, deps: list) -> dict:
+    result = {slug: set() for slug, _ in deps}
+    scope_aliases: dict = {}
+
+    def assign_scope(node, func):
+        for child in ast.iter_child_nodes(node):
+            inner = child if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else func
+            if isinstance(child, (ast.Assign, ast.AnnAssign)) and child.value is not None:
+                seg = ast.get_source_segment(src, child.value) or ""
+                if _LOADER_RE.search(seg):
+                    targets = child.targets if isinstance(child, ast.Assign) else [child.target]
+                    for slug, mod in deps:
+                        quoted = (f'"{slug}"', f"'{slug}'", f'"{mod}"', f"'{mod}'")
+                        if any(q in seg for q in quoted):
+                            key = id(func) if func is not None else None
+                            for target in targets:
+                                if isinstance(target, ast.Name):
+                                    scope_aliases.setdefault(key, {}).setdefault(target.id, set()).add(slug)
+            assign_scope(child, inner)
+
+    assign_scope(tree, None)
+
+    def walk(node, stack):
+        for child in ast.iter_child_nodes(node):
+            st = stack
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                st = stack + [scope_aliases.get(id(child), {})]
+            if (
+                isinstance(child, ast.Attribute)
+                and isinstance(child.value, ast.Name)
+                and not child.attr.startswith("__")
+            ):
+                name = child.value.id
+                for slug, mod in deps:
+                    if name == mod or any(slug in scope.get(name, ()) for scope in st):
+                        result[slug].add(child.attr)
+            walk(child, st)
+
+    walk(tree, [scope_aliases.get(None, {})])
+    return result
+
+
+def _candidate_uses(code_dir: Path, deps: list) -> dict:
+    uses = {slug: set() for slug, _ in deps}
     for path in sorted(code_dir.rglob("*.py")):
         if "__pycache__" in path.relative_to(code_dir).parts:
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:
+            src = path.read_text(encoding="utf-8")
+            tree = ast.parse(src)
+        except (SyntaxError, ValueError, UnicodeDecodeError):
             continue
-        aliases = _aliases(tree, dep_slug, dep_module)
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Attribute)
-                and isinstance(node.value, ast.Name)
-                and node.value.id in aliases
-                and not node.attr.startswith("__")
-            ):
-                names.add(node.attr)
-    return sorted(names)
+        for slug, names in _collect_uses(tree, src, deps).items():
+            uses[slug] |= names
+    return uses
 
 
-def _dependency_dir(repo_root: Path, dep_slug: str) -> Path:
+def _dep_dir(dep_slug: str, repo_root: Path) -> Path | None:
     fm = _frontmatter(repo_root / "specs" / "components" / dep_slug / "component.md")
     if _scalar(fm, "sealed") == "true":
-        return repo_root / _scalar(fm, "source_path")
-    return repo_root / "gen" / dep_slug
+        rel = Path(_scalar(fm, "source_path") or "")
+    else:
+        rel = Path("gen") / dep_slug
+    if (repo_root / rel).is_dir():
+        return repo_root / rel
+    tool = _tool_root()
+    if tool is not None and (tool / rel).is_dir():
+        return tool / rel
+    return None
 
 
-def _check_dependencies(interp, repo_root, code_dir, depends_on) -> list:
-    findings = []
-    for dep_id in depends_on:
+def _dep_doc_text(dep_slug: str, repo_root: Path) -> str | None:
+    rel = Path("specs") / "components" / dep_slug / "interface"
+    roots = [repo_root]
+    tool = _tool_root()
+    if tool is not None:
+        roots.append(tool)
+    for root in roots:
+        files = sorted((root / rel).rglob("*.md")) if (root / rel).is_dir() else []
+        if files:
+            return "\n".join(f.read_text(encoding="utf-8") for f in files)
+    return None
+
+
+def _dependency_findings(slug: str, repo_root: Path, code_dir: Path, interpreter: str) -> list:
+    fm = _frontmatter(repo_root / "specs" / "components" / slug / "component.md")
+    deps = []
+    for dep_id in _depends_on(fm):
         dep_slug = _slug(dep_id)
-        dep_module = dep_slug.replace("-", "_")
-        dep_dir = _dependency_dir(repo_root, dep_slug)
-        if not dep_dir.is_dir():
+        deps.append((dep_slug, dep_slug.replace("-", "_")))
+    uses = _candidate_uses(code_dir, deps)
+    findings = []
+    for dep_slug, dep_module in deps:
+        names = sorted(uses[dep_slug])
+        if not names:
             continue
-        names = _uses(code_dir, dep_slug, dep_module)
+        dep_dir = _dep_dir(dep_slug, repo_root)
+        if dep_dir is None:
+            continue
         proc = _run(
-            [interp, "-c", _DEP_SCRIPT, dep_module, json.dumps(names)],
+            [interpreter, "-c", _DEP_SCRIPT, dep_module, json.dumps(names)],
             dep_dir,
-            _CHECK_TIMEOUT,
+            _TIMEOUT,
         )
         if proc is None or proc.returncode != 0:
             continue
-        for name in sorted(json.loads(_last_line(proc.stdout))):
-            findings.append(
-                _finding("dependency_name", f"{dep_slug} has no {name}, which the candidate uses")
-            )
+        missing = set(_stdout_json(proc))
+        doc = _dep_doc_text(dep_slug, repo_root)
+        for name in names:
+            if name in missing:
+                findings.append({
+                    "kind": "dependency_name",
+                    "message": f"{dep_slug} has no {name}, which the candidate uses",
+                })
+            elif doc is not None and not re.search(r"\b" + re.escape(name) + r"\b", doc):
+                findings.append({
+                    "kind": "dependency_undocumented",
+                    "message": f"{dep_slug} does not document {name}, which the candidate uses",
+                })
     return findings
 
 
-def _implements_cli(spec_dir: Path) -> bool:
-    library = spec_dir / "interface" / "library.md"
-    if not library.is_file():
+def _implements_cli(slug: str, repo_root: Path) -> bool:
+    lib = repo_root / "specs" / "components" / slug / "interface" / "library.md"
+    if not lib.is_file():
         return False
-    return any(
-        line.startswith("Implements:") and _CLI_CONVENTIONS in line
-        for line in library.read_text(encoding="utf-8").splitlines()
+    for line in lib.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Implements:") and "specs/architecture/cli-conventions.md" in stripped:
+            return True
+    return False
+
+
+def _cli_finding(module: str, code_dir: Path, interpreter: str):
+    proc = _run(
+        [interpreter, "-c", f"import sys, {module}; sys.exit({module}.main(['--hotdocs-smoke-unknown']))"],
+        code_dir,
+        _TIMEOUT,
     )
-
-
-def _check_cli(interp, code_dir, module) -> list:
-    code = f"import sys, {module}; sys.exit({module}.main(['--hotdocs-smoke-unknown']))"
-    proc = _run([interp, "-c", code], code_dir, _CHECK_TIMEOUT)
     if proc is None:
-        return [_finding("cli_usage", "timeout")]
-    differed = []
+        return {"kind": "cli_usage", "message": "timeout"}
+    problems = []
     if proc.returncode != 2:
-        differed.append(f"exit {proc.returncode}")
+        problems.append(f"exit {proc.returncode}")
     lines = proc.stderr.splitlines()
     if not (lines and lines[0].startswith("usage error: ")):
-        differed.append("no usage error line")
+        problems.append("no usage error line")
     if "Traceback" in proc.stderr:
-        differed.append("traceback")
-    if differed:
-        return [_finding("cli_usage", ", ".join(differed))]
-    return []
+        problems.append("traceback")
+    if problems:
+        return {"kind": "cli_usage", "message": ", ".join(problems)}
+    return None
 
 
-def _stated_names(interface_file: Path) -> list:
-    lines = interface_file.read_text(encoding="utf-8").splitlines()
+def _stated_names(text: str) -> list:
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.startswith("```")), None)
+    if start is None:
+        return []
     block = []
-    inside = False
-    for line in lines:
+    for line in lines[start + 1:]:
         if line.startswith("```"):
-            if inside:
-                break
-            inside = True
-            continue
-        if inside:
-            block.append(line)
+            break
+        block.append(line)
     names = []
     for line in block:
         if not line.strip():
             continue
-        head = line[: line.index("(")] if "(" in line else line
-        idents = _IDENT.findall(head)
+        head = line.split("(", 1)[0] if "(" in line else line
+        idents = _IDENT_RE.findall(head)
         if idents:
             names.append(idents[-1])
     return names
 
 
-def _check_assets(repo_root, code_dir, spec_dir, assets) -> list:
+def _asset_findings(slug: str, repo_root: Path, code_dir: Path) -> list:
+    fm = _frontmatter(repo_root / "specs" / "components" / slug / "component.md")
     findings = []
-    provisioned = {}
-    for kind, path in assets:
-        adapter = _find_adapter(kind, repo_root)
+    provisioned: dict = {}
+    for kind, path in _assets(fm):
+        adapter = _adapter_path(kind, repo_root)
         if adapter is None:
-            findings.append(_finding("asset_error", f"unknown asset kind: {kind}"))
+            findings.append({"kind": "asset_error", "message": f"unknown asset kind: {kind}"})
             continue
         if kind not in provisioned:
-            provisioned[kind] = _call_adapter(adapter, "provision", repo_root, _CHECK_TIMEOUT)
-        result, error = provisioned[kind]
-        if error is not None:
-            findings.append(_finding("asset_error", f"{path}: {error}"))
-            continue
-        if not result.get("ok"):
-            findings.append(_finding("asset_error", f"{path}: {result.get('reason')}"))
+            result, error = _call_adapter(adapter, "provision", repo_root, _TIMEOUT)
+            if error is not None:
+                provisioned[kind] = error
+            elif not result.get("ok"):
+                provisioned[kind] = result.get("reason")
+            else:
+                provisioned[kind] = None
+        if provisioned[kind] is not None:
+            findings.append({"kind": "asset_error", "message": f"{path}: {provisioned[kind]}"})
             continue
         asset_file = code_dir / path
         if not asset_file.is_file():
-            findings.append(_finding("asset_error", f"{path}: no such asset file"))
+            findings.append({"kind": "asset_error", "message": f"{path}: no such asset file"})
             continue
         file_name = path.rsplit("/", 1)[-1]
-        interface_file = spec_dir / "interface" / "assets" / f"{file_name}.md"
-        if not interface_file.is_file():
-            findings.append(
-                _finding(
-                    "asset_error",
-                    f"{path}: no interface file interface/assets/{file_name}.md",
-                )
-            )
+        iface = repo_root / "specs" / "components" / slug / "interface" / "assets" / f"{file_name}.md"
+        if not iface.is_file():
+            findings.append({
+                "kind": "asset_error",
+                "message": f"{path}: no interface file interface/assets/{file_name}.md",
+            })
             continue
-        provided, error = _call_adapter(adapter, "surface", asset_file, _CHECK_TIMEOUT)
+        names, error = _call_adapter(adapter, "surface", asset_file, _TIMEOUT)
         if error is not None:
-            findings.append(_finding("asset_error", f"{path}: surface failed: {error}"))
+            findings.append({"kind": "asset_error", "message": f"{path}: surface failed: {error}"})
             continue
-        for name in sorted(set(_stated_names(interface_file)) - set(provided)):
-            findings.append(
-                _finding("asset_name_missing", f"{path} has no {name}, which its interface states")
-            )
+        provided = set(names)
+        for name in sorted(set(_stated_names(iface.read_text(encoding="utf-8")))):
+            if name not in provided:
+                findings.append({
+                    "kind": "asset_name_missing",
+                    "message": f"{path} has no {name}, which its interface states",
+                })
     return findings
 
 
-def _parse_assets(fm: list) -> list:
-    out = []
-    for item in _inline_list(fm, "assets"):
-        kind, _, path = item.partition(":")
-        out.append((kind.strip(), path.strip()))
-    return out
-
-
-def _check_environment(repo_root: Path):
-    """Return (interpreter, findings)."""
-    adapter = _find_adapter("python", repo_root)
-    if adapter is None:
-        return None, [_finding("environment", "unknown asset kind: python")]
-    result, error = _call_adapter(adapter, "provision", repo_root, _PROVISION_TIMEOUT)
-    if error == "timeout":
-        return None, [_finding("environment", "python environment: timed out")]
-    if error is not None:
-        return None, [_finding("environment", f"python environment: {error}")]
-    if not result.get("ok"):
-        return None, [_finding("environment", result.get("reason"))]
-    return result.get("interpreter"), []
+def _report(findings: list) -> SurfaceReport:
+    return SurfaceReport(ok=not findings, findings=findings)
 
 
 def check_surface(component_id: str, repo_root: Path, code_dir: Path | None = None) -> SurfaceReport:
@@ -363,25 +426,23 @@ def check_surface(component_id: str, repo_root: Path, code_dir: Path | None = No
     slug = _slug(component_id)
     module = slug.replace("-", "_")
     code_dir = Path(code_dir) if code_dir is not None else repo_root / "gen" / slug
-    spec_dir = repo_root / "specs" / "components" / slug
 
-    interp, findings = _check_environment(repo_root)
-    if findings:
-        return SurfaceReport(ok=False, findings=findings)
+    interpreter, env_error = _environment(repo_root)
+    if env_error is not None or interpreter is None:
+        return _report([{"kind": "environment", "message": env_error}])
 
-    proc = _run([interp, "-c", f"import {module}"], code_dir, _CHECK_TIMEOUT)
+    proc = _run([interpreter, "-c", f"import {module}"], code_dir, _TIMEOUT)
     if proc is None:
-        return SurfaceReport(ok=False, findings=[_finding("import_error", "timeout")])
+        return _report([{"kind": "import_error", "message": "timeout"}])
     if proc.returncode != 0:
-        return SurfaceReport(
-            ok=False, findings=[_finding("import_error", _last_line(proc.stderr))]
-        )
+        return _report([{"kind": "import_error", "message": _last_line(proc.stderr)}])
 
-    fm = _frontmatter(spec_dir / "component.md")
-    findings.extend(
-        _check_dependencies(interp, repo_root, code_dir, _inline_list(fm, "depends_on"))
-    )
-    if _implements_cli(spec_dir):
-        findings.extend(_check_cli(interp, code_dir, module))
-    findings.extend(_check_assets(repo_root, code_dir, spec_dir, _parse_assets(fm)))
-    return SurfaceReport(ok=not findings, findings=findings)
+    findings = _dependency_findings(slug, repo_root, code_dir, interpreter)
+
+    if _implements_cli(slug, repo_root):
+        cli = _cli_finding(module, code_dir, interpreter)
+        if cli is not None:
+            findings.append(cli)
+
+    findings.extend(_asset_findings(slug, repo_root, code_dir))
+    return _report(findings)
