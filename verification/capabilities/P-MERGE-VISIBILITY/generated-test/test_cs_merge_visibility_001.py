@@ -1,20 +1,32 @@
-# hotdocs-criterion: sha256:35567d5102d83d5883e6b1dce852552aded2a559934694bf37345d10ae486d92
+# hotdocs-criterion: sha256:31e3b0d33cf9cc21e6f40ef959562c4854a7bd0ee2beb89bbe500476cce08509
+"""CS-MERGE-VISIBILITY-001: merge status is visible and recoverable.
+
+Three components are touched by a change. Two generate and verify and one
+fails verification. Querying provenance-tracker shows two ready and one not
+ready, with its reason. After a spec edit to the failing component and a
+second generate of only that component, the next query shows the two
+unchanged components still ready as provenance hits (not regenerated)
+alongside the third's fresh, passing result. Every answer comes from a live
+query, never from a kept copy of an earlier run's CLI output.
+"""
+
+import hashlib
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 
 import provenance_tracker
+import provenance_tracker_ui  # noqa: F401  (imported as the bundle states)
+import ui_style  # noqa: F401  (imported as the bundle states)
+
+
+COMPONENTS = ["comp-alpha", "comp-beta", "comp-gamma"]
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def opt_field(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
 
 
 def load_module(path, module_name):
@@ -25,7 +37,7 @@ def load_module(path, module_name):
     return module
 
 
-def run_lint(repo_root):
+def load_spec_linter():
     gen = next(p for p in Path(provenance_tracker.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
     path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
@@ -33,337 +45,380 @@ def run_lint(repo_root):
     spec_linter = importlib.util.module_from_spec(spec)
     sys.modules["spec_linter"] = spec_linter
     spec.loader.exec_module(spec_linter)
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+    return spec_linter
 
 
-COMPONENTS = [
-    ("comp-alpha", "alpha", "R-ALPHA-001", "AC-ALPHA-001"),
-    ("comp-beta", "beta", "R-BETA-001", "AC-BETA-001"),
-    ("comp-gamma", "gamma", "R-GAMMA-001", "AC-GAMMA-001"),
-]
+def assert_lint_clean(repo_root):
+    spec_linter = load_spec_linter()
+    result = spec_linter.lint(None, repo_root)
+    assert field(result, "hard_failures") == 0
 
 
-def write_corpus(repo_root):
-    specs = repo_root / "specs"
-    specs.mkdir(parents=True, exist_ok=True)
-    (specs / "glossary.md").write_text(
-        "# Glossary\n\n- **Widget** - a thing the fixture components handle.\n",
-        encoding="utf-8",
+# ---------------------------------------------------------------- fixture
+
+
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def requirement_text(rid, body):
+    return "# " + rid + "\n\n" + body + "\n"
+
+
+def acceptance_text(acid, rid, body):
+    return (
+        "# " + acid + "\n\n"
+        "Covers: " + rid + "\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n" + body + "\n```\n"
     )
-    for cid, slug, rid, acid in COMPONENTS:
-        cdir = specs / "components" / slug
-        (cdir / "requirements").mkdir(parents=True, exist_ok=True)
-        (cdir / "acceptance").mkdir(parents=True, exist_ok=True)
-        (cdir / "interface").mkdir(parents=True, exist_ok=True)
-        (cdir / "component.md").write_text(
-            "---\n"
-            + "id: " + cid + "\n"
-            + "title: " + slug.capitalize() + " Component\n"
-            + "status: draft\n"
-            + "owners: [pipeline-team]\n"
-            + "sealed: true\n"
-            + "source_path: legacy/" + slug + "/\n"
-            + "---\n\n"
-            + "# " + slug.capitalize() + " Component\n\n"
-            + "## Purpose\n\nHandles widgets for the " + slug + " fixture.\n",
-            encoding="utf-8",
+
+
+def build_component(repo_root, slug, prefix, requirements):
+    base = repo_root / "specs" / "components" / slug
+    title = slug.capitalize()
+    write(
+        base / "component.md",
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + title + "\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "---\n\n"
+        "# " + title + "\n\n"
+        "## Purpose\n\n"
+        + title + " returns a short greeting for its caller.\n",
+    )
+    write(
+        base / "interface" / "library.md",
+        "# Library\n\n```\ngreet() -> str\n```\n\nReturns a short greeting.\n",
+    )
+    for number, body in requirements:
+        rid = "R-" + prefix + "-" + number
+        acid = "AC-" + prefix + "-" + number
+        write(base / "requirements" / (rid + ".md"), requirement_text(rid, body))
+        write(
+            base / "acceptance" / (acid + ".md"),
+            acceptance_text(
+                acid,
+                rid,
+                "Given the component\nWhen greet() is called\nThen it returns a non-empty string",
+            ),
         )
-        (cdir / "requirements" / (rid + ".md")).write_text(
-            "# " + rid + "\n\nThe component MUST return a widget count.\n",
-            encoding="utf-8",
-        )
-        (cdir / "acceptance" / (acid + ".md")).write_text(
-            "# " + acid + "\n\n"
-            + "Covers: " + rid + "\n"
-            + "Kind: generated-test\n\n"
-            + "```gherkin\n"
-            + "Given a widget list\n"
-            + "When the count is requested\n"
-            + "Then the number of widgets is returned\n"
-            + "```\n",
-            encoding="utf-8",
-        )
-        (cdir / "interface" / "library.md").write_text(
-            "# Library\n\n```\ncount(widgets: list) -> int\n```\n",
-            encoding="utf-8",
-        )
-        (cdir / "constraints.md").write_text(
-            "# Constraints\n\nNone beyond the requirements.\n",
-            encoding="utf-8",
-        )
+    write(repo_root / "legacy" / slug / (slug + ".py"), "def greet():\n    return 'hello'\n")
 
 
-FAKE_CHECKER_BODY = '''
-import hashlib
-import json
-from pathlib import Path
-
-STATE = Path(STATE_PATH)
-LOG = Path(LOG_PATH)
-SPECS = Path(REPO_ROOT) / "specs" / "components"
-
-
-class _Result(dict):
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def _log(line):
-    with open(LOG, "a", encoding="utf-8") as fh:
-        fh.write(line + "\\n")
+def build_corpus(repo_root):
+    write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Greeting** — a short, non-empty string a component returns.\n",
+    )
+    build_component(repo_root, "alpha", "ALPHA", [("001", "The component MUST return a greeting.")])
+    build_component(repo_root, "beta", "BETA", [("001", "The component MUST return a greeting.")])
+    build_component(
+        repo_root,
+        "gamma",
+        "GAMMA",
+        [
+            ("001", "The component MUST return a greeting."),
+            ("002", "The greeting MUST be at most ten characters long."),
+        ],
+    )
 
 
-def _cid_from(value):
-    if isinstance(value, str) and value.startswith("comp-"):
-        return value.split("|", 1)[0]
-    if isinstance(value, dict):
-        for k in ("component_id", "id"):
-            v = value.get(k)
-            if isinstance(v, str) and v.startswith("comp-"):
-                return v
-    for k in ("component_id", "id"):
-        v = getattr(value, k, None)
-        if isinstance(v, str) and v.startswith("comp-"):
-            return v
-    return None
-
-
-def _cid(args, kwargs):
-    for v in list(args) + list(kwargs.values()):
-        c = _cid_from(v)
-        if c:
-            return c
-    raise ValueError("no component id in call")
-
-
-def _key(cid):
-    slug = cid[len("comp-"):]
+def component_key(repo_root, component_id):
+    slug = component_id[len("comp-"):]
+    base = repo_root / "specs" / "components" / slug
     h = hashlib.sha256()
-    base = SPECS / slug
     for p in sorted(base.rglob("*")):
         if p.is_file():
             h.update(str(p.relative_to(base)).encode("utf-8"))
-            h.update(b"\\0")
+            h.update(b"\0")
             h.update(p.read_bytes())
-            h.update(b"\\0")
-    return cid + "|sha256:" + h.hexdigest()
+            h.update(b"\0")
+    return "sha256:" + h.hexdigest()
 
 
-def _state():
-    if STATE.is_file():
-        return json.loads(STATE.read_text(encoding="utf-8"))
-    return {}
+FAKE_CHECKER_BODY = "\n".join([
+    "import hashlib",
+    "import json",
+    "",
+    "",
+    "def _log(name):",
+    "    with open(LOG, 'a', encoding='utf-8') as f:",
+    "        f.write(name + '\\n')",
+    "",
+    "",
+    "def _scan(value, found, depth=0):",
+    "    if depth > 4:",
+    "        return",
+    "    if isinstance(value, str):",
+    "        if value in COMPONENTS:",
+    "            found.append(value)",
+    "        elif ('comp-' + value) in COMPONENTS:",
+    "            found.append('comp-' + value)",
+    "        return",
+    "    if isinstance(value, dict):",
+    "        cid = value.get('component_id')",
+    "        if isinstance(cid, str):",
+    "            _scan(cid, found, depth + 1)",
+    "        for v in value.values():",
+    "            _scan(v, found, depth + 1)",
+    "        return",
+    "    if isinstance(value, (list, tuple)):",
+    "        for v in value:",
+    "            _scan(v, found, depth + 1)",
+    "        return",
+    "    cid = getattr(value, 'component_id', None)",
+    "    if isinstance(cid, str):",
+    "        _scan(cid, found, depth + 1)",
+    "",
+    "",
+    "def _key(cid):",
+    "    slug = cid[len('comp-'):]",
+    "    base = REPO_ROOT / 'specs' / 'components' / slug",
+    "    h = hashlib.sha256()",
+    "    for p in sorted(base.rglob('*')):",
+    "        if p.is_file():",
+    "            h.update(str(p.relative_to(base)).encode('utf-8'))",
+    "            h.update(b'\\0')",
+    "            h.update(p.read_bytes())",
+    "            h.update(b'\\0')",
+    "    return 'sha256:' + h.hexdigest()",
+    "",
+    "",
+    "def _resolve(args, kwargs):",
+    "    found = []",
+    "    for a in args:",
+    "        _scan(a, found)",
+    "    for k in sorted(kwargs):",
+    "        _scan(kwargs[k], found)",
+    "    if found:",
+    "        return found[0]",
+    "    keys = [a for a in list(args) + list(kwargs.values())",
+    "            if isinstance(a, str) and a.startswith('sha256:')]",
+    "    for cid in COMPONENTS:",
+    "        if _key(cid) in keys:",
+    "            return cid",
+    "    return None",
+    "",
+    "",
+    "def _store():",
+    "    p = REPO_ROOT / '.fake-provenance' / 'store.json'",
+    "    if p.is_file():",
+    "        return json.loads(p.read_text(encoding='utf-8'))",
+    "    return {}",
+    "",
+    "",
+    "def _check(args, kwargs):",
+    "    cid = _resolve(args, kwargs)",
+    "    if cid is None:",
+    "        return {'component_id': None, 'hit': False, 'key': None,",
+    "                'verification_report': None, 'license_scan': None,",
+    "                'secret_scan': None, 'generated_stamp': None}",
+    "    key = _key(cid)",
+    "    entry = _store().get(cid)",
+    "    if entry and entry['key'] == key:",
+    "        return {'component_id': cid, 'hit': True, 'key': key,",
+    "                'verification_report': entry['verification_report'],",
+    "                'license_scan': {'blocked': False, 'findings': []},",
+    "                'secret_scan': {'flagged': False, 'matches': []},",
+    "                'generated_stamp': entry['stamp']}",
+    "    return {'component_id': cid, 'hit': False, 'key': key,",
+    "            'verification_report': None, 'license_scan': None,",
+    "            'secret_scan': None, 'generated_stamp': None}",
+    "",
+    "",
+    "def current_provenance_key(*args, **kwargs):",
+    "    _log('current_provenance_key')",
+    "    cid = _resolve(args, kwargs)",
+    "    return _key(cid) if cid else None",
+    "",
+    "",
+    "def current_sealed_key(*args, **kwargs):",
+    "    _log('current_sealed_key')",
+    "    cid = _resolve(args, kwargs)",
+    "    return _key(cid) if cid else None",
+    "",
+    "",
+    "def check_provenance(*args, **kwargs):",
+    "    _log('check_provenance')",
+    "    return _check(args, kwargs)",
+    "",
+    "",
+    "def check_sealed_provenance(*args, **kwargs):",
+    "    _log('check_sealed_provenance')",
+    "    return _check(args, kwargs)",
+    "",
+])
 
 
-def _result(cid):
-    key = _key(cid)
-    entry = _state().get(cid)
-    hit = bool(entry) and entry.get("key") == key
-    if hit:
-        overall = entry.get("overall", "pass")
-        failing = entry.get("failing", [])
-        rr = {r: "fail" for r in failing}
-        vr = {
-            "component_id": cid,
-            "overall": overall,
-            "requirement_results": rr,
-            "criteria": [],
-        }
-        reason = None
-    else:
-        vr = None
-        reason = "no provenance for current spec state"
-    return _Result({
-        "component_id": cid,
-        "hit": hit,
-        "key": key,
-        "provenance_key": key,
-        "manifest": ({"component_id": cid, "spec_bundle_hash": key} if hit else None),
-        "verification_report": vr,
-        "license_scan": ({"blocked": False, "findings": []} if hit else None),
-        "secret_scan": ({"flagged": False, "matches": []} if hit else None),
-        "reason": reason,
-    })
-
-
-def current_sealed_key(*args, **kwargs):
-    _log("current_sealed_key " + _cid(args, kwargs))
-    return None
-
-
-def current_provenance_key(*args, **kwargs):
-    cid = _cid(args, kwargs)
-    _log("current_provenance_key " + cid)
-    return _key(cid)
-
-
-def check_provenance(*args, **kwargs):
-    cid = _cid(args, kwargs)
-    _log("check_provenance " + cid)
-    return _result(cid)
-
-
-def check_sealed_provenance(*args, **kwargs):
-    cid = _cid(args, kwargs)
-    _log("check_sealed_provenance " + cid)
-    return _result(cid)
-'''
-
-
-FAKE_SCANNER_BODY = '''
-
-def scan(repo_root):
-    return {"flagged": False, "matches": []}
-'''
-
-
-def write_fakes(repo_root, state_path, log_path):
-    pc = repo_root / "gen" / "provenance-checker"
-    pc.mkdir(parents=True, exist_ok=True)
-    (pc / "provenance_checker.py").write_text(
-        "STATE_PATH = " + repr(str(state_path)) + "\n"
-        + "LOG_PATH = " + repr(str(log_path)) + "\n"
-        + "REPO_ROOT = " + repr(str(repo_root)) + "\n"
-        + FAKE_CHECKER_BODY,
-        encoding="utf-8",
+def write_fakes(repo_root, log_path):
+    header = (
+        "from pathlib import Path\n"
+        "REPO_ROOT = Path(" + repr(str(repo_root)) + ")\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "COMPONENTS = " + repr(COMPONENTS) + "\n"
     )
-    ss = repo_root / "gen" / "secret-scanner"
-    ss.mkdir(parents=True, exist_ok=True)
-    (ss / "secret_scanner.py").write_text(FAKE_SCANNER_BODY, encoding="utf-8")
-
-
-def load_fake_checker(repo_root):
-    return load_module(
+    write(
         repo_root / "gen" / "provenance-checker" / "provenance_checker.py",
-        "test_cs_merge_visibility_fake_checker",
+        header + FAKE_CHECKER_BODY,
+    )
+    write(
+        repo_root / "gen" / "secret-scanner" / "secret_scanner.py",
+        "def scan(repo_root):\n"
+        "    return {'flagged': False, 'matches': []}\n",
     )
 
 
-def generation_result(cid):
+# ------------------------------------------------------- simulated generate
+
+
+def verification_report(component_id, results):
+    overall = "pass" if all(v == "pass" for v in results.values()) else "fail"
+    criteria = []
+    for rid in sorted(results):
+        crit = {"covers": rid, "result": results[rid]}
+        if results[rid] == "fail":
+            crit["failure_origin"] = "implementation"
+        criteria.append(crit)
     return {
-        "component_id": cid,
-        "model": "anthropic:claude-sonnet-5",
-        "files": ["gen/" + cid[len("comp-"):] + "/module.py"],
+        "component_id": component_id,
+        "overall": overall,
+        "requirement_results": dict(results),
+        "criteria": criteria,
+    }
+
+
+def generation_result(component_id):
+    slug = component_id[len("comp-"):]
+    return {
+        "component_id": component_id,
+        "files": ["gen/" + slug + "/" + slug + ".py"],
         "model_call_error": None,
     }
 
 
-def verification_report(cid, rid, passed):
-    return {
-        "component_id": cid,
-        "overall": "pass" if passed else "fail",
-        "requirement_results": {rid: "pass" if passed else "fail"},
-        "criteria": [
-            {
-                "criterion_id": "AC-" + rid[len("R-"):],
-                "covers": rid,
-                "result": "pass" if passed else "fail",
-                **({} if passed else {"failure_origin": "implementation"}),
-            }
-        ],
-    }
+def simulate_generate(repo_root, component_id, results, stamp):
+    """One `hotdocs generate` attempt: an attempt record always, provenance
+    only when verification passed."""
+    report = verification_report(component_id, results)
+    key = component_key(repo_root, component_id)
+    provenance_tracker.write_attempt_record(
+        component_id,
+        generation_result(component_id),
+        report,
+        key,
+        repo_root,
+    )
+    if report["overall"] == "pass":
+        store_path = repo_root / ".fake-provenance" / "store.json"
+        store = json.loads(store_path.read_text(encoding="utf-8")) if store_path.is_file() else {}
+        store[component_id] = {"key": key, "verification_report": report, "stamp": stamp}
+        write(store_path, json.dumps(store, indent=2, sort_keys=True))
 
 
-def attempt_count(repo_root, cid):
-    d = repo_root / ".hotdocs" / "attempts" / cid
-    if not d.is_dir():
-        return 0
-    return len([p for p in d.glob("*.json") if p.is_file()])
+def run_main(argv):
+    try:
+        rc = provenance_tracker.main(argv)
+    except SystemExit as exc:
+        rc = exc.code
+    return 0 if rc is None else rc
 
 
-def comp_ready(result):
-    if not field(result, "hit"):
-        return False
-    vr = field(result, "verification_report")
-    return vr is not None and field(vr, "overall") == "pass"
+def reasons_naming(reasons, component_id):
+    return [r for r in reasons if component_id in str(r)]
 
 
-def test_cs_merge_visibility_001(tmp_path):
+# ------------------------------------------------------------------ test
+
+
+def test_cs_merge_visibility_001(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    state_path = tmp_path / "provenance-state.json"
     log_path = tmp_path / "fake-calls.log"
-    write_corpus(repo_root)
-    write_fakes(repo_root, state_path, log_path)
-    run_lint(repo_root)
+    build_corpus(repo_root)
+    write_fakes(repo_root, log_path)
+    assert_lint_clean(repo_root)
 
-    fake = load_fake_checker(repo_root)
-    ids = [c[0] for c in COMPONENTS]
-    rids = {c[0]: c[2] for c in COMPONENTS}
+    # Step 1: a change touching three components; two pass, one fails.
+    simulate_generate(repo_root, "comp-alpha", {"R-ALPHA-001": "pass"}, "alpha-run-1")
+    simulate_generate(repo_root, "comp-beta", {"R-BETA-001": "pass"}, "beta-run-1")
+    simulate_generate(
+        repo_root, "comp-gamma", {"R-GAMMA-001": "pass", "R-GAMMA-002": "fail"}, "gamma-run-1"
+    )
+    assert_lint_clean(repo_root)
+    capsys.readouterr()  # discard anything step 1 printed: never consulted again
 
-    # Step 1: first `hotdocs generate` - alpha and beta verify, gamma fails.
-    state = {}
+    first = provenance_tracker.check_readiness(repo_root)
+    assert field(first, "ready") is False
+    first_components = field(first, "components")
+    for cid in COMPONENTS:
+        assert cid in first_components
     for cid in ("comp-alpha", "comp-beta"):
-        key = fake.current_provenance_key(cid, repo_root)
-        state[cid] = {"key": key, "overall": "pass", "failing": []}
-        provenance_tracker.write_attempt_record(
-            cid, generation_result(cid), verification_report(cid, rids[cid], True),
-            key, repo_root,
-        )
-    gamma_key_1 = fake.current_provenance_key("comp-gamma", repo_root)
-    provenance_tracker.write_attempt_record(
-        "comp-gamma", generation_result("comp-gamma"),
-        verification_report("comp-gamma", rids["comp-gamma"], False),
-        gamma_key_1, repo_root,
+        result = first_components[cid]
+        assert field(result, "hit") is True
+        assert field(field(result, "verification_report"), "overall") == "pass"
+    assert field(first_components["comp-gamma"], "hit") is False
+
+    first_reasons = list(field(first, "not_ready_reasons"))
+    assert reasons_naming(first_reasons, "comp-gamma"), first_reasons
+    assert not reasons_naming(first_reasons, "comp-alpha"), first_reasons
+    assert not reasons_naming(first_reasons, "comp-beta"), first_reasons
+    assert provenance_tracker.last_requirement_failures("comp-gamma", repo_root) == ["R-GAMMA-002"]
+
+    rc = run_main(["verify", "--format=json", "--repo-root=" + str(repo_root)])
+    out = capsys.readouterr().out
+    assert rc == 1
+    cli_first = json.loads(out)
+    assert cli_first["ready"] is False
+    assert any("comp-gamma" in r for r in cli_first["not_ready_reasons"])
+
+    # Step 2: a spec edit to the failing component, then a second generate of it alone.
+    edited = (
+        repo_root / "specs" / "components" / "gamma" / "requirements" / "R-GAMMA-002.md"
     )
-    state_path.write_text(json.dumps(state), encoding="utf-8")
-    keys_after_first = {cid: state[cid]["key"] for cid in ("comp-alpha", "comp-beta")}
-
-    # First query - no CLI output from the generate run is consulted.
-    report1 = provenance_tracker.check_readiness(repo_root)
-    assert log_path.is_file() and log_path.read_text(encoding="utf-8").strip()
-
-    comps1 = field(report1, "components")
-    assert set(ids) <= set(comps1.keys())
-    assert comp_ready(comps1["comp-alpha"])
-    assert comp_ready(comps1["comp-beta"])
-    assert not comp_ready(comps1["comp-gamma"])
-    assert field(report1, "ready") is False
-    reasons1 = list(field(report1, "not_ready_reasons"))
-    assert any("comp-gamma" in r for r in reasons1), reasons1
-    assert not any("comp-alpha" in r for r in reasons1), reasons1
-    assert not any("comp-beta" in r for r in reasons1), reasons1
-    assert list(provenance_tracker.last_requirement_failures("comp-gamma", repo_root)) == [
-        rids["comp-gamma"]
-    ]
-
-    # Step 2: spec edit to the failing component, still lint-clean.
-    req = repo_root / "specs" / "components" / "gamma" / "requirements" / (rids["comp-gamma"] + ".md")
-    req.write_text(
-        "# " + rids["comp-gamma"] + "\n\n"
-        + "The component MUST return a widget count, zero for an empty list.\n",
-        encoding="utf-8",
+    write(
+        edited,
+        requirement_text("R-GAMMA-002", "The greeting MUST be at most twenty characters long."),
     )
-    run_lint(repo_root)
-    gamma_key_2 = fake.current_provenance_key("comp-gamma", repo_root)
-    assert gamma_key_2 != gamma_key_1
-
-    # Second `hotdocs generate comp-gamma` - only gamma is regenerated.
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    state["comp-gamma"] = {"key": gamma_key_2, "overall": "pass", "failing": []}
-    state_path.write_text(json.dumps(state), encoding="utf-8")
-    provenance_tracker.write_attempt_record(
-        "comp-gamma", generation_result("comp-gamma"),
-        verification_report("comp-gamma", rids["comp-gamma"], True),
-        gamma_key_2, repo_root,
+    assert_lint_clean(repo_root)
+    time.sleep(1.1)  # the new attempt's id sorts after the first one's
+    simulate_generate(
+        repo_root, "comp-gamma", {"R-GAMMA-001": "pass", "R-GAMMA-002": "pass"}, "gamma-run-2"
     )
+    assert_lint_clean(repo_root)
 
-    # Second query.
-    report2 = provenance_tracker.check_readiness(repo_root)
-    comps2 = field(report2, "components")
-    assert set(ids) <= set(comps2.keys())
+    second = provenance_tracker.check_readiness(repo_root)
+    second_components = field(second, "components")
     for cid in ("comp-alpha", "comp-beta"):
-        assert field(comps2[cid], "hit") is True
-        assert comp_ready(comps2[cid])
-        # Unchanged: provenance still matches the first run's key, no new attempt.
-        assert fake.current_provenance_key(cid, repo_root) == keys_after_first[cid]
-        assert attempt_count(repo_root, cid) == 1
-    assert comp_ready(comps2["comp-gamma"])
-    assert attempt_count(repo_root, "comp-gamma") == 2
-    reasons2 = list(field(report2, "not_ready_reasons"))
-    assert not any(cid in r for r in reasons2 for cid in ids), reasons2
-    assert field(report2, "ready") is True
-    assert reasons2 == []
+        before = first_components[cid]
+        after = second_components[cid]
+        assert field(after, "hit") is True
+        assert field(field(after, "verification_report"), "overall") == "pass"
+        # Same provenance as before: a hit on the first run's result, not regenerated.
+        assert field(after, "key") == field(before, "key")
+        assert field(after, "generated_stamp") == field(before, "generated_stamp")
+    gamma = second_components["comp-gamma"]
+    assert field(gamma, "hit") is True
+    assert field(field(gamma, "verification_report"), "overall") == "pass"
+    assert field(gamma, "generated_stamp") == "gamma-run-2"
+    assert field(gamma, "key") != field(first_components["comp-gamma"], "key")
+
+    assert list(field(second, "not_ready_reasons")) == []
+    assert field(second, "ready") is True
+    assert provenance_tracker.last_requirement_failures("comp-gamma", repo_root) == []
+
+    rc = run_main(["verify", "--format=json", "--repo-root=" + str(repo_root)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    cli_second = json.loads(out)
+    assert cli_second["ready"] is True
+    assert cli_second["not_ready_reasons"] == []
+
+    # The stand-in provenance-checker answered the queries.
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    assert any(c in ("check_provenance", "check_sealed_provenance") for c in calls)

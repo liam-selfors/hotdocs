@@ -1,18 +1,20 @@
-# hotdocs-criterion: sha256:4e3ad4db24ee57344daf21091bb73e63ba42fb699db1f3699bf254b1bd731b3f
-"""CS-AMBIGUITY-001: a requirement with no covering acceptance criterion is a
-fail-severity spec-linter finding, and the merge is blocked before generation
-runs (spec-linter exits 1, writing nothing under gen/ or verification/)."""
+# hotdocs-criterion: sha256:66a5c140eecf722d940186b0aa05d9b319ac692dde5285f6b87312bfcab54ec9
+"""CS-AMBIGUITY-001: an uncovered requirement is a fail-severity lint finding
+that blocks the merge before generation runs (P-AMBIGUITY-GATE)."""
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
 import capability_scenario_verifier
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_spec_linter():
@@ -27,11 +29,11 @@ def _load_spec_linter():
         if (base / "spec_linter.py").is_file()
         else base / "spec_linter" / "__init__.py"
     )
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    return spec_linter
+    return load_module(path, "spec_linter")
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path, text):
@@ -47,7 +49,7 @@ def _build_corpus(repo_root):
         "\n"
         "Canonical vocabulary for this fixture corpus.\n"
         "\n"
-        "- **Widget** \u2014 a small fixture thing.\n",
+        "- **widget** — a thing the foo component counts.\n",
     )
     comp = specs / "components" / "foo"
     _write(
@@ -57,42 +59,42 @@ def _build_corpus(repo_root):
         "title: Foo\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
         "depends_on: []\n"
         "realizes: []\n"
         "uses_var: []\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo returns numbers for the fixture.\n"
+        "Counts widgets.\n"
         "\n"
         "## Behavior\n"
         "\n"
-        "- `R-FOO-001` \u2014 `foo(x)` returns `x`.\n"
-        "- `R-FOO-002` \u2014 `foo(x)` raises `ValueError` for a negative `x`.\n",
+        "- R-FOO-001: counting widgets.\n"
+        "- R-FOO-002: rejecting a negative count.\n",
     )
     _write(
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "`foo(x)` MUST return `x` unchanged for a non-negative `x`.\n",
+        "`count_widgets(n)` MUST return `n` for a non-negative integer `n`.\n",
     )
     _write(
         comp / "requirements" / "R-FOO-002.md",
         "# R-FOO-002\n"
         "\n"
-        "`foo(x)` MUST raise `ValueError` for a negative `x`.\n",
+        "`count_widgets(n)` MUST raise `ValueError` for a negative `n`.\n",
     )
     _write(
         comp / "interface" / "library.md",
         "# Library\n"
         "\n"
         "```\n"
-        "foo(x: int) -> int\n"
+        "count_widgets(n: int) -> int\n"
         "```\n",
     )
     _write(
@@ -103,9 +105,9 @@ def _build_corpus(repo_root):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given a non-negative integer x\n"
-        "When foo is called with x\n"
-        "Then it returns x\n"
+        "Given a non-negative integer 3\n"
+        "When count_widgets is called with it\n"
+        "Then it returns 3\n"
         "```\n",
     )
     _write(
@@ -116,15 +118,15 @@ def _build_corpus(repo_root):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given a negative integer x\n"
-        "When foo is called with x\n"
+        "Given a negative integer -1\n"
+        "When count_widgets is called with it\n"
         "Then it raises ValueError\n"
         "```\n",
     )
     return comp
 
 
-def test_cs_ambiguity_001_uncovered_requirement_blocks_merge(tmp_path, capsys):
+def test_uncovered_requirement_fails_lint_and_blocks_merge(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     comp = _build_corpus(repo_root)
@@ -132,36 +134,30 @@ def test_cs_ambiguity_001_uncovered_requirement_blocks_merge(tmp_path, capsys):
     spec_linter = _load_spec_linter()
 
     # Precondition: the corpus, with every requirement covered, is lint-clean.
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+    baseline = spec_linter.lint(None, repo_root)
+    assert field(baseline, "hard_failures") == 0, [
+        (field(f, "rule_id"), field(f, "file"), field(f, "message"))
+        for f in field(baseline, "findings")
+        if field(f, "severity") == "fail"
+    ]
 
-    # The spec change: R-FOO-002 in the Behavior section loses its only
-    # covering acceptance criterion; everything else stays lint-clean.
+    # The spec change: R-FOO-002 loses its only covering acceptance criterion.
     (comp / "acceptance" / "AC-FOO-002.md").unlink()
 
     report = spec_linter.lint(None, repo_root)
-    findings = list(field(report, "findings"))
-    fails = [f for f in findings if field(f, "severity") == "fail"]
-
+    fails = [f for f in field(report, "findings") if field(f, "severity") == "fail"]
     assert field(report, "hard_failures") >= 1
-    assert fails, "expected a fail-severity finding for uncovered R-FOO-002"
+    assert fails, "expected a fail-severity finding for the uncovered requirement"
     assert any(
-        "R-FOO-002" in str(field(f, "message"))
-        or str(field(f, "file")).replace("\\", "/").startswith("specs/components/foo/")
+        "R-FOO-002" in str(field(f, "message")) or "R-FOO-002" in str(field(f, "file"))
         for f in fails
-    ), [
-        (field(f, "rule_id"), field(f, "file"), field(f, "message")) for f in fails
-    ]
+    ), [(field(f, "rule_id"), field(f, "file"), field(f, "message")) for f in fails]
 
-    # The pipeline's lint gate blocks the merge: exit code 1.
-    capsys.readouterr()
+    # The gate blocks the merge: the lint CLI exits 1 on a fail finding.
     code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
-    out = capsys.readouterr().out
+    capsys.readouterr()
     assert code == 1
 
-    parsed = json.loads(out)
-    assert any(f["severity"] == "fail" for f in parsed["findings"])
-    assert parsed["summary"]["hard_failures"] >= 1
-
     # Blocked before generation: nothing was generated or verified.
-    assert not (repo_root / "gen" / "foo").exists()
+    assert not (repo_root / "gen").exists()
     assert not (repo_root / "verification").exists()
