@@ -1,7 +1,8 @@
-# hotdocs-criterion: sha256:695c597323135b807bde30d26bb16e3d5b805c80b0432fb745488594ffdef45e
+# hotdocs-criterion: sha256:2827d4a24a92450ad33ca6f343ef7d1009b0a93f026998d691d08adfba018557
+"""AC-CLI-003: model injection into forwarded tokens (R-CLI-003)."""
+
 import json
 import os
-import shutil
 import sys
 
 import pytest
@@ -18,165 +19,191 @@ CONFIG = {
     "auth": None,
 }
 
-USING_LINE = "hotdocs: using model claude-cli:sonnet from hotdocs.toml (pass --no-model to skip)"
+USING_LINE = (
+    "hotdocs: using model claude-cli:sonnet from hotdocs.toml "
+    "(pass --no-model to skip)"
+)
 
-ROWS = [
-    ("gen/component-gate-runner", "component_gate_runner"),
-    ("gen/test-author", "test_author"),
-    ("gen/spec-linter", "spec_linter"),
-    ("gen/spec-scaffolder", "spec_scaffolder"),
-    ("gen/spec-completeness-assistant", "spec_completeness_assistant"),
-    ("gen/provenance-tracker", "provenance_tracker"),
-]
-
-
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    cache = path.parent / "__pycache__"
-    if cache.exists():
-        shutil.rmtree(str(cache))
-    path.write_text(text)
+# verb rows used here: (dir, module, strip)
+ROWS = {
+    "generate": ("gen/component-gate-runner", "component_gate_runner", 0),
+    "author-test": ("gen/test-author", "test_author", 1),
+    "lint": ("gen/spec-linter", "spec_linter", 1),
+    "decision new": ("gen/spec-scaffolder", "spec_scaffolder", 0),
+    "assist": ("gen/spec-completeness-assistant", "spec_completeness_assistant", 1),
+    "verify": ("gen/provenance-tracker", "provenance_tracker", 0),
+}
 
 
-def _fake_component_source(log_path):
-    return (
+@pytest.fixture(autouse=True)
+def _no_bytecode(monkeypatch):
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+
+
+def write_fake_component(project, row):
+    dir_, module, _strip = ROWS[row]
+    directory = project / dir_
+    directory.mkdir(parents=True, exist_ok=True)
+    log_path = str(project / "calls.log")
+    source = (
         "import json\n"
         "\n"
+        "LOG = " + repr(log_path) + "\n"
+        "\n"
+        "\n"
         "def main(argv):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
-        "        f.write(json.dumps(argv) + '\\n')\n"
+        "    with open(LOG, 'a', encoding='utf-8') as handle:\n"
+        "        handle.write(json.dumps(argv) + '\\n')\n"
         "    return 7\n"
     )
+    (directory / (module + ".py")).write_text(source, encoding="utf-8")
 
 
-def _llm_source(mode):
-    head = "def load_config(config_path=None):\n"
-    if mode == "config":
-        return head + "    return " + repr(CONFIG) + "\n"
-    if mode == "none":
-        return head + "    return None\n"
-    if mode == "raise":
-        return head + "    raise ValueError(" + repr("bad") + ")\n"
-    raise AssertionError(mode)
+def write_fake_llm(project, body):
+    directory = project / "gen" / "llm-endpoint"
+    directory.mkdir(parents=True, exist_ok=True)
+    source = (
+        "def load_config(config_path=None):\n"
+        "    " + body + "\n"
+    )
+    (directory / "llm_endpoint.py").write_text(source, encoding="utf-8")
+
+
+def llm_returns_config(project):
+    write_fake_llm(project, "return " + repr(CONFIG))
+
+
+def llm_returns_none(project):
+    write_fake_llm(project, "return None")
+
+
+def llm_raises_bad(project):
+    write_fake_llm(project, "raise ValueError(" + repr("bad") + ")")
+
+
+def read_calls(project):
+    log = project / "calls.log"
+    if not log.is_file():
+        return []
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def make_project(tmp_path, name, rows):
+    project = tmp_path / name
+    project.mkdir()
+    for row in rows:
+        write_fake_component(project, row)
+    return project
+
+
+def invoke(project, tool_root, argv, capsys):
+    """Run once; return (forwarded tokens, stderr text)."""
+    capsys.readouterr()
+    before = len(read_calls(project))
+    sink = []
+    code = hotdocs_cli.run(
+        list(argv),
+        tool_root=str(tool_root),
+        output_fn=lambda *a, **k: sink.append(a),
+        env=dict(os.environ),
+        cwd=str(project),
+    )
+    err = capsys.readouterr().err
+    calls = read_calls(project)
+    assert len(calls) == before + 1, "fake component did not run exactly once"
+    assert code == 7
+    return calls[-1], err
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setattr(sys, "dont_write_bytecode", True)
-    project = tmp_path / "project"
-    tool_root = tmp_path / "tool"
-    project.mkdir()
-    tool_root.mkdir()
-    log = project / "calls.log"
-    for d, m in ROWS:
-        _write(project / d / (m + ".py"), _fake_component_source(log))
-    return {"project": project, "tool_root": tool_root, "log": log}
+def tool_root(tmp_path):
+    root = tmp_path / "tool-root"
+    root.mkdir()
+    return root
 
 
-def _set_llm(env, mode):
-    _write(
-        env["project"] / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        _llm_source(mode),
-    )
+def repo_root_token(project):
+    return "--repo-root=" + os.path.abspath(str(project))
 
 
-def _run(env, capsys, argv):
-    capsys.readouterr()
-    if env["log"].exists():
-        env["log"].unlink()
-    out = []
-    code = hotdocs_cli.run(
-        list(argv),
-        tool_root=str(env["tool_root"]),
-        output_fn=lambda *a, **k: out.append(a),
-        env=dict(os.environ),
-        cwd=str(env["project"]),
-    )
-    captured = capsys.readouterr()
-    lines = [l for l in env["log"].read_text().splitlines() if l.strip()]
-    assert len(lines) == 1, lines
-    return code, json.loads(lines[0]), captured.err
+def test_required_rows_gain_model_last(tmp_path, tool_root, capsys):
+    project = make_project(tmp_path, "p1", ["generate", "author-test"])
+    llm_returns_config(project)
+    rr = repo_root_token(project)
+
+    tokens, _ = invoke(project, tool_root, ["generate", "comp-x"], capsys)
+    assert tokens == ["generate", "comp-x", rr, "--model=claude-cli:sonnet"]
+
+    tokens, _ = invoke(project, tool_root, ["author-test", "comp-x", "AC-X-1"], capsys)
+    assert tokens == ["comp-x", "AC-X-1", rr, "--model=claude-cli:sonnet"]
 
 
-def _root_token(env):
-    return "--repo-root=" + os.path.abspath(str(env["project"]))
+def test_explicit_model_passes_unchanged(tmp_path, tool_root, capsys):
+    project = make_project(tmp_path, "p2", ["generate"])
+    llm_returns_config(project)
+    rr = repo_root_token(project)
+
+    tokens, _ = invoke(project, tool_root, ["generate", "comp-x", "--model", "m"], capsys)
+    assert tokens == ["generate", "comp-x", "--model", "m", rr]
+
+    tokens, _ = invoke(project, tool_root, ["generate", "comp-x", "--model=m"], capsys)
+    assert tokens == ["generate", "comp-x", "--model=m", rr]
 
 
-def test_required_rows_gain_model_last(env, capsys):
-    _set_llm(env, "config")
-    root = _root_token(env)
-    for argv in (["generate", "comp-x"], ["author-test", "comp-x", "AC-X-1"]):
-        code, tokens, err = _run(env, capsys, argv)
-        assert code == 7
-        assert tokens == argv + [root, "--model=claude-cli:sonnet"]
-        assert "using model" not in err
+def test_none_then_value_error_injects_nothing(tmp_path, tool_root, capsys):
+    project = make_project(tmp_path, "p3", ["generate"])
+    rr = repo_root_token(project)
 
+    llm_returns_none(project)
+    tokens, _ = invoke(project, tool_root, ["generate", "comp-x"], capsys)
+    assert tokens == ["generate", "comp-x", rr]
 
-def test_explicit_model_passes_unchanged(env, capsys):
-    _set_llm(env, "config")
-    root = _root_token(env)
-    for argv in (["generate", "comp-x", "--model", "m"], ["generate", "comp-x", "--model=m"]):
-        code, tokens, err = _run(env, capsys, argv)
-        assert code == 7
-        assert tokens == argv + [root]
-        assert sum(1 for t in tokens if t == "--model" or t.startswith("--model=")) == 1
-
-
-def test_none_then_value_error(env, capsys):
-    root = _root_token(env)
-    _set_llm(env, "none")
-    code, tokens, err = _run(env, capsys, ["generate", "comp-x"])
-    assert code == 7
-    assert tokens == ["generate", "comp-x", root]
-
-    _set_llm(env, "raise")
-    code, tokens, err = _run(env, capsys, ["generate", "comp-x"])
-    assert code == 7
-    assert tokens == ["generate", "comp-x", root]
+    llm_raises_bad(project)
+    tokens, err = invoke(project, tool_root, ["generate", "comp-x"], capsys)
+    assert tokens == ["generate", "comp-x", rr]
     assert "bad" in err.splitlines()
 
 
-def test_no_rows_never_gain_model(env, capsys):
-    _set_llm(env, "config")
+def test_no_rows_never_gain_model(tmp_path, tool_root, capsys):
+    project = make_project(tmp_path, "p4", ["lint", "decision new"])
+    llm_returns_config(project)
+
     for argv in (["lint"], ["decision", "new", "x"]):
-        code, tokens, err = _run(env, capsys, argv)
-        assert code == 7
+        tokens, err = invoke(project, tool_root, argv, capsys)
         assert not any(t == "--model" or t.startswith("--model=") for t in tokens)
-        assert "using model" not in err
+        assert not any("using model" in line for line in err.splitlines())
 
 
-def test_optional_rows_gain_model_and_print_line(env, capsys):
-    _set_llm(env, "config")
-    root = _root_token(env)
-    for argv in (["assist", "--changed=R-X-1"], ["verify"]):
-        code, tokens, err = _run(env, capsys, argv)
-        assert code == 7
-        assert tokens[-2:] == [root, "--model=claude-cli:sonnet"]
-        assert err.splitlines().count(USING_LINE) == 1
-    # exact forwarded tokens given each row's strip
-    code, tokens, err = _run(env, capsys, ["assist", "--changed=R-X-1"])
-    assert tokens == ["--changed=R-X-1", root, "--model=claude-cli:sonnet"]
-    code, tokens, err = _run(env, capsys, ["verify"])
-    assert tokens == ["verify", root, "--model=claude-cli:sonnet"]
+def test_optional_rows_gain_model_and_print_notice(tmp_path, tool_root, capsys):
+    project = make_project(tmp_path, "p5", ["assist", "verify"])
+    llm_returns_config(project)
+    rr = repo_root_token(project)
+
+    tokens, err = invoke(project, tool_root, ["assist", "--changed=R-X-1"], capsys)
+    assert tokens[-2:] == [rr, "--model=claude-cli:sonnet"]
+    assert err.splitlines().count(USING_LINE) == 1
+
+    tokens, err = invoke(project, tool_root, ["verify"], capsys)
+    assert tokens[-2:] == [rr, "--model=claude-cli:sonnet"]
+    assert err.splitlines().count(USING_LINE) == 1
 
 
-def test_no_model_removed_for_model_rows(env, capsys):
-    _set_llm(env, "config")
-    root = _root_token(env)
-    code, tokens, err = _run(env, capsys, ["assist", "--changed=R-X-1", "--no-model"])
-    assert code == 7
-    assert tokens == ["--changed=R-X-1", root]
-    assert "using model" not in err
+def test_no_model_removed_for_model_rows(tmp_path, tool_root, capsys):
+    project = make_project(tmp_path, "p6", ["assist", "generate"])
+    llm_returns_config(project)
+    rr = repo_root_token(project)
 
-    code, tokens, err = _run(env, capsys, ["generate", "comp-x", "--no-model"])
-    assert code == 7
-    assert tokens == ["generate", "comp-x", root]
-    assert "using model" not in err
+    tokens, _ = invoke(project, tool_root, ["assist", "--changed=R-X-1", "--no-model"], capsys)
+    assert tokens == ["--changed=R-X-1", rr]
+
+    tokens, _ = invoke(project, tool_root, ["generate", "comp-x", "--no-model"], capsys)
+    assert tokens == ["generate", "comp-x", rr]
 
 
-def test_no_model_forwarded_for_no_row(env, capsys):
-    _set_llm(env, "config")
-    root = _root_token(env)
-    code, tokens, err = _run(env, capsys, ["lint", "--no-model"])
-    assert code == 7
-    assert tokens == ["--no-model", root]
+def test_no_model_forwarded_for_no_row(tmp_path, tool_root, capsys):
+    project = make_project(tmp_path, "p7", ["lint"])
+    llm_returns_config(project)
+    rr = repo_root_token(project)
+
+    tokens, _ = invoke(project, tool_root, ["lint", "--no-model"], capsys)
+    assert tokens == ["--no-model", rr]

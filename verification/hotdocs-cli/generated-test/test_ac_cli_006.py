@@ -1,146 +1,137 @@
-# hotdocs-criterion: sha256:bb18484ab9b9e073cbe7eb8c7858519d9e0fce38afd9a53b1839373564b6325f
+# hotdocs-criterion: sha256:4b8e1ce25ded442bbea5477552b06c67abdbdc6cd91767420ef46d4b37d4bb86
 import inspect
 import json
-from pathlib import Path
 
 import pytest
 
 import hotdocs_cli
 
 
-def _make_dirs(tmp_path, name):
-    project = tmp_path / (name + "-project")
-    project.mkdir()
-    tool_root = tmp_path / (name + "-toolroot")
-    tool_root.mkdir()
-    return project, tool_root
+def _write_lint_fake(project, body_lines):
+    """Write a fake spec-linter component at <project>/gen/spec-linter/spec_linter.py.
+
+    body_lines are the statements of main after the call has been logged.
+    """
+    target_dir = project / "gen" / "spec-linter"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    log_path = str(project / "calls.log")
+    source = (
+        "import json\n"
+        "import sys\n"
+        "\n"
+        "\n"
+        "class ModelResolutionError(Exception):\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "def main(argv=None):\n"
+        "    with open(" + repr(log_path) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(argv) + '\\n')\n"
+    )
+    for line in body_lines:
+        source += "    " + line + "\n"
+    (target_dir / "spec_linter.py").write_text(source, encoding="utf-8")
+    return project / "calls.log"
 
 
-def _log_lines(source_lines, log_path):
-    # Lines of source that append json.dumps(argv) to the log file.
-    return source_lines + [
-        "    with open(" + repr(str(log_path)) + ", 'a') as handle:\n",
-        "        handle.write(json.dumps(argv) + '\\n')\n",
-    ]
-
-
-def _write_lint_fake(project, body_lines, preamble_lines=None):
-    directory = project / "gen" / "spec-linter"
-    directory.mkdir(parents=True, exist_ok=True)
-    log_path = project / "calls.log"
-    lines = ["import json\n"]
-    if preamble_lines:
-        lines.extend(preamble_lines)
-    lines.append("def main(argv):\n")
-    lines = _log_lines(lines, log_path)
-    lines.extend(body_lines)
-    (directory / "spec_linter.py").write_text("".join(lines), encoding="utf-8")
-    return log_path
-
-
-def _read_log(log_path):
+def _read_calls(log_path):
     if not log_path.is_file():
         return []
-    return [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def _sink():
-    collected = []
-
-    def output_fn(*args, **kwargs):
-        collected.append(" ".join(str(a) for a in args))
-
-    return collected, output_fn
+@pytest.fixture
+def empty_tool_root(tmp_path):
+    root = tmp_path / "empty_tool_root"
+    root.mkdir()
+    return root
 
 
-def test_routed_lint_returns_component_exit_codes(tmp_path):
-    codes = []
-    for index, code in enumerate([0, 7]):
-        project, tool_root = _make_dirs(tmp_path, "route" + repr(index))
-        log_path = _write_lint_fake(project, ["    return " + repr(code) + "\n"])
-        _, output_fn = _sink()
-        result = hotdocs_cli.run(
-            ["lint"],
-            tool_root=str(tool_root),
-            output_fn=output_fn,
-            cwd=str(project),
-        )
-        codes.append(result)
-        assert len(_read_log(log_path)) == 1
-    assert codes == [0, 7]
+def test_routed_lint_returns_component_exit_codes(tmp_path, empty_tool_root):
+    project_a = tmp_path / "project_a"
+    project_a.mkdir()
+    log_a = _write_lint_fake(project_a, ["return " + repr(0)])
 
+    project_b = tmp_path / "project_b"
+    project_b.mkdir()
+    log_b = _write_lint_fake(project_b, ["return " + repr(7)])
 
-def test_unknown_verb_version_and_missing_component_exit_codes(tmp_path):
-    project, tool_root = _make_dirs(tmp_path, "codes")
-    _, output_fn = _sink()
-
-    unknown = hotdocs_cli.run(
-        ["frobnicate"],
-        tool_root=str(tool_root),
-        output_fn=output_fn,
-        cwd=str(project),
+    out = []
+    code_a = hotdocs_cli.run(
+        ["lint"], cwd=str(project_a), tool_root=str(empty_tool_root), output_fn=out.append
     )
-    version = hotdocs_cli.run(
-        ["--version"],
-        tool_root=str(tool_root),
-        output_fn=output_fn,
-        cwd=str(project),
+    code_b = hotdocs_cli.run(
+        ["lint"], cwd=str(project_b), tool_root=str(empty_tool_root), output_fn=out.append
     )
-    missing = hotdocs_cli.run(
-        ["lint"],
-        tool_root=str(tool_root),
-        output_fn=output_fn,
-        cwd=str(project),
-    )
-    assert [unknown, version, missing] == [2, 0, 2]
+
+    assert code_a == 0
+    assert code_b == 7
+    # Confirm each fake actually ran (tokens themselves are not asserted).
+    assert len(_read_calls(log_a)) == 1
+    assert len(_read_calls(log_b)) == 1
 
 
-def test_model_resolution_error_by_class_name_is_usage_error(tmp_path, capsys):
-    project, tool_root = _make_dirs(tmp_path, "mre")
-    message = "model 'x' names no provider"
+def test_unknown_verb_version_and_missing_component(tmp_path, empty_tool_root):
+    project = tmp_path / "project"
+    project.mkdir()
+    out = []
+
+    code_unknown = hotdocs_cli.run(
+        ["frobnicate"], cwd=str(project), tool_root=str(empty_tool_root), output_fn=out.append
+    )
+    code_version = hotdocs_cli.run(
+        ["--version"], cwd=str(project), tool_root=str(empty_tool_root), output_fn=out.append
+    )
+    code_missing = hotdocs_cli.run(
+        ["lint"], cwd=str(project), tool_root=str(empty_tool_root), output_fn=out.append
+    )
+
+    assert code_unknown == 2
+    assert code_version == 0
+    assert code_missing == 2
+
+
+def test_model_resolution_error_is_usage_error(tmp_path, empty_tool_root, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
     log_path = _write_lint_fake(
-        project,
-        ["    raise ModelResolutionError(" + repr(message) + ")\n"],
-        preamble_lines=[
-            "class ModelResolutionError(Exception):\n",
-            "    pass\n",
-        ],
+        project, ["raise ModelResolutionError(" + repr("model 'x' names no provider") + ")"]
     )
-    _, output_fn = _sink()
+
+    out = []
     capsys.readouterr()
-    result = hotdocs_cli.run(
-        ["lint"],
-        tool_root=str(tool_root),
-        output_fn=output_fn,
-        cwd=str(project),
+    code = hotdocs_cli.run(
+        ["lint"], cwd=str(project), tool_root=str(empty_tool_root), output_fn=out.append
     )
     captured = capsys.readouterr()
-    assert result == 2
-    assert captured.err.splitlines() == ["usage error: " + message]
-    assert len(_read_log(log_path)) == 1
+
+    assert code == 2
+    assert captured.err.splitlines() == ["usage error: model 'x' names no provider"]
+    assert len(_read_calls(log_path)) == 1
 
 
-def test_other_exception_propagates(tmp_path):
-    project, tool_root = _make_dirs(tmp_path, "valueerror")
-    _write_lint_fake(project, ["    raise ValueError(" + repr("boom") + ")\n"])
-    _, output_fn = _sink()
+def test_other_exception_propagates(tmp_path, empty_tool_root):
+    project = tmp_path / "project"
+    project.mkdir()
+    log_path = _write_lint_fake(project, ["raise ValueError(" + repr("boom") + ")"])
+
+    out = []
     with pytest.raises(ValueError, match="boom"):
         hotdocs_cli.run(
-            ["lint"],
-            tool_root=str(tool_root),
-            output_fn=output_fn,
-            cwd=str(project),
+            ["lint"], cwd=str(project), tool_root=str(empty_tool_root), output_fn=out.append
         )
+    assert len(_read_calls(log_path)) == 1
 
 
 def test_main_signature_and_version(capsys):
-    names = list(inspect.signature(hotdocs_cli.main).parameters)
-    assert names == ["argv"]
+    params = list(inspect.signature(hotdocs_cli.main).parameters)
+    assert params == ["argv"]
 
     capsys.readouterr()
-    result = hotdocs_cli.main(["--version"])
+    code = hotdocs_cli.main(["--version"])
     captured = capsys.readouterr()
-    assert result == 0
+
+    assert code == 0
     lines = captured.out.splitlines()
     assert len(lines) == 1
     assert lines[0].startswith("hotdocs ")

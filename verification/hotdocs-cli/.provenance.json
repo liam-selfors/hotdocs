@@ -1,7 +1,7 @@
 {
-  "spec_bundle_hash": "sha256:6c886855ce03114e31346796d77bfbfdd17d42ca14d56da011409dde7e349a82",
+  "spec_bundle_hash": "sha256:6baa7692cf6d2a4b338fed7a1b959c8a67c103d5ee3e32b5c0d6891e4633fea2",
   "spec_bundle_parts": {
-    "spec": "sha256:63309e21444a0b75d61d024104b6eade33c519dc04bd1fc5560b77719811df2a",
+    "spec": "sha256:17a7572152732892a0de107f2f9df093f0f110ab9aa481af988bda56823802fe",
     "dependency_code": "sha256:b479265b1dc9f73ed716fb000cd124c25f7bc75ac8c7b239e15567c283114dd5"
   },
   "model_pin": "claude-opus-5-5",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T17:02:11Z",
+  "generated_at": "2026-11-28T05:46:26Z",
   "verification_run_id": "hotdocs-cli-attempt-1",
   "verification_report": {
     "component_id": "comp-hotdocs-cli",
@@ -127,7 +127,7 @@
       "R-CLI-007": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.855072463768116,
+    "mutation_score": 0.8688524590163934,
     "mutation_error": null,
     "assets": [
       {
@@ -268,11 +268,31 @@
         "type": "Base64 High Entropy String"
       },
       {
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "type": "Hex High Entropy String"
+      },
+      {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
         "type": "Hex High Entropy String"
       },
       {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_005.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_008.py",
         "type": "Hex High Entropy String"
       },
       {
@@ -349,6 +369,14 @@
       },
       {
         "file": "verification/secret-scanner/generated-test/test_ac_secret_016.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "type": "AWS Access Key"
+      },
+      {
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
         "type": "AWS Access Key"
       },
       {
