@@ -1,6 +1,6 @@
 # AC-SURF-008
 
-Covers: R-SURF-002
+Covers: R-SURF-007
 Kind: generated-test
 
 ```gherkin

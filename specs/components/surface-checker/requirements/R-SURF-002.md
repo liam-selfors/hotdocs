@@ -19,16 +19,4 @@
   It MUST then check, in one subprocess of `R-SURF-006`'s interpreter
   importing the dependency's module, each name with `hasattr`, or as an importable submodule
   `<module>.<name>`. Each missing name gives one `dependency_name`
-  finding, `<dep-slug> has no <name>, which the candidate uses`. Each
-  name the module has but its documented interface never mentions gives
-  one `dependency_undocumented` finding,
-  `<dep-slug> does not document <name>, which the candidate uses`: the
-  documented interface is the text of every `.md` file under
-  `<repo_root>/specs/components/<dep-slug>/interface/` (then the tool
-  root's, when the repo has none), never the documents their
-  `Implements:` lines name: a shared document's names, such as
-  `json-values.md`'s `to_json`, are a convention each implementer
-  carries itself, not that dependency's offer. A name is mentioned when
-  it occurs there as a whole word (`\b<name>\b`). A dependency with no such `.md`
-  file, in the repo or the tool root, gets no `dependency_undocumented`
-  finding. A dependency whose module does not import is skipped (`D393`).
+  finding, `<dep-slug> has no <name>, which the candidate uses`. A dependency whose module does not import is skipped.
