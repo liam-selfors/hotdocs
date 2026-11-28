@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:5e9cd4fa660d4315d14dac665e9f3175bd5321cefe27e5f8c42fb5503d22ac7f",
+  "spec_bundle_hash": "sha256:b1d7bea6f9dc43f7f36fcd5626b3eda9ed1f2471af3fe2708adbf6d22dd02826",
   "spec_bundle_parts": {
     "spec": "sha256:2584cf773d3438740ff85ecaba3129bb8cb4e4f8763dc2875e820ae1aa3d2885",
-    "dependency_code": "sha256:f1e1d741177d5f71c2897168f72e9217b21b45bef9fe9a5fbd467f93d68ecaf2"
+    "dependency_code": "sha256:3475cf24cc6e33542c0cf9d984193f984380a277b32e92e2b4419fc16dc8c35b"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-28T08:12:33Z",
+  "generated_at": "2026-11-28T12:48:28Z",
   "verification_run_id": "mutation-scorer-attempt-1",
   "verification_report": {
     "component_id": "comp-mutation-scorer",
@@ -117,13 +117,20 @@
   "secret_scan": {
     "scope": "full",
     "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": false,
-    "matches": [],
+    "flagged": true,
+    "matches": [
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/driver-browser/generated-test/test_ac_drv_010.py",
+        "line": 15
+      }
+    ],
     "allowed": [
       {
         "rule_id": "Hex High Entropy String",
         "file": "gen/review-packet-builder/review_packet_builder.py",
-        "line": 14
+        "line": 19
       },
       {
         "rule_id": "AWS Access Key",
